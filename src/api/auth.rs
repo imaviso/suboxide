@@ -477,7 +477,7 @@ where
             .unwrap_or_default();
 
         // For POST requests, also extract form body parameters
-        let params = if is_post {
+        let mut params = if is_post {
             // Reconstruct the request to extract form data
             let req = Request::from_parts(parts.clone(), body);
             match Form::<AuthParams>::from_request(req, state).await {
@@ -487,6 +487,23 @@ where
         } else {
             query_params
         };
+
+        // Support for clients passing credentials in HTTP headers (e.g. SolidSonic)
+        // Checks for X-Subsonic-Username, X-Subsonic-Token, and X-Subsonic-Salt
+        #[allow(clippy::collapsible_if)]
+        if params.u.is_empty() {
+            if let Some(Ok(u)) = parts.headers.get("X-Subsonic-Username").map(|h| h.to_str()) {
+                params.u = u.to_string();
+
+                if let Some(Ok(t)) = parts.headers.get("X-Subsonic-Token").map(|h| h.to_str()) {
+                    params.t = Some(t.to_string());
+                }
+
+                if let Some(Ok(s)) = parts.headers.get("X-Subsonic-Salt").map(|h| h.to_str()) {
+                    params.s = Some(s.to_string());
+                }
+            }
+        }
 
         let format = params.format();
 
