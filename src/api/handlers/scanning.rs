@@ -1,12 +1,14 @@
 //! Library scanning API handlers (startScan, getScanStatus)
 
+#![allow(clippy::unused_async)]
+
 use axum::response::IntoResponse;
 
 use crate::api::auth::SubsonicAuth;
 use crate::api::response::{ScanStatusData, ok_scan_status};
 use crate::scanner::Scanner;
 
-/// Build a ScanStatusData from the current scan state.
+/// Build a `ScanStatusData` from the current scan state.
 fn build_scan_status_data(auth: &SubsonicAuth) -> ScanStatusData {
     let scan_state = auth.state.get_scan_state();
     ScanStatusData {
@@ -34,14 +36,14 @@ pub async fn start_scan(auth: SubsonicAuth) -> impl IntoResponse {
 
         let pool = auth.state.get_db_pool();
         let scan_state_for_scanner = scan_state.clone();
-        let scan_state_for_finish = scan_state.clone();
+        let scan_state_for_finish = scan_state;
 
         // Spawn background task to run the scan
         tokio::spawn(async move {
             // Run the scan in a blocking task since it's CPU-intensive
             let result = tokio::task::spawn_blocking(move || {
                 let scanner = Scanner::new(pool);
-                scanner.scan_all_with_state(Some(scan_state_for_scanner))
+                scanner.scan_all_with_state(Some(&scan_state_for_scanner))
             })
             .await;
 

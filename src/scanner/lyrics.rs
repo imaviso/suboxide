@@ -33,21 +33,20 @@ pub struct SyncedLine {
 /// Extract lyrics from an audio file.
 ///
 /// Returns a list of extracted lyrics (may have multiple for different languages).
+#[must_use] 
 pub fn extract_lyrics(path: &Path) -> Vec<ExtractedLyrics> {
     let mut results = Vec::new();
 
-    let tagged_file = match lofty::read_from_path(path) {
-        Ok(f) => f,
-        Err(_) => return results,
+    let Ok(tagged_file) = lofty::read_from_path(path) else {
+        return results;
     };
 
     // Try primary tag first, then any available tag
-    let tag = match tagged_file
+    let Some(tag) = tagged_file
         .primary_tag()
         .or_else(|| tagged_file.first_tag())
-    {
-        Some(t) => t,
-        None => return results,
+    else {
+        return results;
     };
 
     // Try to get unsynchronized lyrics (USLT in ID3, LYRICS in Vorbis)
@@ -106,6 +105,7 @@ fn looks_like_lrc(text: &str) -> bool {
 /// Parse LRC formatted lyrics into synchronized lines.
 ///
 /// LRC format: [mm:ss.xx]text or [mm:ss:xx]text or [mm:ss]text
+#[must_use] 
 pub fn parse_lrc(text: &str) -> Vec<SyncedLine> {
     let mut lines = Vec::new();
 
@@ -183,6 +183,7 @@ fn parse_lrc_timestamp(s: &str) -> Option<i64> {
 }
 
 /// Parse unsynchronized lyrics into individual lines.
+#[must_use] 
 pub fn parse_unsynced(text: &str) -> Vec<String> {
     text.lines()
         .map(|l| l.trim().to_string())

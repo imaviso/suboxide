@@ -1,4 +1,5 @@
-//! Browsing-related API handlers (getMusicFolders, getIndexes, getArtists, etc.)
+//! Browsing-related API handlers (getMusicFolders, getArtists, etc.)
+#![allow(clippy::unused_async)]
 
 use std::collections::BTreeMap;
 
@@ -87,8 +88,7 @@ pub async fn get_indexes(auth: SubsonicAuth) -> impl IntoResponse {
     let last_modified = auth
         .state
         .get_artists_last_modified()
-        .map(|dt| dt.and_utc().timestamp_millis())
-        .unwrap_or(0);
+        .map_or(0, |dt| dt.and_utc().timestamp_millis());
 
     let response = IndexesResponse {
         ignored_articles: "The El La Los Las Le Les".to_string(),
@@ -139,7 +139,7 @@ pub async fn get_artists(auth: SubsonicAuth) -> impl IntoResponse {
             .or_default()
             .push(ArtistID3Response::from_artist(
                 artist,
-                Some(album_count as i32),
+                Some(i32::try_from(album_count).unwrap_or(0)),
             ));
     }
 
@@ -165,21 +165,14 @@ pub async fn get_album(
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
-    let album_id = match params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) {
-        Some(id) => id,
-        None => {
-            return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-                .into_response();
-        }
+    let Some(album_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
+            .into_response();
     };
 
     // Get the album
-    let album = match auth.state.get_album(album_id) {
-        Some(album) => album,
-        None => {
-            return error_response(auth.format, &ApiError::NotFound("Album".into()))
-                .into_response();
-        }
+    let Some(album) = auth.state.get_album(album_id) else {
+        return error_response(auth.format, &ApiError::NotFound("Album".into())).into_response();
     };
 
     // Get the album's starred status
@@ -218,21 +211,14 @@ pub async fn get_artist(
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
-    let artist_id = match params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) {
-        Some(id) => id,
-        None => {
-            return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-                .into_response();
-        }
+    let Some(artist_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
+            .into_response();
     };
 
     // Get the artist
-    let artist = match auth.state.get_artist(artist_id) {
-        Some(artist) => artist,
-        None => {
-            return error_response(auth.format, &ApiError::NotFound("Artist".into()))
-                .into_response();
-        }
+    let Some(artist) = auth.state.get_artist(artist_id) else {
+        return error_response(auth.format, &ApiError::NotFound("Artist".into())).into_response();
     };
 
     // Get the artist's starred status
@@ -271,20 +257,14 @@ pub async fn get_song(
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
-    let song_id = match params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) {
-        Some(id) => id,
-        None => {
-            return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-                .into_response();
-        }
+    let Some(song_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
+            .into_response();
     };
 
     // Get the song
-    let song = match auth.state.get_song(song_id) {
-        Some(song) => song,
-        None => {
-            return error_response(auth.format, &ApiError::NotFound("Song".into())).into_response();
-        }
+    let Some(song) = auth.state.get_song(song_id) else {
+        return error_response(auth.format, &ApiError::NotFound("Song".into())).into_response();
     };
 
     // Get the song's starred status
@@ -329,12 +309,9 @@ pub async fn get_album_list2(
     axum::extract::Query(params): axum::extract::Query<AlbumList2Params>,
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
-    let list_type = match params.list_type.as_deref() {
-        Some(t) => t,
-        None => {
-            return error_response(auth.format, &ApiError::MissingParameter("type".into()))
-                .into_response();
-        }
+    let Some(list_type) = params.list_type.as_deref() else {
+        return error_response(auth.format, &ApiError::MissingParameter("type".into()))
+            .into_response();
     };
 
     let size = params.size.unwrap_or(10).clamp(1, 500);
@@ -354,15 +331,12 @@ pub async fn get_album_list2(
                 .get_albums_by_year(from_year, to_year, offset, size)
         }
         "byGenre" => {
-            let genre = match params.genre.as_deref() {
-                Some(g) => g,
-                None => {
-                    return error_response(
-                        auth.format,
-                        &ApiError::MissingParameter("genre".into()),
-                    )
-                    .into_response();
-                }
+            let Some(genre) = params.genre.as_deref() else {
+                return error_response(
+                    auth.format,
+                    &ApiError::MissingParameter("genre".into()),
+                )
+                .into_response();
             };
             auth.state.get_albums_by_genre(genre, offset, size)
         }
@@ -371,7 +345,7 @@ pub async fn get_album_list2(
         _ => {
             return error_response(
                 auth.format,
-                &ApiError::Generic(format!("Unknown list type: {}", list_type)),
+                &ApiError::Generic(format!("Unknown list type: {list_type}")),
             )
             .into_response();
         }
@@ -488,7 +462,11 @@ pub async fn search3(
         .map(|a| {
             let album_count = artist_album_counts.get(&a.id).copied().unwrap_or(0);
             let starred_at = starred_artists.get(&a.id);
-            ArtistID3Response::from_artist_with_starred(a, Some(album_count as i32), starred_at)
+            ArtistID3Response::from_artist_with_starred(
+                a,
+                Some(i32::try_from(album_count).unwrap_or(0)),
+                starred_at,
+            )
         })
         .collect();
 
@@ -601,12 +579,9 @@ pub async fn get_songs_by_genre(
     axum::extract::Query(params): axum::extract::Query<SongsByGenreParams>,
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
-    let genre = match params.genre.as_deref() {
-        Some(g) => g,
-        None => {
-            return error_response(auth.format, &ApiError::MissingParameter("genre".into()))
-                .into_response();
-        }
+    let Some(genre) = params.genre.as_deref() else {
+        return error_response(auth.format, &ApiError::MissingParameter("genre".into()))
+            .into_response();
     };
 
     let count = params.count.unwrap_or(10).clamp(1, 500);
@@ -664,21 +639,14 @@ pub async fn get_artist_info2(
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
-    let artist_id = match params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) {
-        Some(id) => id,
-        None => {
-            return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-                .into_response();
-        }
+    let Some(artist_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
+            .into_response();
     };
 
     // Get the artist
-    let artist = match auth.state.get_artist(artist_id) {
-        Some(artist) => artist,
-        None => {
-            return error_response(auth.format, &ApiError::NotFound("Artist".into()))
-                .into_response();
-        }
+    let Some(artist) = auth.state.get_artist(artist_id) else {
+        return error_response(auth.format, &ApiError::NotFound("Artist".into())).into_response();
     };
 
     // Create response with available data from the artist
@@ -696,28 +664,21 @@ pub struct AlbumInfo2Params {
 
 /// GET/POST /rest/getAlbumInfo2[.view]
 ///
-/// Returns album info with notes, MusicBrainz ID, image URLs, etc.
+/// Returns album info with notes, `MusicBrainz` ID, image URLs, etc.
 /// This is a stub implementation that returns minimal data from the database.
 pub async fn get_album_info2(
     axum::extract::Query(params): axum::extract::Query<AlbumInfo2Params>,
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
-    let album_id = match params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) {
-        Some(id) => id,
-        None => {
-            return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-                .into_response();
-        }
+    let Some(album_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
+            .into_response();
     };
 
     // Get the album
-    let album = match auth.state.get_album(album_id) {
-        Some(album) => album,
-        None => {
-            return error_response(auth.format, &ApiError::NotFound("Album".into()))
-                .into_response();
-        }
+    let Some(album) = auth.state.get_album(album_id) else {
+        return error_response(auth.format, &ApiError::NotFound("Album".into())).into_response();
     };
 
     // Create response with available data from the album
@@ -744,12 +705,9 @@ pub async fn get_similar_songs2(
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
-    let id = match params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) {
-        Some(id) => id,
-        None => {
-            return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-                .into_response();
-        }
+    let Some(id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
+            .into_response();
     };
 
     let count = params.count.unwrap_or(50).clamp(1, 500);
@@ -868,12 +826,9 @@ pub async fn get_music_directory(
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
-    let id = match params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) {
-        Some(id) => id,
-        None => {
-            return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-                .into_response();
-        }
+    let Some(id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
+            .into_response();
     };
 
     // Try to find what this ID refers to: music folder, artist, or album
@@ -920,12 +875,9 @@ pub async fn get_album_list(
     axum::extract::Query(params): axum::extract::Query<AlbumList2Params>,
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
-    let list_type = match params.list_type.as_deref() {
-        Some(t) => t,
-        None => {
-            return error_response(auth.format, &ApiError::MissingParameter("type".into()))
-                .into_response();
-        }
+    let Some(list_type) = params.list_type.as_deref() else {
+        return error_response(auth.format, &ApiError::MissingParameter("type".into()))
+            .into_response();
     };
 
     let size = params.size.unwrap_or(10).clamp(1, 500);
@@ -945,15 +897,12 @@ pub async fn get_album_list(
                 .get_albums_by_year(from_year, to_year, offset, size)
         }
         "byGenre" => {
-            let genre = match params.genre.as_deref() {
-                Some(g) => g,
-                None => {
-                    return error_response(
-                        auth.format,
-                        &ApiError::MissingParameter("genre".into()),
-                    )
-                    .into_response();
-                }
+            let Some(genre) = params.genre.as_deref() else {
+                return error_response(
+                    auth.format,
+                    &ApiError::MissingParameter("genre".into()),
+                )
+                .into_response();
             };
             auth.state.get_albums_by_genre(genre, offset, size)
         }
@@ -962,7 +911,7 @@ pub async fn get_album_list(
         _ => {
             return error_response(
                 auth.format,
-                &ApiError::Generic(format!("Unknown list type: {}", list_type)),
+                &ApiError::Generic(format!("Unknown list type: {list_type}")),
             )
             .into_response();
         }
@@ -1174,6 +1123,7 @@ pub async fn search(
     let songs = auth.state.search_songs(query, offset, count);
 
     let matches: Vec<SearchMatch> = songs.iter().map(SearchMatch::from).collect();
+    #[allow(clippy::cast_possible_wrap)]
     let total_hits = matches.len() as i64;
 
     let response = SearchResultResponse {
@@ -1193,21 +1143,14 @@ pub async fn get_artist_info(
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
-    let artist_id = match params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) {
-        Some(id) => id,
-        None => {
-            return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-                .into_response();
-        }
+    let Some(artist_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
+            .into_response();
     };
 
     // Get the artist
-    let artist = match auth.state.get_artist(artist_id) {
-        Some(artist) => artist,
-        None => {
-            return error_response(auth.format, &ApiError::NotFound("Artist".into()))
-                .into_response();
-        }
+    let Some(artist) = auth.state.get_artist(artist_id) else {
+        return error_response(auth.format, &ApiError::NotFound("Artist".into())).into_response();
     };
 
     let response = ArtistInfoResponse::from_artist(&artist);
@@ -1222,21 +1165,14 @@ pub async fn get_album_info(
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
-    let album_id = match params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) {
-        Some(id) => id,
-        None => {
-            return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-                .into_response();
-        }
+    let Some(album_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
+            .into_response();
     };
 
     // Get the album
-    let album = match auth.state.get_album(album_id) {
-        Some(album) => album,
-        None => {
-            return error_response(auth.format, &ApiError::NotFound("Album".into()))
-                .into_response();
-        }
+    let Some(album) = auth.state.get_album(album_id) else {
+        return error_response(auth.format, &ApiError::NotFound("Album".into())).into_response();
     };
 
     // Use AlbumInfoResponse which is the same for ID3 and non-ID3
@@ -1252,12 +1188,9 @@ pub async fn get_similar_songs(
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
-    let id = match params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) {
-        Some(id) => id,
-        None => {
-            return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-                .into_response();
-        }
+    let Some(id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
+            .into_response();
     };
 
     let count = params.count.unwrap_or(50).clamp(1, 500);
@@ -1331,7 +1264,7 @@ pub async fn get_lyrics(
     // Return empty lyrics with the requested artist/title
     let response = LyricsResponse::new(
         params.artist.clone(),
-        params.title.clone(),
+        params.title,
         None, // No lyrics content
     );
 
@@ -1340,7 +1273,7 @@ pub async fn get_lyrics(
 
 /// GET/POST /rest/getLyricsBySongId[.view]
 ///
-/// Returns structured lyrics for a given song (OpenSubsonic extension).
+/// Returns structured lyrics for a given song (`OpenSubsonic` extension).
 /// Extracts embedded lyrics from the audio file.
 /// Returns an empty lyricsList if no lyrics are available.
 pub async fn get_lyrics_by_song_id(
@@ -1350,21 +1283,15 @@ pub async fn get_lyrics_by_song_id(
     use crate::scanner::lyrics::{parse_lrc, parse_unsynced};
 
     // Get the required 'id' parameter
-    let song_id = match params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) {
-        Some(id) => id,
-        None => {
-            return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-                .into_response();
-        }
+    let Some(song_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
+            .into_response();
     };
 
     // Get the song (also verifies it exists)
-    let song = match auth.state.get_song(song_id) {
-        Some(s) => s,
-        None => {
-            return error_response(auth.format, &ApiError::NotFound("Song not found".into()))
-                .into_response();
-        }
+    let Some(song) = auth.state.get_song(song_id) else {
+        return error_response(auth.format, &ApiError::NotFound("Song not found".into()))
+            .into_response();
     };
 
     // Extract lyrics from the audio file

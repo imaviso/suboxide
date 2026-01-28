@@ -1,4 +1,4 @@
-//! Database module for SQLite persistence.
+//! Database module for `SQLite` persistence.
 
 pub mod connection;
 pub mod repository;

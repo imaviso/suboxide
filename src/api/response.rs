@@ -4,7 +4,7 @@
 //! The format is determined by the `f` query parameter (xml, json, jsonp).
 
 use axum::{
-    http::{StatusCode, header},
+    http::{header, StatusCode},
     response::{IntoResponse, Response},
 };
 use serde::Serialize;
@@ -40,10 +40,11 @@ pub enum Format {
 }
 
 impl Format {
+    #[must_use]
     pub fn from_param(f: Option<&str>) -> Self {
         match f {
-            Some("json") | Some("jsonp") => Format::Json,
-            _ => Format::Xml,
+            Some("json" | "jsonp") => Self::Json,
+            _ => Self::Xml,
         }
     }
 }
@@ -79,7 +80,7 @@ pub struct ScanStatusData {
 // OpenSubsonic Extension Types
 // ============================================================================
 
-/// Represents a supported OpenSubsonic API extension.
+/// Represents a supported `OpenSubsonic` API extension.
 #[derive(Debug, Clone, Serialize)]
 pub struct OpenSubsonicExtension {
     /// The name of the extension.
@@ -97,7 +98,8 @@ impl OpenSubsonicExtension {
     }
 }
 
-/// Returns the list of OpenSubsonic extensions supported by this server.
+/// Returns the list of `OpenSubsonic` extensions supported by this server.
+#[must_use]
 pub fn supported_extensions() -> Vec<OpenSubsonicExtension> {
     vec![
         OpenSubsonicExtension::new("formPost", vec![1]),
@@ -111,7 +113,7 @@ pub fn supported_extensions() -> Vec<OpenSubsonicExtension> {
 // ============================================================================
 
 mod xml {
-    use super::*;
+    use super::{ResponseStatus, Serialize, API_VERSION, SERVER_NAME, SERVER_VERSION};
 
     // Note: quick_xml doesn't support #[serde(flatten)], so we need to include
     // all base attributes directly in each response struct.
@@ -134,7 +136,7 @@ mod xml {
     }
 
     impl EmptyResponse {
-        pub fn ok() -> Self {
+        pub const fn ok() -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -173,7 +175,7 @@ mod xml {
     }
 
     impl ErrorResponse {
-        pub fn new(code: u32, message: String) -> Self {
+        pub const fn new(code: u32, message: String) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Failed,
@@ -211,7 +213,7 @@ mod xml {
     }
 
     impl LicenseResponse {
-        pub fn ok() -> Self {
+        pub const fn ok() -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -252,7 +254,7 @@ mod xml {
     }
 
     impl OpenSubsonicExtensionsResponse {
-        pub fn new(extensions: Vec<OpenSubsonicExtensionXml>) -> Self {
+        pub const fn new(extensions: Vec<OpenSubsonicExtensionXml>) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -291,7 +293,7 @@ mod xml {
     }
 
     impl MusicFoldersResponse {
-        pub fn new(folders: Vec<super::MusicFolderResponse>) -> Self {
+        pub const fn new(folders: Vec<super::MusicFolderResponse>) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -324,7 +326,7 @@ mod xml {
     }
 
     impl IndexesResponse {
-        pub fn new(indexes: super::IndexesResponse) -> Self {
+        pub const fn new(indexes: super::IndexesResponse) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -357,7 +359,7 @@ mod xml {
     }
 
     impl ArtistsResponse {
-        pub fn new(artists: super::ArtistsID3Response) -> Self {
+        pub const fn new(artists: super::ArtistsID3Response) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -390,7 +392,7 @@ mod xml {
     }
 
     impl AlbumResponse {
-        pub fn new(album: super::AlbumWithSongsID3Response) -> Self {
+        pub const fn new(album: super::AlbumWithSongsID3Response) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -423,7 +425,7 @@ mod xml {
     }
 
     impl ArtistResponse {
-        pub fn new(artist: super::ArtistWithAlbumsID3Response) -> Self {
+        pub const fn new(artist: super::ArtistWithAlbumsID3Response) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -456,7 +458,7 @@ mod xml {
     }
 
     impl SongResponse {
-        pub fn new(song: super::ChildResponse) -> Self {
+        pub const fn new(song: super::ChildResponse) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -489,7 +491,7 @@ mod xml {
     }
 
     impl AlbumList2Response {
-        pub fn new(album_list2: super::AlbumList2Response) -> Self {
+        pub const fn new(album_list2: super::AlbumList2Response) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -522,7 +524,7 @@ mod xml {
     }
 
     impl GenresResponse {
-        pub fn new(genres: super::GenresResponse) -> Self {
+        pub const fn new(genres: super::GenresResponse) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -555,7 +557,7 @@ mod xml {
     }
 
     impl SearchResult3Response {
-        pub fn new(search_result3: super::SearchResult3Response) -> Self {
+        pub const fn new(search_result3: super::SearchResult3Response) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -588,7 +590,7 @@ mod xml {
     }
 
     impl Starred2Response {
-        pub fn new(starred2: super::Starred2Response) -> Self {
+        pub const fn new(starred2: super::Starred2Response) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -621,7 +623,7 @@ mod xml {
     }
 
     impl NowPlayingResponse {
-        pub fn new(now_playing: super::NowPlayingResponse) -> Self {
+        pub const fn new(now_playing: super::NowPlayingResponse) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -654,7 +656,7 @@ mod xml {
     }
 
     impl RandomSongsResponse {
-        pub fn new(random_songs: super::RandomSongsResponse) -> Self {
+        pub const fn new(random_songs: super::RandomSongsResponse) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -687,7 +689,7 @@ mod xml {
     }
 
     impl SongsByGenreResponse {
-        pub fn new(songs_by_genre: super::SongsByGenreResponse) -> Self {
+        pub const fn new(songs_by_genre: super::SongsByGenreResponse) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -720,7 +722,7 @@ mod xml {
     }
 
     impl PlaylistsResponse {
-        pub fn new(playlists: super::PlaylistsResponse) -> Self {
+        pub const fn new(playlists: super::PlaylistsResponse) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -753,7 +755,7 @@ mod xml {
     }
 
     impl PlaylistResponse {
-        pub fn new(playlist: super::PlaylistWithSongsResponse) -> Self {
+        pub const fn new(playlist: super::PlaylistWithSongsResponse) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -786,7 +788,7 @@ mod xml {
     }
 
     impl PlayQueueResponse {
-        pub fn new(play_queue: super::PlayQueueResponse) -> Self {
+        pub const fn new(play_queue: super::PlayQueueResponse) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -819,7 +821,7 @@ mod xml {
     }
 
     impl PlayQueueByIndexResponse {
-        pub fn new(play_queue_by_index: super::PlayQueueByIndexResponse) -> Self {
+        pub const fn new(play_queue_by_index: super::PlayQueueByIndexResponse) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -852,7 +854,7 @@ mod xml {
     }
 
     impl TokenInfoResponse {
-        pub fn new(token_info: super::TokenInfoResponse) -> Self {
+        pub const fn new(token_info: super::TokenInfoResponse) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -885,7 +887,7 @@ mod xml {
     }
 
     impl UserResponse {
-        pub fn new(user: super::UserResponse) -> Self {
+        pub const fn new(user: super::UserResponse) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -918,7 +920,7 @@ mod xml {
     }
 
     impl UsersResponse {
-        pub fn new(users: super::UsersResponse) -> Self {
+        pub const fn new(users: super::UsersResponse) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -1024,7 +1026,7 @@ mod xml {
     }
 
     impl BookmarksResponse {
-        pub fn new() -> Self {
+        pub const fn new() -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -1057,7 +1059,7 @@ mod xml {
     }
 
     impl ArtistInfo2Response {
-        pub fn new(artist_info2: super::ArtistInfo2Response) -> Self {
+        pub const fn new(artist_info2: super::ArtistInfo2Response) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -1090,7 +1092,7 @@ mod xml {
     }
 
     impl AlbumInfoResponse {
-        pub fn new(album_info: super::AlbumInfoResponse) -> Self {
+        pub const fn new(album_info: super::AlbumInfoResponse) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -1123,7 +1125,7 @@ mod xml {
     }
 
     impl SimilarSongs2Response {
-        pub fn new(similar_songs2: super::SimilarSongs2Response) -> Self {
+        pub const fn new(similar_songs2: super::SimilarSongs2Response) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -1156,7 +1158,7 @@ mod xml {
     }
 
     impl TopSongsResponse {
-        pub fn new(top_songs: super::TopSongsResponse) -> Self {
+        pub const fn new(top_songs: super::TopSongsResponse) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -1189,7 +1191,7 @@ mod xml {
     }
 
     impl LyricsResponse {
-        pub fn new(lyrics: super::LyricsResponse) -> Self {
+        pub const fn new(lyrics: super::LyricsResponse) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -1222,7 +1224,7 @@ mod xml {
     }
 
     impl LyricsListResponse {
-        pub fn new(lyrics_list: super::LyricsListResponse) -> Self {
+        pub const fn new(lyrics_list: super::LyricsListResponse) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -1255,7 +1257,7 @@ mod xml {
     }
 
     impl DirectoryResponse {
-        pub fn new(directory: super::DirectoryResponse) -> Self {
+        pub const fn new(directory: super::DirectoryResponse) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -1288,7 +1290,7 @@ mod xml {
     }
 
     impl AlbumListResponse {
-        pub fn new(album_list: super::AlbumListResponse) -> Self {
+        pub const fn new(album_list: super::AlbumListResponse) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -1321,7 +1323,7 @@ mod xml {
     }
 
     impl StarredResponse {
-        pub fn new(starred: super::StarredResponse) -> Self {
+        pub const fn new(starred: super::StarredResponse) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -1354,7 +1356,7 @@ mod xml {
     }
 
     impl SearchResult2Response {
-        pub fn new(search_result2: super::SearchResult2Response) -> Self {
+        pub const fn new(search_result2: super::SearchResult2Response) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -1387,7 +1389,7 @@ mod xml {
     }
 
     impl SearchResultResponse {
-        pub fn new(search_result: super::SearchResultResponse) -> Self {
+        pub const fn new(search_result: super::SearchResultResponse) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -1420,7 +1422,7 @@ mod xml {
     }
 
     impl ArtistInfoResponse {
-        pub fn new(artist_info: super::ArtistInfoResponse) -> Self {
+        pub const fn new(artist_info: super::ArtistInfoResponse) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -1453,7 +1455,7 @@ mod xml {
     }
 
     impl SimilarSongsResponse {
-        pub fn new(similar_songs: super::SimilarSongsResponse) -> Self {
+        pub const fn new(similar_songs: super::SimilarSongsResponse) -> Self {
             Self {
                 xmlns: "http://subsonic.org/restapi",
                 status: ResponseStatus::Ok,
@@ -1472,7 +1474,9 @@ mod xml {
 // ============================================================================
 
 mod json {
-    use super::*;
+    use super::{
+        OpenSubsonicExtension, ResponseStatus, Serialize, API_VERSION, SERVER_NAME, SERVER_VERSION,
+    };
 
     #[derive(Debug, Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -1626,7 +1630,7 @@ mod json {
     }
 
     impl SubsonicResponse {
-        pub fn ok() -> Self {
+        pub const fn ok() -> Self {
             Self {
                 status: ResponseStatus::Ok,
                 version: API_VERSION,
@@ -1674,7 +1678,7 @@ mod json {
             }
         }
 
-        pub fn error(code: u32, message: String) -> Self {
+        pub const fn error(code: u32, message: String) -> Self {
             Self {
                 status: ResponseStatus::Failed,
                 version: API_VERSION,
@@ -1722,7 +1726,7 @@ mod json {
             }
         }
 
-        pub fn with_license(mut self) -> Self {
+        pub const fn with_license(mut self) -> Self {
             self.license = Some(License { valid: true });
             self
         }
@@ -1840,7 +1844,7 @@ mod json {
             self
         }
 
-        pub fn with_bookmarks(mut self) -> Self {
+        pub const fn with_bookmarks(mut self) -> Self {
             self.bookmarks = Some(BookmarksJson {});
             self
         }
@@ -1910,7 +1914,7 @@ mod json {
             self
         }
 
-        pub fn wrap(self) -> JsonWrapper {
+        pub const fn wrap(self) -> JsonWrapper {
             JsonWrapper {
                 subsonic_response: self,
             }
@@ -1973,20 +1977,23 @@ enum ResponseKind {
 }
 
 impl SubsonicResponse {
-    pub fn empty(format: Format) -> Self {
+    #[must_use]
+    pub const fn empty(format: Format) -> Self {
         Self {
             format,
             kind: ResponseKind::Empty,
         }
     }
 
-    pub fn license(format: Format) -> Self {
+    #[must_use]
+    pub const fn license(format: Format) -> Self {
         Self {
             format,
             kind: ResponseKind::License,
         }
     }
 
+    #[must_use]
     pub fn error(format: Format, error: &ApiError) -> Self {
         Self {
             format,
@@ -1997,7 +2004,8 @@ impl SubsonicResponse {
         }
     }
 
-    pub fn open_subsonic_extensions(
+    #[must_use]
+    pub const fn open_subsonic_extensions(
         format: Format,
         extensions: Vec<OpenSubsonicExtension>,
     ) -> Self {
@@ -2007,119 +2015,136 @@ impl SubsonicResponse {
         }
     }
 
-    pub fn music_folders(format: Format, folders: Vec<MusicFolderResponse>) -> Self {
+    #[must_use]
+    pub const fn music_folders(format: Format, folders: Vec<MusicFolderResponse>) -> Self {
         Self {
             format,
             kind: ResponseKind::MusicFolders(folders),
         }
     }
 
-    pub fn indexes(format: Format, indexes: IndexesResponse) -> Self {
+    #[must_use]
+    pub const fn indexes(format: Format, indexes: IndexesResponse) -> Self {
         Self {
             format,
             kind: ResponseKind::Indexes(indexes),
         }
     }
 
-    pub fn artists(format: Format, artists: ArtistsID3Response) -> Self {
+    #[must_use]
+    pub const fn artists(format: Format, artists: ArtistsID3Response) -> Self {
         Self {
             format,
             kind: ResponseKind::Artists(artists),
         }
     }
 
-    pub fn album(format: Format, album: AlbumWithSongsID3Response) -> Self {
+    #[must_use]
+    pub const fn album(format: Format, album: AlbumWithSongsID3Response) -> Self {
         Self {
             format,
             kind: ResponseKind::Album(album),
         }
     }
 
-    pub fn artist(format: Format, artist: ArtistWithAlbumsID3Response) -> Self {
+    #[must_use]
+    pub const fn artist(format: Format, artist: ArtistWithAlbumsID3Response) -> Self {
         Self {
             format,
             kind: ResponseKind::Artist(artist),
         }
     }
 
-    pub fn song(format: Format, song: ChildResponse) -> Self {
+    #[must_use]
+    pub const fn song(format: Format, song: ChildResponse) -> Self {
         Self {
             format,
             kind: ResponseKind::Song(song),
         }
     }
 
-    pub fn album_list2(format: Format, album_list2: AlbumList2Response) -> Self {
+    #[must_use]
+    pub const fn album_list2(format: Format, album_list2: AlbumList2Response) -> Self {
         Self {
             format,
             kind: ResponseKind::AlbumList2(album_list2),
         }
     }
 
-    pub fn genres(format: Format, genres: GenresResponse) -> Self {
+    #[must_use]
+    pub const fn genres(format: Format, genres: GenresResponse) -> Self {
         Self {
             format,
             kind: ResponseKind::Genres(genres),
         }
     }
 
-    pub fn search_result3(format: Format, search_result3: SearchResult3Response) -> Self {
+    #[must_use]
+    pub const fn search_result3(format: Format, search_result3: SearchResult3Response) -> Self {
         Self {
             format,
             kind: ResponseKind::SearchResult3(search_result3),
         }
     }
 
-    pub fn starred2(format: Format, starred2: Starred2Response) -> Self {
+    #[must_use]
+    pub const fn starred2(format: Format, starred2: Starred2Response) -> Self {
         Self {
             format,
             kind: ResponseKind::Starred2(starred2),
         }
     }
 
-    pub fn now_playing(format: Format, now_playing: NowPlayingResponse) -> Self {
+    #[must_use]
+    pub const fn now_playing(format: Format, now_playing: NowPlayingResponse) -> Self {
         Self {
             format,
             kind: ResponseKind::NowPlaying(now_playing),
         }
     }
 
-    pub fn random_songs(format: Format, random_songs: RandomSongsResponse) -> Self {
+    #[must_use]
+    pub const fn random_songs(format: Format, random_songs: RandomSongsResponse) -> Self {
         Self {
             format,
             kind: ResponseKind::RandomSongs(random_songs),
         }
     }
 
-    pub fn songs_by_genre(format: Format, songs_by_genre: SongsByGenreResponse) -> Self {
+    #[must_use]
+    pub const fn songs_by_genre(format: Format, songs_by_genre: SongsByGenreResponse) -> Self {
         Self {
             format,
             kind: ResponseKind::SongsByGenre(songs_by_genre),
         }
     }
 
-    pub fn playlists(format: Format, playlists: PlaylistsResponse) -> Self {
+    #[must_use]
+    pub const fn playlists(format: Format, playlists: PlaylistsResponse) -> Self {
         Self {
             format,
             kind: ResponseKind::Playlists(playlists),
         }
     }
 
-    pub fn playlist(format: Format, playlist: PlaylistWithSongsResponse) -> Self {
+    #[must_use]
+    pub const fn playlist(format: Format, playlist: PlaylistWithSongsResponse) -> Self {
         Self {
             format,
             kind: ResponseKind::Playlist(playlist),
         }
     }
 
-    pub fn play_queue(format: Format, play_queue: PlayQueueResponse) -> Self {
+    #[must_use]
+    pub const fn play_queue(format: Format, play_queue: PlayQueueResponse) -> Self {
         Self {
             format,
             kind: ResponseKind::PlayQueue(play_queue),
         }
     }
 
-    pub fn play_queue_by_index(
+    #[must_use]
+    pub const fn play_queue_by_index(
         format: Format,
         play_queue_by_index: PlayQueueByIndexResponse,
     ) -> Self {
@@ -2129,126 +2154,144 @@ impl SubsonicResponse {
         }
     }
 
-    pub fn token_info(format: Format, token_info: TokenInfoResponse) -> Self {
+    #[must_use]
+    pub const fn token_info(format: Format, token_info: TokenInfoResponse) -> Self {
         Self {
             format,
             kind: ResponseKind::TokenInfo(token_info),
         }
     }
 
-    pub fn user(format: Format, user: UserResponse) -> Self {
+    #[must_use]
+    pub const fn user(format: Format, user: UserResponse) -> Self {
         Self {
             format,
             kind: ResponseKind::User(user),
         }
     }
 
-    pub fn users(format: Format, users: UsersResponse) -> Self {
+    #[must_use]
+    pub const fn users(format: Format, users: UsersResponse) -> Self {
         Self {
             format,
             kind: ResponseKind::Users(users),
         }
     }
 
-    pub fn scan_status(format: Format, data: ScanStatusData) -> Self {
+    #[must_use]
+    pub const fn scan_status(format: Format, data: ScanStatusData) -> Self {
         Self {
             format,
             kind: ResponseKind::ScanStatus(data),
         }
     }
 
-    pub fn bookmarks(format: Format) -> Self {
+    #[must_use]
+    pub const fn bookmarks(format: Format) -> Self {
         Self {
             format,
             kind: ResponseKind::Bookmarks,
         }
     }
 
-    pub fn artist_info2(format: Format, artist_info2: ArtistInfo2Response) -> Self {
+    #[must_use]
+    pub const fn artist_info2(format: Format, artist_info2: ArtistInfo2Response) -> Self {
         Self {
             format,
             kind: ResponseKind::ArtistInfo2(artist_info2),
         }
     }
 
-    pub fn album_info(format: Format, album_info: AlbumInfoResponse) -> Self {
+    #[must_use]
+    pub const fn album_info(format: Format, album_info: AlbumInfoResponse) -> Self {
         Self {
             format,
             kind: ResponseKind::AlbumInfo(album_info),
         }
     }
 
-    pub fn similar_songs2(format: Format, similar_songs2: SimilarSongs2Response) -> Self {
+    #[must_use]
+    pub const fn similar_songs2(format: Format, similar_songs2: SimilarSongs2Response) -> Self {
         Self {
             format,
             kind: ResponseKind::SimilarSongs2(similar_songs2),
         }
     }
 
-    pub fn top_songs(format: Format, top_songs: TopSongsResponse) -> Self {
+    #[must_use]
+    pub const fn top_songs(format: Format, top_songs: TopSongsResponse) -> Self {
         Self {
             format,
             kind: ResponseKind::TopSongs(top_songs),
         }
     }
 
-    pub fn lyrics(format: Format, lyrics: LyricsResponse) -> Self {
+    #[must_use]
+    pub const fn lyrics(format: Format, lyrics: LyricsResponse) -> Self {
         Self {
             format,
             kind: ResponseKind::Lyrics(lyrics),
         }
     }
 
-    pub fn lyrics_list(format: Format, lyrics_list: LyricsListResponse) -> Self {
+    #[must_use]
+    pub const fn lyrics_list(format: Format, lyrics_list: LyricsListResponse) -> Self {
         Self {
             format,
             kind: ResponseKind::LyricsList(lyrics_list),
         }
     }
 
-    pub fn directory(format: Format, directory: DirectoryResponse) -> Self {
+    #[must_use]
+    pub const fn directory(format: Format, directory: DirectoryResponse) -> Self {
         Self {
             format,
             kind: ResponseKind::Directory(directory),
         }
     }
 
-    pub fn album_list(format: Format, album_list: AlbumListResponse) -> Self {
+    #[must_use]
+    pub const fn album_list(format: Format, album_list: AlbumListResponse) -> Self {
         Self {
             format,
             kind: ResponseKind::AlbumList(album_list),
         }
     }
 
-    pub fn starred(format: Format, starred: StarredResponse) -> Self {
+    #[must_use]
+    pub const fn starred(format: Format, starred: StarredResponse) -> Self {
         Self {
             format,
             kind: ResponseKind::Starred(starred),
         }
     }
 
-    pub fn search_result2(format: Format, search_result2: SearchResult2Response) -> Self {
+    #[must_use]
+    pub const fn search_result2(format: Format, search_result2: SearchResult2Response) -> Self {
         Self {
             format,
             kind: ResponseKind::SearchResult2(search_result2),
         }
     }
 
-    pub fn search_result(format: Format, search_result: SearchResultResponse) -> Self {
+    #[must_use]
+    pub const fn search_result(format: Format, search_result: SearchResultResponse) -> Self {
         Self {
             format,
             kind: ResponseKind::SearchResult(search_result),
         }
     }
 
-    pub fn artist_info(format: Format, artist_info: ArtistInfoResponse) -> Self {
+    #[must_use]
+    pub const fn artist_info(format: Format, artist_info: ArtistInfoResponse) -> Self {
         Self {
             format,
             kind: ResponseKind::ArtistInfo(artist_info),
         }
     }
 
-    pub fn similar_songs(format: Format, similar_songs: SimilarSongsResponse) -> Self {
+    #[must_use]
+    pub const fn similar_songs(format: Format, similar_songs: SimilarSongsResponse) -> Self {
         Self {
             format,
             kind: ResponseKind::SimilarSongs(similar_songs),
@@ -2266,7 +2309,7 @@ impl IntoResponse for SubsonicResponse {
 }
 
 impl SubsonicResponse {
-    #[allow(clippy::wrong_self_convention)]
+    #[allow(clippy::wrong_self_convention, clippy::too_many_lines)]
     fn to_xml_response(self) -> Response {
         let xml_result = match self.kind {
             ResponseKind::Empty => quick_xml::se::to_string(&xml::EmptyResponse::ok()),
@@ -2384,7 +2427,7 @@ impl SubsonicResponse {
         match xml_result {
             Ok(xml) => {
                 let xml_with_declaration =
-                    format!(r#"<?xml version="1.0" encoding="UTF-8"?>{}"#, xml);
+                    format!(r#"<?xml version="1.0" encoding="UTF-8"?>{xml}"#);
                 (
                     StatusCode::OK,
                     [(header::CONTENT_TYPE, "application/xml; charset=utf-8")],
@@ -2399,7 +2442,7 @@ impl SubsonicResponse {
         }
     }
 
-    #[allow(clippy::wrong_self_convention)]
+    #[allow(clippy::wrong_self_convention, clippy::too_many_lines)]
     fn to_json_response(self) -> Response {
         let response = match self.kind {
             ResponseKind::Empty => json::SubsonicResponse::ok().wrap(),
@@ -2525,13 +2568,13 @@ impl SubsonicResponse {
 /// - Convert $text to value (for genre text content)
 fn transform_json_keys(json: &str) -> String {
     // Parse as Value, transform, and re-serialize
-    match serde_json::from_str::<serde_json::Value>(json) {
-        Ok(value) => {
+    serde_json::from_str::<serde_json::Value>(json).map_or_else(
+        |_| json.to_string(),
+        |value| {
             let transformed = transform_value(value);
             serde_json::to_string(&transformed).unwrap_or_else(|_| json.to_string())
-        }
-        Err(_) => json.to_string(),
-    }
+        },
+    )
 }
 
 fn transform_value(value: serde_json::Value) -> serde_json::Value {
@@ -2541,13 +2584,16 @@ fn transform_value(value: serde_json::Value) -> serde_json::Value {
         Value::Object(map) => {
             let mut new_map = serde_json::Map::new();
             for (key, val) in map {
-                let new_key = if let Some(stripped) = key.strip_prefix('@') {
-                    stripped.to_string()
-                } else if key == "$text" {
-                    "value".to_string()
-                } else {
-                    key.clone()
-                };
+                let new_key = key.strip_prefix('@').map_or_else(
+                    || {
+                        if key == "$text" {
+                            "value".to_string()
+                        } else {
+                            key.clone()
+                        }
+                    },
+                    std::string::ToString::to_string,
+                );
                 new_map.insert(new_key, transform_value(val));
             }
             Value::Object(new_map)
@@ -2562,67 +2608,83 @@ fn transform_value(value: serde_json::Value) -> serde_json::Value {
 // ============================================================================
 
 /// Helper function to create an empty successful response.
-pub fn ok_empty(format: Format) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_empty(format: Format) -> SubsonicResponse {
     SubsonicResponse::empty(format)
 }
 
 /// Helper function to create a license response.
-pub fn ok_license(format: Format) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_license(format: Format) -> SubsonicResponse {
     SubsonicResponse::license(format)
 }
 
 /// Helper function to create an error response.
+#[must_use]
 pub fn error_response(format: Format, error: &ApiError) -> SubsonicResponse {
     SubsonicResponse::error(format, error)
 }
 
-/// Helper function to create an OpenSubsonic extensions response.
+/// Helper function to create an `OpenSubsonic` extensions response.
+#[must_use]
 pub fn ok_open_subsonic_extensions(format: Format) -> SubsonicResponse {
     SubsonicResponse::open_subsonic_extensions(format, supported_extensions())
 }
 
 /// Helper function to create a music folders response.
-pub fn ok_music_folders(format: Format, folders: Vec<MusicFolderResponse>) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_music_folders(
+    format: Format,
+    folders: Vec<MusicFolderResponse>,
+) -> SubsonicResponse {
     SubsonicResponse::music_folders(format, folders)
 }
 
 /// Helper function to create an indexes response.
-pub fn ok_indexes(format: Format, indexes: IndexesResponse) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_indexes(format: Format, indexes: IndexesResponse) -> SubsonicResponse {
     SubsonicResponse::indexes(format, indexes)
 }
 
 /// Helper function to create an artists response.
-pub fn ok_artists(format: Format, artists: ArtistsID3Response) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_artists(format: Format, artists: ArtistsID3Response) -> SubsonicResponse {
     SubsonicResponse::artists(format, artists)
 }
 
 /// Helper function to create an album response.
-pub fn ok_album(format: Format, album: AlbumWithSongsID3Response) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_album(format: Format, album: AlbumWithSongsID3Response) -> SubsonicResponse {
     SubsonicResponse::album(format, album)
 }
 
 /// Helper function to create an artist response.
-pub fn ok_artist(format: Format, artist: ArtistWithAlbumsID3Response) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_artist(format: Format, artist: ArtistWithAlbumsID3Response) -> SubsonicResponse {
     SubsonicResponse::artist(format, artist)
 }
 
 /// Helper function to create a song response.
-pub fn ok_song(format: Format, song: ChildResponse) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_song(format: Format, song: ChildResponse) -> SubsonicResponse {
     SubsonicResponse::song(format, song)
 }
 
 /// Helper function to create an album list2 response.
-pub fn ok_album_list2(format: Format, album_list2: AlbumList2Response) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_album_list2(format: Format, album_list2: AlbumList2Response) -> SubsonicResponse {
     SubsonicResponse::album_list2(format, album_list2)
 }
 
 /// Helper function to create a genres response.
-pub fn ok_genres(format: Format, genres: GenresResponse) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_genres(format: Format, genres: GenresResponse) -> SubsonicResponse {
     SubsonicResponse::genres(format, genres)
 }
 
 /// Helper function to create a search result3 response.
-pub fn ok_search_result3(
+#[must_use]
+pub const fn ok_search_result3(
     format: Format,
     search_result3: SearchResult3Response,
 ) -> SubsonicResponse {
@@ -2630,85 +2692,110 @@ pub fn ok_search_result3(
 }
 
 /// Helper function to create a starred2 response.
-pub fn ok_starred2(format: Format, starred2: Starred2Response) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_starred2(format: Format, starred2: Starred2Response) -> SubsonicResponse {
     SubsonicResponse::starred2(format, starred2)
 }
 
 /// Helper function to create a now playing response.
-pub fn ok_now_playing(format: Format, now_playing: NowPlayingResponse) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_now_playing(format: Format, now_playing: NowPlayingResponse) -> SubsonicResponse {
     SubsonicResponse::now_playing(format, now_playing)
 }
 
 /// Helper function to create a random songs response.
-pub fn ok_random_songs(format: Format, random_songs: RandomSongsResponse) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_random_songs(
+    format: Format,
+    random_songs: RandomSongsResponse,
+) -> SubsonicResponse {
     SubsonicResponse::random_songs(format, random_songs)
 }
 
 /// Helper function to create a songs by genre response.
-pub fn ok_songs_by_genre(format: Format, songs_by_genre: SongsByGenreResponse) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_songs_by_genre(
+    format: Format,
+    songs_by_genre: SongsByGenreResponse,
+) -> SubsonicResponse {
     SubsonicResponse::songs_by_genre(format, songs_by_genre)
 }
 
 /// Helper function to create a playlists response.
-pub fn ok_playlists(format: Format, playlists: PlaylistsResponse) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_playlists(format: Format, playlists: PlaylistsResponse) -> SubsonicResponse {
     SubsonicResponse::playlists(format, playlists)
 }
 
 /// Helper function to create a playlist with songs response.
-pub fn ok_playlist(format: Format, playlist: PlaylistWithSongsResponse) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_playlist(format: Format, playlist: PlaylistWithSongsResponse) -> SubsonicResponse {
     SubsonicResponse::playlist(format, playlist)
 }
 
 /// Helper function to create a play queue response.
-pub fn ok_play_queue(format: Format, play_queue: PlayQueueResponse) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_play_queue(format: Format, play_queue: PlayQueueResponse) -> SubsonicResponse {
     SubsonicResponse::play_queue(format, play_queue)
 }
 
-/// Helper function to create a play queue by index response (OpenSubsonic).
-pub fn ok_play_queue_by_index(
+/// Helper function to create a play queue by index response (`OpenSubsonic`).
+#[must_use]
+pub const fn ok_play_queue_by_index(
     format: Format,
     play_queue_by_index: PlayQueueByIndexResponse,
 ) -> SubsonicResponse {
     SubsonicResponse::play_queue_by_index(format, play_queue_by_index)
 }
 
-/// Helper function to create a token info response (OpenSubsonic).
-pub fn ok_token_info(format: Format, token_info: TokenInfoResponse) -> SubsonicResponse {
+/// Helper function to create a token info response (`OpenSubsonic`).
+#[must_use]
+pub const fn ok_token_info(format: Format, token_info: TokenInfoResponse) -> SubsonicResponse {
     SubsonicResponse::token_info(format, token_info)
 }
 
 /// Helper function to create a user response.
-pub fn ok_user(format: Format, user: UserResponse) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_user(format: Format, user: UserResponse) -> SubsonicResponse {
     SubsonicResponse::user(format, user)
 }
 
 /// Helper function to create a users response.
-pub fn ok_users(format: Format, users: UsersResponse) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_users(format: Format, users: UsersResponse) -> SubsonicResponse {
     SubsonicResponse::users(format, users)
 }
 
 /// Helper function to create a scan status response.
-pub fn ok_scan_status(format: Format, data: ScanStatusData) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_scan_status(format: Format, data: ScanStatusData) -> SubsonicResponse {
     SubsonicResponse::scan_status(format, data)
 }
 
 /// Helper function to create an empty bookmarks response.
-pub fn ok_bookmarks(format: Format) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_bookmarks(format: Format) -> SubsonicResponse {
     SubsonicResponse::bookmarks(format)
 }
 
 /// Helper function to create an artist info2 response.
-pub fn ok_artist_info2(format: Format, artist_info2: ArtistInfo2Response) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_artist_info2(
+    format: Format,
+    artist_info2: ArtistInfo2Response,
+) -> SubsonicResponse {
     SubsonicResponse::artist_info2(format, artist_info2)
 }
 
 /// Helper function to create an album info response.
-pub fn ok_album_info(format: Format, album_info: AlbumInfoResponse) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_album_info(format: Format, album_info: AlbumInfoResponse) -> SubsonicResponse {
     SubsonicResponse::album_info(format, album_info)
 }
 
 /// Helper function to create a similar songs2 response.
-pub fn ok_similar_songs2(
+#[must_use]
+pub const fn ok_similar_songs2(
     format: Format,
     similar_songs2: SimilarSongs2Response,
 ) -> SubsonicResponse {
@@ -2716,37 +2803,44 @@ pub fn ok_similar_songs2(
 }
 
 /// Helper function to create a top songs response.
-pub fn ok_top_songs(format: Format, top_songs: TopSongsResponse) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_top_songs(format: Format, top_songs: TopSongsResponse) -> SubsonicResponse {
     SubsonicResponse::top_songs(format, top_songs)
 }
 
 /// Helper function to create a lyrics response.
-pub fn ok_lyrics(format: Format, lyrics: LyricsResponse) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_lyrics(format: Format, lyrics: LyricsResponse) -> SubsonicResponse {
     SubsonicResponse::lyrics(format, lyrics)
 }
 
-/// Helper function to create a lyrics list response (getLyricsBySongId - OpenSubsonic).
-pub fn ok_lyrics_list(format: Format, lyrics_list: LyricsListResponse) -> SubsonicResponse {
+/// Helper function to create a lyrics list response (getLyricsBySongId - `OpenSubsonic`).
+#[must_use]
+pub const fn ok_lyrics_list(format: Format, lyrics_list: LyricsListResponse) -> SubsonicResponse {
     SubsonicResponse::lyrics_list(format, lyrics_list)
 }
 
 /// Helper function to create a directory response (getMusicDirectory).
-pub fn ok_directory(format: Format, directory: DirectoryResponse) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_directory(format: Format, directory: DirectoryResponse) -> SubsonicResponse {
     SubsonicResponse::directory(format, directory)
 }
 
 /// Helper function to create an album list response (getAlbumList).
-pub fn ok_album_list(format: Format, album_list: AlbumListResponse) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_album_list(format: Format, album_list: AlbumListResponse) -> SubsonicResponse {
     SubsonicResponse::album_list(format, album_list)
 }
 
 /// Helper function to create a starred response (getStarred).
-pub fn ok_starred(format: Format, starred: StarredResponse) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_starred(format: Format, starred: StarredResponse) -> SubsonicResponse {
     SubsonicResponse::starred(format, starred)
 }
 
 /// Helper function to create a search result2 response (search2).
-pub fn ok_search_result2(
+#[must_use]
+pub const fn ok_search_result2(
     format: Format,
     search_result2: SearchResult2Response,
 ) -> SubsonicResponse {
@@ -2754,16 +2848,25 @@ pub fn ok_search_result2(
 }
 
 /// Helper function to create a search result response (search).
-pub fn ok_search_result(format: Format, search_result: SearchResultResponse) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_search_result(
+    format: Format,
+    search_result: SearchResultResponse,
+) -> SubsonicResponse {
     SubsonicResponse::search_result(format, search_result)
 }
 
 /// Helper function to create an artist info response (getArtistInfo).
-pub fn ok_artist_info(format: Format, artist_info: ArtistInfoResponse) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_artist_info(format: Format, artist_info: ArtistInfoResponse) -> SubsonicResponse {
     SubsonicResponse::artist_info(format, artist_info)
 }
 
 /// Helper function to create a similar songs response (getSimilarSongs).
-pub fn ok_similar_songs(format: Format, similar_songs: SimilarSongsResponse) -> SubsonicResponse {
+#[must_use]
+pub const fn ok_similar_songs(
+    format: Format,
+    similar_songs: SimilarSongsResponse,
+) -> SubsonicResponse {
     SubsonicResponse::similar_songs(format, similar_songs)
 }

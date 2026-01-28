@@ -123,6 +123,7 @@ pub struct AppState {
 }
 
 impl AppState {
+    #[must_use]
     pub fn new(pool: DbPool) -> Self {
         let scan_state = Arc::new(ScanState::new());
         Self {
@@ -131,7 +132,8 @@ impl AppState {
         }
     }
 
-    /// Get the shared scan state for use by AutoScanner.
+    /// Get the shared scan state for use by `AutoScanner`.
+    #[must_use]
     pub fn scan_state(&self) -> Arc<ScanState> {
         self.scan_state.clone()
     }
@@ -146,7 +148,7 @@ impl FromRef<AppState> for Arc<dyn AuthState> {
 
 /// Create the main router with all Subsonic API routes.
 /// All endpoints support both GET and POST (formPost extension).
-/// The .view suffix is automatically handled by SubsonicRouterExt.
+/// The .view suffix is automatically handled by `SubsonicRouterExt`.
 fn create_router(state: AppState) -> Router {
     // All endpoints - subsonic_route automatically adds .view suffix and POST method
     let rest_routes = Router::new()
@@ -270,13 +272,14 @@ fn create_user(
             Ok(())
         }
         Err(e) => {
-            eprintln!("Failed to create user: {}", e);
+            eprintln!("Failed to create user: {e}");
             Err(Box::new(e))
         }
     }
 }
 
 #[tokio::main]
+#[allow(clippy::too_many_lines)]
 async fn main() {
     let cli = Cli::parse();
 
@@ -303,79 +306,78 @@ async fn main() {
             }
         }
         Some(Commands::GenerateApiKey { username }) => {
-            let repo = UserRepository::new(pool.clone());
+            let repo = UserRepository::new(pool);
             match repo.find_by_username(&username) {
                 Ok(Some(user)) => match repo.generate_api_key(user.id) {
                     Ok(api_key) => {
-                        println!("Generated API key for user '{}':", username);
-                        println!("{}", api_key);
+                        println!("Generated API key for user '{username}':");
+                        println!("{api_key}");
                     }
                     Err(e) => {
-                        eprintln!("Failed to generate API key: {}", e);
+                        eprintln!("Failed to generate API key: {e}");
                         std::process::exit(1);
                     }
                 },
                 Ok(None) => {
-                    eprintln!("User '{}' not found", username);
+                    eprintln!("User '{username}' not found");
                     std::process::exit(1);
                 }
                 Err(e) => {
-                    eprintln!("Database error: {}", e);
+                    eprintln!("Database error: {e}");
                     std::process::exit(1);
                 }
             }
         }
         Some(Commands::RevokeApiKey { username }) => {
-            let repo = UserRepository::new(pool.clone());
+            let repo = UserRepository::new(pool);
             match repo.find_by_username(&username) {
                 Ok(Some(user)) => match repo.revoke_api_key(user.id) {
                     Ok(true) => {
-                        println!("Revoked API key for user '{}'", username);
+                        println!("Revoked API key for user '{username}'");
                     }
                     Ok(false) => {
-                        eprintln!("User '{}' not found", username);
+                        eprintln!("User '{username}' not found");
                         std::process::exit(1);
                     }
                     Err(e) => {
-                        eprintln!("Failed to revoke API key: {}", e);
+                        eprintln!("Failed to revoke API key: {e}");
                         std::process::exit(1);
                     }
                 },
                 Ok(None) => {
-                    eprintln!("User '{}' not found", username);
+                    eprintln!("User '{username}' not found");
                     std::process::exit(1);
                 }
                 Err(e) => {
-                    eprintln!("Database error: {}", e);
+                    eprintln!("Database error: {e}");
                     std::process::exit(1);
                 }
             }
         }
         Some(Commands::ShowApiKey { username }) => {
-            let repo = UserRepository::new(pool.clone());
+            let repo = UserRepository::new(pool);
             match repo.find_by_username(&username) {
-                Ok(Some(user)) => match user.api_key {
-                    Some(api_key) => {
-                        println!("API key for user '{}':", username);
-                        println!("{}", api_key);
+                Ok(Some(user)) => {
+                    if let Some(api_key) = user.api_key {
+                        println!("API key for user '{username}':");
+                        println!("{api_key}");
+                    } else {
+                        println!("User '{username}' has no API key. Generate one with:");
+                        println!("  subsonic generate-api-key --username {username}");
                     }
-                    None => {
-                        println!("User '{}' has no API key. Generate one with:", username);
-                        println!("  subsonic generate-api-key --username {}", username);
-                    }
-                },
+                }
                 Ok(None) => {
-                    eprintln!("User '{}' not found", username);
+                    eprintln!("User '{username}' not found");
                     std::process::exit(1);
                 }
                 Err(e) => {
-                    eprintln!("Database error: {}", e);
+                    eprintln!("Database error: {e}");
                     std::process::exit(1);
                 }
             }
         }
         Some(Commands::AddFolder { name, path }) => {
-            let repo = MusicFolderRepository::new(pool.clone());
+            let repo = MusicFolderRepository::new(pool);
             let new_folder = NewMusicFolder::new(&name, &path);
             match repo.create(&new_folder) {
                 Ok(folder) => {
@@ -383,13 +385,13 @@ async fn main() {
                     println!("  Path: {}", folder.path);
                 }
                 Err(e) => {
-                    eprintln!("Failed to add music folder: {}", e);
+                    eprintln!("Failed to add music folder: {e}");
                     std::process::exit(1);
                 }
             }
         }
         Some(Commands::ListFolders) => {
-            let repo = MusicFolderRepository::new(pool.clone());
+            let repo = MusicFolderRepository::new(pool);
             match repo.find_all() {
                 Ok(folders) => {
                     if folders.is_empty() {
@@ -411,40 +413,39 @@ async fn main() {
                     }
                 }
                 Err(e) => {
-                    eprintln!("Failed to list music folders: {}", e);
+                    eprintln!("Failed to list music folders: {e}");
                     std::process::exit(1);
                 }
             }
         }
         Some(Commands::RemoveFolder { id }) => {
-            let repo = MusicFolderRepository::new(pool.clone());
+            let repo = MusicFolderRepository::new(pool);
             match repo.delete(id) {
                 Ok(true) => {
-                    println!("Removed music folder with id {}", id);
+                    println!("Removed music folder with id {id}");
                 }
                 Ok(false) => {
-                    eprintln!("Music folder with id {} not found", id);
+                    eprintln!("Music folder with id {id} not found");
                     std::process::exit(1);
                 }
                 Err(e) => {
-                    eprintln!("Failed to remove music folder: {}", e);
+                    eprintln!("Failed to remove music folder: {e}");
                     std::process::exit(1);
                 }
             }
         }
         Some(Commands::Scan { folder, full }) => {
-            let scanner = Scanner::new(pool.clone());
+            let scanner = Scanner::new(pool);
             let mode = if full {
                 ScanMode::Full
             } else {
                 ScanMode::Incremental
             };
 
-            let result = if let Some(folder_id) = folder {
-                scanner.scan_folder_by_id_with_mode(folder_id, mode)
-            } else {
-                scanner.scan_all_with_options(None, mode)
-            };
+            let result = folder.map_or_else(
+                || scanner.scan_all_with_options(None, mode),
+                |folder_id| scanner.scan_folder_by_id_with_mode(folder_id, mode),
+            );
 
             match result {
                 Ok(stats) => {
@@ -460,7 +461,7 @@ async fn main() {
                     println!("  Cover art saved:  {}", stats.cover_art_saved);
                 }
                 Err(e) => {
-                    eprintln!("Scan failed: {}", e);
+                    eprintln!("Scan failed: {e}");
                     std::process::exit(1);
                 }
             }
@@ -502,7 +503,7 @@ async fn run_server(pool: DbPool, port: u16, auto_scan: bool, auto_scan_interval
         None
     };
 
-    let addr = format!("0.0.0.0:{}", port);
+    let addr = format!("0.0.0.0:{port}");
     let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(l) => l,
         Err(e) => {

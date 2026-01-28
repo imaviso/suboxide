@@ -1,5 +1,7 @@
 //! System-related API handlers (ping, getLicense, getOpenSubsonicExtensions, tokenInfo, etc.)
 
+#![allow(clippy::unused_async)]
+
 use axum::response::IntoResponse;
 
 use crate::api::auth::SubsonicAuth;
@@ -26,8 +28,8 @@ pub async fn get_license(auth: SubsonicAuth) -> impl IntoResponse {
 
 /// GET/POST /rest/getOpenSubsonicExtensions[.view]
 ///
-/// List the OpenSubsonic extensions supported by this server.
-/// This endpoint is part of the OpenSubsonic specification.
+/// List the `OpenSubsonic` extensions supported by this server.
+/// This endpoint is part of the `OpenSubsonic` specification.
 pub async fn get_open_subsonic_extensions(auth: SubsonicAuth) -> impl IntoResponse {
     ok_open_subsonic_extensions(auth.format)
 }
@@ -44,7 +46,7 @@ pub async fn get_bookmarks(auth: SubsonicAuth) -> impl IntoResponse {
 /// GET/POST /rest/tokenInfo[.view]
 ///
 /// Returns information about the API key used for authentication.
-/// This is an OpenSubsonic extension.
+/// This is an `OpenSubsonic` extension.
 ///
 /// Returns the username associated with the API key.
 pub async fn token_info(auth: SubsonicAuth) -> impl IntoResponse {

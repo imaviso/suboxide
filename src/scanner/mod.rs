@@ -59,6 +59,9 @@ const COVER_ART_FILENAMES: &[&str] = &[
 /// Supported image file extensions for external cover art.
 const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "gif", "bmp", "webp"];
 
+/// Batch size for song inserts (`SQLite` has a limit of ~999 variables per query)
+const BATCH_SIZE: usize = 100;
+
 /// Metadata extracted from an audio file.
 #[derive(Debug, Clone)]
 pub struct ScannedTrack {
@@ -86,6 +89,16 @@ pub struct ScannedTrack {
     pub cover_art_mime: Option<String>,
     /// File modification time (Unix timestamp in seconds).
     pub file_modified_at: Option<i64>,
+}
+
+#[derive(Debug)]
+struct PreparedTrack {
+    track: ScannedTrack,
+    path_str: String,
+    artist_id: Option<i32>,
+    album_id: Option<i32>,
+    cover_art: Option<String>,
+    is_update: bool,
 }
 
 /// Result of scanning a music folder.
@@ -136,19 +149,21 @@ pub enum ScanPhase {
 
 impl ScanPhase {
     /// Get the phase as a string for API responses.
-    pub fn as_str(&self) -> &'static str {
+    #[must_use] 
+    pub const fn as_str(&self) -> &'static str {
         match self {
-            ScanPhase::Idle => "idle",
-            ScanPhase::Discovering => "discovering",
-            ScanPhase::Processing => "processing",
-            ScanPhase::Cleaning => "cleaning",
+            Self::Idle => "idle",
+            Self::Discovering => "discovering",
+            Self::Processing => "processing",
+            Self::Cleaning => "cleaning",
         }
     }
 }
 
 impl ScanState {
     /// Create a new scan state.
-    pub fn new() -> Self {
+    #[must_use] 
+    pub const fn new() -> Self {
         Self {
             scanning: AtomicBool::new(false),
             count: AtomicU64::new(0),
@@ -269,11 +284,10 @@ pub struct AutoScanner {
 
 impl Scanner {
     /// Create a new scanner.
+    #[must_use] 
     pub fn new(pool: DbPool) -> Self {
         // Use home directory for cover art cache
-        let cover_art_dir = dirs::home_dir()
-            .map(|h| h.join(COVER_ART_CACHE_DIR))
-            .unwrap_or_else(|| PathBuf::from(COVER_ART_CACHE_DIR));
+        let cover_art_dir = dirs::home_dir().map_or_else(|| PathBuf::from(COVER_ART_CACHE_DIR), |h| h.join(COVER_ART_CACHE_DIR));
 
         Self {
             pool,
@@ -282,7 +296,8 @@ impl Scanner {
     }
 
     /// Create a new scanner with a custom cover art directory.
-    pub fn with_cover_art_dir(pool: DbPool, cover_art_dir: PathBuf) -> Self {
+    #[must_use] 
+    pub const fn with_cover_art_dir(pool: DbPool, cover_art_dir: PathBuf) -> Self {
         Self {
             pool,
             cover_art_dir,
@@ -315,7 +330,7 @@ impl Scanner {
             _ => "jpg", // Default to JPEG
         };
 
-        let filename = format!("{}.{}", hash, ext);
+        let filename = format!("{hash}.{ext}");
         let filepath = self.cover_art_dir.join(&filename);
 
         // Only write if file doesn't already exist (same content = same hash)
@@ -328,6 +343,7 @@ impl Scanner {
     }
 
     /// Get the cover art cache directory path.
+    #[must_use] 
     pub fn cover_art_dir(&self) -> &Path {
         &self.cover_art_dir
     }
@@ -335,17 +351,16 @@ impl Scanner {
     /// Look for external cover art file in the given directory.
     /// Tries common filenames like cover.jpg, folder.png, etc.
     /// Returns the cover art data and MIME type if found.
-    fn find_external_cover_art(&self, dir: &Path) -> Option<(Vec<u8>, String)> {
+    fn find_external_cover_art(dir: &Path) -> Option<(Vec<u8>, String)> {
         // Try each common filename with each supported extension
         for filename in COVER_ART_FILENAMES {
             for ext in IMAGE_EXTENSIONS {
-                let path = dir.join(format!("{}.{}", filename, ext));
+                let path = dir.join(format!("{filename}.{ext}"));
                 if path.exists()
                     && path.is_file()
                     && let Ok(data) = fs::read(&path)
                 {
                     let mime = match *ext {
-                        "jpg" | "jpeg" => "image/jpeg",
                         "png" => "image/png",
                         "gif" => "image/gif",
                         "bmp" => "image/bmp",
@@ -360,7 +375,7 @@ impl Scanner {
         // Also try case-insensitive matching as a fallback
         // Some albums might have "Cover.JPG" or "FOLDER.PNG"
         if let Ok(entries) = fs::read_dir(dir) {
-            for entry in entries.filter_map(|e| e.ok()) {
+            for entry in entries.filter_map(std::result::Result::ok) {
                 let path = entry.path();
                 if !path.is_file() {
                     continue;
@@ -369,11 +384,11 @@ impl Scanner {
                 let filename = path
                     .file_stem()
                     .and_then(|s| s.to_str())
-                    .map(|s| s.to_lowercase());
+                    .map(str::to_lowercase);
                 let ext = path
                     .extension()
                     .and_then(|s| s.to_str())
-                    .map(|s| s.to_lowercase());
+                    .map(str::to_lowercase);
 
                 if let (Some(name), Some(extension)) = (filename, ext)
                     && COVER_ART_FILENAMES.contains(&name.as_str())
@@ -381,7 +396,6 @@ impl Scanner {
                     && let Ok(data) = fs::read(&path)
                 {
                     let mime = match extension.as_str() {
-                        "jpg" | "jpeg" => "image/jpeg",
                         "png" => "image/png",
                         "gif" => "image/gif",
                         "bmp" => "image/bmp",
@@ -408,10 +422,10 @@ impl Scanner {
 
     /// Scan all enabled music folders with optional progress tracking.
     ///
-    /// If a ScanState is provided, the count will be updated as tracks are processed.
+    /// If a `ScanState` is provided, the count will be updated as tracks are processed.
     pub fn scan_all_with_state(
         &self,
-        state: Option<Arc<ScanState>>,
+        state: Option<&ScanState>,
     ) -> Result<ScanResult, ScanError> {
         self.scan_all_with_options(state, ScanMode::Full)
     }
@@ -419,7 +433,7 @@ impl Scanner {
     /// Scan all enabled music folders with optional progress tracking and scan mode.
     pub fn scan_all_with_options(
         &self,
-        state: Option<Arc<ScanState>>,
+        state: Option<&ScanState>,
         mode: ScanMode,
     ) -> Result<ScanResult, ScanError> {
         let folder_repo = MusicFolderRepository::new(self.pool.clone());
@@ -433,7 +447,7 @@ impl Scanner {
 
         for folder in &folders {
             // Update scan state with current folder
-            if let Some(ref s) = state {
+            if let Some(s) = state {
                 s.set_current_folder(Some(folder.name.clone()));
             }
 
@@ -441,7 +455,7 @@ impl Scanner {
                 "Scanning folder: {} ({}) [mode: {:?}]",
                 folder.name, folder.path, mode
             );
-            match self.scan_folder_with_options(folder, state.clone(), mode) {
+            match self.scan_folder_with_options(folder, state, mode) {
                 Ok(result) => {
                     total_result.tracks_found += result.tracks_found;
                     total_result.tracks_added += result.tracks_added;
@@ -460,13 +474,13 @@ impl Scanner {
         }
 
         // Clean up orphaned artists and albums after scanning all folders
-        if let Some(ref s) = state {
+        if let Some(s) = state {
             s.set_phase(ScanPhase::Cleaning);
             s.set_current_folder(None);
         }
 
         if let Err(e) = self.cleanup_orphans() {
-            eprintln!("Warning: Failed to cleanup orphaned records: {}", e);
+            eprintln!("Warning: Failed to cleanup orphaned records: {e}");
         }
 
         Ok(total_result)
@@ -499,7 +513,7 @@ impl Scanner {
     fn scan_folder_with_options(
         &self,
         folder: &MusicFolder,
-        state: Option<Arc<ScanState>>,
+        state: Option<&ScanState>,
         mode: ScanMode,
     ) -> Result<ScanResult, ScanError> {
         let mut result = ScanResult::default();
@@ -510,7 +524,7 @@ impl Scanner {
         }
 
         // Set discovery phase
-        if let Some(ref s) = state {
+        if let Some(s) = state {
             s.set_phase(ScanPhase::Discovering);
         }
 
@@ -518,11 +532,11 @@ impl Scanner {
         let existing_songs = self.get_existing_songs(folder.id)?;
 
         // Collect all audio files on disk
-        let (tracks, discovered_paths) = self.discover_tracks_with_paths(folder_path, folder)?;
+        let (tracks, discovered_paths) = Self::discover_tracks_with_paths(folder_path, folder);
         result.tracks_found = tracks.len();
 
         // Set total count now that we know how many files to process
-        if let Some(ref s) = state {
+        if let Some(s) = state {
             // Add to total (accumulates across folders)
             let current_total = s.get_total();
             s.set_total(current_total + tracks.len() as u64);
@@ -569,7 +583,7 @@ impl Scanner {
     }
 
     /// Get existing songs in a folder from the database.
-    /// Returns a map of path -> (id, file_modified_at).
+    /// Returns a map of path -> (id, `file_modified_at`).
     fn get_existing_songs(
         &self,
         folder_id: i32,
@@ -631,22 +645,21 @@ impl Scanner {
     /// Discover all audio files in a directory, also returning the set of discovered paths.
     /// Uses parallel processing for metadata reading.
     fn discover_tracks_with_paths(
-        &self,
         folder_path: &Path,
         folder: &MusicFolder,
-    ) -> Result<(Vec<ScannedTrack>, HashSet<String>), ScanError> {
+    ) -> (Vec<ScannedTrack>, HashSet<String>) {
         // First, collect all audio file paths (fast, sequential walk)
         let audio_files: Vec<PathBuf> = WalkDir::new(folder_path)
             .follow_links(true)
             .into_iter()
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .filter(|entry| entry.path().is_file())
             .filter_map(|entry| {
                 let path = entry.into_path();
                 let ext = path
                     .extension()
                     .and_then(|e| e.to_str())
-                    .map(|e| e.to_lowercase());
+                    .map(str::to_lowercase);
 
                 match ext {
                     Some(ext) if AUDIO_EXTENSIONS.contains(&ext.as_str()) => Some(path),
@@ -669,7 +682,7 @@ impl Scanner {
                 let extension = path
                     .extension()
                     .and_then(|e| e.to_str())
-                    .map(|e| e.to_lowercase())
+                    .map(str::to_lowercase)
                     .unwrap_or_default();
 
                 match Self::read_track_metadata_static(path, &extension, &folder_path_str) {
@@ -682,10 +695,11 @@ impl Scanner {
             })
             .collect();
 
-        Ok((tracks, paths))
+        (tracks, paths)
     }
 
-    /// Static version of read_track_metadata for use with rayon (no &self needed).
+    /// Static version of `read_track_metadata` for use with rayon (no &self needed).
+    #[allow(clippy::too_many_lines)]
     fn read_track_metadata_static(
         path: &Path,
         extension: &str,
@@ -699,7 +713,7 @@ impl Scanner {
             .modified()
             .ok()
             .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_secs() as i64);
+            .map(|d| i64::try_from(d.as_secs()).unwrap_or(0));
 
         // Get parent path relative to music folder
         let parent_path = path
@@ -716,7 +730,7 @@ impl Scanner {
         let tagged_file = lofty::read_from_path(path)?;
 
         let properties = tagged_file.properties();
-        let duration_secs = properties.duration().as_secs() as u32;
+        let duration_secs = u32::try_from(properties.duration().as_secs()).unwrap_or(0);
         let bit_rate = properties.audio_bitrate();
         let bit_depth = properties.bit_depth();
         let sample_rate = properties.sample_rate();
@@ -738,29 +752,27 @@ impl Scanner {
             genre,
             cover_art_data,
             cover_art_mime,
-        ) = if let Some(tag) = tag {
+        ) = tag.map_or((None, None, None, None, None, None, None, None, None, None), |tag| {
             // Extract embedded cover art (first picture)
             let (art_data, art_mime) = tag
                 .pictures()
                 .first()
-                .map(|p| {
+                .map_or((None, None), |p| {
                     let mime = match p.mime_type() {
                         Some(lofty::picture::MimeType::Png) => "image/png",
-                        Some(lofty::picture::MimeType::Jpeg) => "image/jpeg",
                         Some(lofty::picture::MimeType::Gif) => "image/gif",
                         Some(lofty::picture::MimeType::Bmp) => "image/bmp",
                         Some(lofty::picture::MimeType::Tiff) => "image/tiff",
                         _ => "image/jpeg", // Default to JPEG
                     };
                     (Some(p.data().to_vec()), Some(mime.to_string()))
-                })
-                .unwrap_or((None, None));
+                });
 
             (
                 tag.title().map(|s| s.to_string()),
                 tag.artist().map(|s| s.to_string()),
                 tag.album().map(|s| s.to_string()),
-                tag.get_string(&ItemKey::AlbumArtist).map(|s| s.to_string()),
+                tag.get_string(&ItemKey::AlbumArtist).map(std::string::ToString::to_string),
                 tag.track(),
                 tag.disk(),
                 tag.year(),
@@ -768,9 +780,7 @@ impl Scanner {
                 art_data,
                 art_mime,
             )
-        } else {
-            (None, None, None, None, None, None, None, None, None, None)
-        };
+        });
 
         // Use filename as title if no tag
         let title = title.unwrap_or_else(|| {
@@ -821,14 +831,14 @@ impl Scanner {
     }
 
     /// Process scanned tracks and populate the database with options.
-    /// Returns (artists_added, albums_added, tracks_added, tracks_updated, tracks_skipped, tracks_failed, cover_art_saved)
-    #[allow(clippy::type_complexity)]
+    /// Returns (`artists_added`, `albums_added`, `tracks_added`, `tracks_updated`, `tracks_skipped`, `tracks_failed`, `cover_art_saved`)
+    #[allow(clippy::type_complexity, clippy::too_many_lines)]
     fn process_tracks_with_options(
         &self,
         folder: &MusicFolder,
         tracks: Vec<ScannedTrack>,
         existing_songs: &HashMap<String, (i32, Option<i64>)>,
-        state: Option<Arc<ScanState>>,
+        state: Option<&ScanState>,
         mode: ScanMode,
     ) -> Result<(usize, usize, usize, usize, usize, usize, usize), ScanError> {
         use crate::db::schema::{albums, artists, songs};
@@ -932,19 +942,6 @@ impl Scanner {
             }
         }
 
-        // Batch size for song inserts (SQLite has a limit of ~999 variables per query)
-        const BATCH_SIZE: usize = 100;
-
-        // Prepare tracks to process
-        struct PreparedTrack {
-            track: ScannedTrack,
-            path_str: String,
-            artist_id: Option<i32>,
-            album_id: Option<i32>,
-            cover_art: Option<String>,
-            is_update: bool,
-        }
-
         let mut prepared_tracks: Vec<PreparedTrack> = Vec::with_capacity(tracks.len());
 
         // Second pass: resolve albums and prepare tracks
@@ -959,7 +956,7 @@ impl Scanner {
             {
                 // File hasn't changed, skip processing
                 tracks_skipped += 1;
-                if let Some(ref state) = state {
+                if let Some(state) = state {
                     state.increment_count();
                 }
                 continue;
@@ -989,7 +986,7 @@ impl Scanner {
                             albums::name.eq(album_name),
                             albums::artist_id.eq(artist_id),
                             albums::artist_name.eq(&artist_name),
-                            albums::year.eq(track.year.map(|y| y as i32)),
+                            albums::year.eq(track.year.map(|y| i32::try_from(y).unwrap_or(0))),
                             albums::genre.eq(&track.genre),
                         ))
                         .on_conflict_do_nothing()
@@ -1039,13 +1036,10 @@ impl Scanner {
                             Some((art_data.clone(), art_mime.clone()))
                         } else if let Some(parent_dir) = track.path.parent() {
                             let parent_buf = parent_dir.to_path_buf();
-                            if let Some(cached) = dir_cover_art_cache.get(&parent_buf) {
-                                cached.clone()
-                            } else {
-                                let found = self.find_external_cover_art(parent_dir);
-                                dir_cover_art_cache.insert(parent_buf, found.clone());
-                                found
-                            }
+                            dir_cover_art_cache
+                                .entry(parent_buf)
+                                .or_insert_with(|| Self::find_external_cover_art(parent_dir))
+                                .clone()
                         } else {
                             None
                         };
@@ -1058,7 +1052,7 @@ impl Scanner {
                                         .set(albums::cover_art.eq(&cover_art_hash))
                                         .execute(&mut conn)
                                 {
-                                    eprintln!("  Warning: Failed to update album cover art: {}", e);
+                                    eprintln!("  Warning: Failed to update album cover art: {e}");
                                     None
                                 } else {
                                     album_cover_art_cache
@@ -1068,7 +1062,7 @@ impl Scanner {
                                 }
                             }
                             Err(e) => {
-                                eprintln!("  Warning: Failed to save cover art: {}", e);
+                                eprintln!("  Warning: Failed to save cover art: {e}");
                                 None
                             }
                         }
@@ -1106,17 +1100,17 @@ impl Scanner {
                                 songs::artist_id.eq(prepared.artist_id),
                                 songs::artist_name.eq(&prepared.track.artist),
                                 songs::album_name.eq(&prepared.track.album),
-                                songs::file_size.eq(prepared.track.file_size as i64),
-                                songs::duration.eq(prepared.track.duration_secs as i32),
-                                songs::bit_rate.eq(prepared.track.bit_rate.map(|b| b as i32)),
-                                songs::bit_depth.eq(prepared.track.bit_depth.map(|b| b as i32)),
+                                songs::file_size.eq(i64::try_from(prepared.track.file_size).unwrap_or(0)),
+                                songs::duration.eq(i32::try_from(prepared.track.duration_secs).unwrap_or(0)),
+                                songs::bit_rate.eq(prepared.track.bit_rate.map(|b| i32::try_from(b).unwrap_or(0))),
+                                songs::bit_depth.eq(prepared.track.bit_depth.map(i32::from)),
                                 songs::sampling_rate
-                                    .eq(prepared.track.sample_rate.map(|s| s as i32)),
-                                songs::channel_count.eq(prepared.track.channels.map(|c| c as i32)),
+                                    .eq(prepared.track.sample_rate.map(|s| i32::try_from(s).unwrap_or(0))),
+                                songs::channel_count.eq(prepared.track.channels.map(i32::from)),
                                 songs::track_number
-                                    .eq(prepared.track.track_number.map(|t| t as i32)),
-                                songs::disc_number.eq(prepared.track.disc_number.map(|d| d as i32)),
-                                songs::year.eq(prepared.track.year.map(|y| y as i32)),
+                                    .eq(prepared.track.track_number.map(|t| i32::try_from(t).unwrap_or(0))),
+                                songs::disc_number.eq(prepared.track.disc_number.map(|d| i32::try_from(d).unwrap_or(0))),
+                                songs::year.eq(prepared.track.year.map(|y| i32::try_from(y).unwrap_or(0))),
                                 songs::genre.eq(&prepared.track.genre),
                                 songs::cover_art.eq(&prepared.cover_art),
                                 songs::file_modified_at.eq(prepared.track.file_modified_at),
@@ -1134,19 +1128,19 @@ impl Scanner {
                                 songs::music_folder_id.eq(folder.id),
                                 songs::path.eq(&prepared.path_str),
                                 songs::parent_path.eq(&prepared.track.parent_path),
-                                songs::file_size.eq(prepared.track.file_size as i64),
+                                songs::file_size.eq(i64::try_from(prepared.track.file_size).unwrap_or(0)),
                                 songs::content_type.eq(&prepared.track.content_type),
                                 songs::suffix.eq(&prepared.track.suffix),
-                                songs::duration.eq(prepared.track.duration_secs as i32),
-                                songs::bit_rate.eq(prepared.track.bit_rate.map(|b| b as i32)),
-                                songs::bit_depth.eq(prepared.track.bit_depth.map(|b| b as i32)),
+                                songs::duration.eq(i32::try_from(prepared.track.duration_secs).unwrap_or(0)),
+                                songs::bit_rate.eq(prepared.track.bit_rate.map(|b| i32::try_from(b).unwrap_or(0))),
+                                songs::bit_depth.eq(prepared.track.bit_depth.map(i32::from)),
                                 songs::sampling_rate
-                                    .eq(prepared.track.sample_rate.map(|s| s as i32)),
-                                songs::channel_count.eq(prepared.track.channels.map(|c| c as i32)),
+                                    .eq(prepared.track.sample_rate.map(|s| i32::try_from(s).unwrap_or(0))),
+                                songs::channel_count.eq(prepared.track.channels.map(i32::from)),
                                 songs::track_number
-                                    .eq(prepared.track.track_number.map(|t| t as i32)),
-                                songs::disc_number.eq(prepared.track.disc_number.map(|d| d as i32)),
-                                songs::year.eq(prepared.track.year.map(|y| y as i32)),
+                                    .eq(prepared.track.track_number.map(|t| i32::try_from(t).unwrap_or(0))),
+                                songs::disc_number.eq(prepared.track.disc_number.map(|d| i32::try_from(d).unwrap_or(0))),
+                                songs::year.eq(prepared.track.year.map(|y| i32::try_from(y).unwrap_or(0))),
                                 songs::genre.eq(&prepared.track.genre),
                                 songs::cover_art.eq(&prepared.cover_art),
                                 songs::file_modified_at.eq(prepared.track.file_modified_at),
@@ -1172,14 +1166,14 @@ impl Scanner {
                 } else {
                     tracks_added += 1;
                 }
-                if let Some(ref state) = state {
+                if let Some(state) = state {
                     state.increment_count();
                 }
             }
         }
 
         // Update album song counts and durations
-        self.update_album_stats(&mut conn)?;
+        Self::update_album_stats(&mut conn)?;
 
         Ok((
             artists_added,
@@ -1193,17 +1187,17 @@ impl Scanner {
     }
 
     /// Update album statistics (song count, duration) based on songs.
-    fn update_album_stats(&self, conn: &mut diesel::SqliteConnection) -> Result<(), ScanError> {
+    fn update_album_stats(conn: &mut diesel::SqliteConnection) -> Result<(), ScanError> {
         use diesel::prelude::*;
 
         // This updates each album's song_count and duration based on its songs
         diesel::sql_query(
-            r#"
+            r"
             UPDATE albums SET
                 song_count = (SELECT COUNT(*) FROM songs WHERE songs.album_id = albums.id),
                 duration = (SELECT COALESCE(SUM(duration), 0) FROM songs WHERE songs.album_id = albums.id),
                 updated_at = CURRENT_TIMESTAMP
-            "#,
+            ",
         )
         .execute(conn)
         .map_err(MusicRepoError::Database)?;
@@ -1215,9 +1209,7 @@ impl Scanner {
 impl AutoScanner {
     /// Create a new auto-scanner with default interval (5 minutes).
     pub fn new(pool: DbPool, scan_state: Arc<ScanState>) -> Self {
-        let cover_art_dir = dirs::home_dir()
-            .map(|h| h.join(COVER_ART_CACHE_DIR))
-            .unwrap_or_else(|| PathBuf::from(COVER_ART_CACHE_DIR));
+        let cover_art_dir = dirs::home_dir().map_or_else(|| PathBuf::from(COVER_ART_CACHE_DIR), |h| h.join(COVER_ART_CACHE_DIR));
 
         Self {
             pool,
@@ -1230,9 +1222,7 @@ impl AutoScanner {
 
     /// Create a new auto-scanner with a custom interval.
     pub fn with_interval(pool: DbPool, scan_state: Arc<ScanState>, interval_secs: u64) -> Self {
-        let cover_art_dir = dirs::home_dir()
-            .map(|h| h.join(COVER_ART_CACHE_DIR))
-            .unwrap_or_else(|| PathBuf::from(COVER_ART_CACHE_DIR));
+        let cover_art_dir = dirs::home_dir().map_or_else(|| PathBuf::from(COVER_ART_CACHE_DIR), |h| h.join(COVER_ART_CACHE_DIR));
 
         Self {
             pool,
@@ -1274,7 +1264,7 @@ impl AutoScanner {
         loop {
             // Wait for the interval or shutdown signal
             tokio::select! {
-                _ = tokio::time::sleep(interval) => {
+                () = tokio::time::sleep(interval) => {
                     // Time to scan
                 }
                 _ = shutdown_rx.changed() => {
@@ -1301,7 +1291,7 @@ impl AutoScanner {
 
             let result = tokio::task::spawn_blocking(move || {
                 let scanner = Scanner::with_cover_art_dir(pool_clone, cover_art_dir_clone);
-                scanner.scan_all_with_options(Some(scan_state_clone), ScanMode::Incremental)
+                scanner.scan_all_with_options(Some(&scan_state_clone), ScanMode::Incremental)
             })
             .await;
 

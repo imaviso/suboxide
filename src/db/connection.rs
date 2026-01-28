@@ -14,7 +14,7 @@ pub type DbConn = PooledConnection<ConnectionManager<SqliteConnection>>;
 /// Database configuration.
 #[derive(Debug, Clone)]
 pub struct DbConfig {
-    /// Path to the SQLite database file.
+    /// Path to the `SQLite` database file.
     pub database_url: String,
     /// Maximum number of connections in the pool.
     pub max_connections: u32,
@@ -54,7 +54,7 @@ impl DbConfig {
     }
 }
 
-/// Customizer that applies SQLite PRAGMAs to each new connection.
+/// Customizer that applies `SQLite` PRAGMAs to each new connection.
 /// This ensures all pooled connections have consistent settings.
 #[derive(Debug)]
 struct SqliteConnectionCustomizer;
@@ -92,6 +92,7 @@ impl CustomizeConnection<SqliteConnection, diesel::r2d2::Error> for SqliteConnec
 }
 
 /// Run the SQL migrations to set up the database schema.
+#[allow(clippy::too_many_lines)]
 pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result::Error> {
     // Enable WAL mode for better concurrent read/write performance
     // WAL mode allows readers to not block writers and vice versa,
@@ -104,7 +105,7 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
 
     // Create users table
     diesel::sql_query(
-        r#"
+        r"
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
             username TEXT NOT NULL UNIQUE,
@@ -128,7 +129,7 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
             subsonic_password TEXT,
             api_key TEXT
         )
-        "#,
+        ",
     )
     .execute(conn)?;
 
@@ -157,7 +158,7 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
 
     // Create music_folders table
     diesel::sql_query(
-        r#"
+        r"
         CREATE TABLE IF NOT EXISTS music_folders (
             id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
             name TEXT NOT NULL,
@@ -166,13 +167,13 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
-        "#,
+        ",
     )
     .execute(conn)?;
 
     // Create artists table
     diesel::sql_query(
-        r#"
+        r"
         CREATE TABLE IF NOT EXISTS artists (
             id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
             name TEXT NOT NULL,
@@ -183,7 +184,7 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
-        "#,
+        ",
     )
     .execute(conn)?;
 
@@ -192,7 +193,7 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
 
     // Create albums table
     diesel::sql_query(
-        r#"
+        r"
         CREATE TABLE IF NOT EXISTS albums (
             id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
             name TEXT NOT NULL,
@@ -209,7 +210,7 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
-        "#,
+        ",
     )
     .execute(conn)?;
 
@@ -221,7 +222,7 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
 
     // Create songs table
     diesel::sql_query(
-        r#"
+        r"
         CREATE TABLE IF NOT EXISTS songs (
             id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
             title TEXT NOT NULL,
@@ -252,7 +253,7 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
-        "#,
+        ",
     )
     .execute(conn)?;
 
@@ -305,7 +306,7 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
 
     // Create starred table for favorites
     diesel::sql_query(
-        r#"
+        r"
         CREATE TABLE IF NOT EXISTS starred (
             id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -319,7 +320,7 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
                 (artist_id IS NULL AND album_id IS NULL AND song_id IS NOT NULL)
             )
         )
-        "#,
+        ",
     )
     .execute(conn)?;
 
@@ -353,7 +354,7 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
 
     // Create now_playing table for currently playing songs
     diesel::sql_query(
-        r#"
+        r"
         CREATE TABLE IF NOT EXISTS now_playing (
             id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -362,7 +363,7 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
             started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             minutes_ago INTEGER NOT NULL DEFAULT 0
         )
-        "#,
+        ",
     )
     .execute(conn)?;
 
@@ -377,7 +378,7 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
 
     // Create scrobbles table for play history
     diesel::sql_query(
-        r#"
+        r"
         CREATE TABLE IF NOT EXISTS scrobbles (
             id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -385,7 +386,7 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
             played_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             submission BOOLEAN NOT NULL DEFAULT TRUE
         )
-        "#,
+        ",
     )
     .execute(conn)?;
 
@@ -402,7 +403,7 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
 
     // Create user_ratings table for song/album/artist ratings
     diesel::sql_query(
-        r#"
+        r"
         CREATE TABLE IF NOT EXISTS user_ratings (
             id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -418,7 +419,7 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
                 (song_id IS NULL AND album_id IS NULL AND artist_id IS NOT NULL)
             )
         )
-        "#,
+        ",
     )
     .execute(conn)?;
 
@@ -444,7 +445,7 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
 
     // Create playlists table
     diesel::sql_query(
-        r#"
+        r"
         CREATE TABLE IF NOT EXISTS playlists (
             id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -456,7 +457,7 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
-        "#,
+        ",
     )
     .execute(conn)?;
 
@@ -465,7 +466,7 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
 
     // Create playlist_songs table
     diesel::sql_query(
-        r#"
+        r"
         CREATE TABLE IF NOT EXISTS playlist_songs (
             id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
             playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
@@ -473,7 +474,7 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
             position INTEGER NOT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
-        "#,
+        ",
     )
     .execute(conn)?;
 
@@ -489,7 +490,7 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
 
     // Create play_queue table for per-user play queue state
     diesel::sql_query(
-        r#"
+        r"
         CREATE TABLE IF NOT EXISTS play_queue (
             id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -498,7 +499,7 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
             changed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             changed_by TEXT
         )
-        "#,
+        ",
     )
     .execute(conn)?;
 
@@ -509,14 +510,14 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
 
     // Create play_queue_songs table for songs in the play queue
     diesel::sql_query(
-        r#"
+        r"
         CREATE TABLE IF NOT EXISTS play_queue_songs (
             id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
             play_queue_id INTEGER NOT NULL REFERENCES play_queue(id) ON DELETE CASCADE,
             song_id INTEGER NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
             position INTEGER NOT NULL
         )
-        "#,
+        ",
     )
     .execute(conn)?;
 

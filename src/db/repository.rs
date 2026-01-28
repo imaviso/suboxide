@@ -1,17 +1,19 @@
 //! Database repository for user operations.
 
+use std::collections::HashMap;
+
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use thiserror::Error;
 
-use crate::db::DbPool;
 use crate::db::schema::{
     albums, artists, music_folders, play_queue, play_queue_songs, playlist_songs, playlists, songs,
     starred, user_ratings, users,
 };
-use crate::models::User;
+use crate::db::DbPool;
 use crate::models::music::{Album, Artist, MusicFolder, NewMusicFolder, Song};
 use crate::models::user::UserRoles;
+use crate::models::User;
 
 /// Errors that can occur during user repository operations.
 #[derive(Debug, Error)]
@@ -33,6 +35,7 @@ pub enum UserRepoError {
 #[derive(Debug, Clone, Queryable, Selectable)]
 #[diesel(table_name = users)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[allow(clippy::struct_excessive_bools)]
 pub struct UserRow {
     pub id: i32,
     pub username: String,
@@ -61,7 +64,7 @@ pub struct UserRow {
 
 impl From<UserRow> for User {
     fn from(row: UserRow) -> Self {
-        User {
+        Self {
             id: row.id,
             username: row.username,
             password_hash: row.password_hash,
@@ -90,6 +93,7 @@ impl From<UserRow> for User {
 /// Data for inserting a new user.
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = users)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct NewUser<'a> {
     pub username: &'a str,
     pub password_hash: &'a str,
@@ -112,7 +116,12 @@ pub struct NewUser<'a> {
 
 impl<'a> NewUser<'a> {
     /// Create a new admin user.
-    pub fn admin(username: &'a str, password_hash: &'a str, subsonic_password: &'a str) -> Self {
+    #[must_use]
+    pub const fn admin(
+        username: &'a str,
+        password_hash: &'a str,
+        subsonic_password: &'a str,
+    ) -> Self {
         Self {
             username,
             password_hash,
@@ -135,7 +144,12 @@ impl<'a> NewUser<'a> {
     }
 
     /// Create a new regular user with default permissions.
-    pub fn regular(username: &'a str, password_hash: &'a str, subsonic_password: &'a str) -> Self {
+    #[must_use]
+    pub const fn regular(
+        username: &'a str,
+        password_hash: &'a str,
+        subsonic_password: &'a str,
+    ) -> Self {
         Self {
             username,
             password_hash,
@@ -166,7 +180,8 @@ pub struct UserRepository {
 
 impl UserRepository {
     /// Create a new user repository.
-    pub fn new(pool: DbPool) -> Self {
+    #[must_use]
+    pub const fn new(pool: DbPool) -> Self {
         Self { pool }
     }
 
@@ -429,7 +444,7 @@ pub struct MusicFolderRow {
 
 impl From<MusicFolderRow> for MusicFolder {
     fn from(row: MusicFolderRow) -> Self {
-        MusicFolder {
+        Self {
             id: row.id,
             name: row.name,
             path: row.path,
@@ -467,7 +482,8 @@ pub struct MusicFolderRepository {
 
 impl MusicFolderRepository {
     /// Create a new music folder repository.
-    pub fn new(pool: DbPool) -> Self {
+    #[must_use]
+    pub const fn new(pool: DbPool) -> Self {
         Self { pool }
     }
 
@@ -593,7 +609,7 @@ pub struct ArtistRow {
 
 impl From<ArtistRow> for Artist {
     fn from(row: ArtistRow) -> Self {
-        Artist {
+        Self {
             id: row.id,
             name: row.name,
             sort_name: row.sort_name,
@@ -614,7 +630,8 @@ pub struct ArtistRepository {
 
 impl ArtistRepository {
     /// Create a new artist repository.
-    pub fn new(pool: DbPool) -> Self {
+    #[must_use]
+    pub const fn new(pool: DbPool) -> Self {
         Self { pool }
     }
 
@@ -680,7 +697,7 @@ impl ArtistRepository {
     }
 
     /// Count albums for multiple artists in a single query.
-    /// Returns a HashMap mapping artist_id to album_count.
+    /// Returns a `HashMap` mapping `artist_id` to `album_count`.
     pub fn count_albums_batch(
         &self,
         artist_ids: &[i32],
@@ -726,7 +743,7 @@ impl ArtistRepository {
             return Ok(results.into_iter().map(Artist::from).collect());
         }
 
-        let pattern = format!("%{}%", query);
+        let pattern = format!("%{query}%");
         let results = artists::table
             .filter(artists::name.like(&pattern))
             .select(ArtistRow::as_select())
@@ -766,7 +783,7 @@ pub struct AlbumRow {
 
 impl From<AlbumRow> for Album {
     fn from(row: AlbumRow) -> Self {
-        Album {
+        Self {
             id: row.id,
             name: row.name,
             sort_name: row.sort_name,
@@ -793,7 +810,8 @@ pub struct AlbumRepository {
 
 impl AlbumRepository {
     /// Create a new album repository.
-    pub fn new(pool: DbPool) -> Self {
+    #[must_use]
+    pub const fn new(pool: DbPool) -> Self {
         Self { pool }
     }
 
@@ -871,7 +889,7 @@ impl AlbumRepository {
         Ok(results.into_iter().map(Album::from).collect())
     }
 
-    /// Find newest albums (by created_at) with pagination.
+    /// Find newest albums (by `created_at`) with pagination.
     pub fn find_newest(&self, offset: i64, limit: i64) -> Result<Vec<Album>, MusicRepoError> {
         let mut conn = self.pool.get()?;
 
@@ -900,7 +918,7 @@ impl AlbumRepository {
     }
 
     /// Find recently played albums with pagination.
-    /// Note: Using updated_at as a proxy for last played time.
+    /// Note: Using `updated_at` as a proxy for last played time.
     pub fn find_recent(&self, offset: i64, limit: i64) -> Result<Vec<Album>, MusicRepoError> {
         let mut conn = self.pool.get()?;
 
@@ -992,7 +1010,7 @@ impl AlbumRepository {
             return Ok(results.into_iter().map(Album::from).collect());
         }
 
-        let pattern = format!("%{}%", query);
+        let pattern = format!("%{query}%");
         let results = albums::table
             .filter(albums::name.like(&pattern))
             .select(AlbumRow::as_select())
@@ -1057,7 +1075,7 @@ pub struct SongRow {
 
 impl From<SongRow> for Song {
     fn from(row: SongRow) -> Self {
-        Song {
+        Self {
             id: row.id,
             title: row.title,
             sort_name: row.sort_name,
@@ -1097,7 +1115,8 @@ pub struct SongRepository {
 
 impl SongRepository {
     /// Create a new song repository.
-    pub fn new(pool: DbPool) -> Self {
+    #[must_use]
+    pub const fn new(pool: DbPool) -> Self {
         Self { pool }
     }
 
@@ -1174,7 +1193,7 @@ impl SongRepository {
             return Ok(results.into_iter().map(Song::from).collect());
         }
 
-        let pattern = format!("%{}%", query);
+        let pattern = format!("%{query}%");
         let results = songs::table
             .filter(songs::title.like(&pattern))
             .select(SongRow::as_select())
@@ -1187,7 +1206,7 @@ impl SongRepository {
     }
 
     /// Get all genres with song and album counts.
-    /// Returns a vector of (genre_name, song_count, album_count).
+    /// Returns a vector of (`genre_name`, `song_count`, `album_count`).
     pub fn get_genres(&self) -> Result<Vec<(String, i64, i64)>, MusicRepoError> {
         let mut conn = self.pool.get()?;
 
@@ -1206,7 +1225,6 @@ impl SongRepository {
             .load(&mut conn)?;
 
         // Merge into a single list
-        use std::collections::HashMap;
         let mut genre_map: HashMap<String, (i64, i64)> = HashMap::new();
 
         for (genre, count) in song_counts {
@@ -1384,7 +1402,8 @@ pub struct StarredRepository {
 
 impl StarredRepository {
     /// Create a new starred repository.
-    pub fn new(pool: DbPool) -> Self {
+    #[must_use]
+    pub const fn new(pool: DbPool) -> Self {
         Self { pool }
     }
 
@@ -1499,7 +1518,7 @@ impl StarredRepository {
     // ========================================================================
 
     /// Get all starred artists for a user with their starred timestamp.
-    /// Returns (Artist, starred_at).
+    /// Returns (Artist, `starred_at`).
     pub fn get_starred_artists(
         &self,
         user_id: i32,
@@ -1521,7 +1540,7 @@ impl StarredRepository {
     }
 
     /// Get all starred albums for a user with their starred timestamp.
-    /// Returns (Album, starred_at).
+    /// Returns (Album, `starred_at`).
     pub fn get_starred_albums(
         &self,
         user_id: i32,
@@ -1543,7 +1562,7 @@ impl StarredRepository {
     }
 
     /// Get all starred songs for a user with their starred timestamp.
-    /// Returns (Song, starred_at).
+    /// Returns (Song, `starred_at`).
     pub fn get_starred_songs(
         &self,
         user_id: i32,
@@ -1603,7 +1622,7 @@ impl StarredRepository {
         Ok(count > 0)
     }
 
-    /// Get the starred_at timestamp for an artist.
+    /// Get the `starred_at` timestamp for an artist.
     pub fn get_starred_at_for_artist(
         &self,
         user_id: i32,
@@ -1621,7 +1640,7 @@ impl StarredRepository {
         Ok(result)
     }
 
-    /// Get the starred_at timestamp for an album.
+    /// Get the `starred_at` timestamp for an album.
     pub fn get_starred_at_for_album(
         &self,
         user_id: i32,
@@ -1639,7 +1658,7 @@ impl StarredRepository {
         Ok(result)
     }
 
-    /// Get the starred_at timestamp for a song.
+    /// Get the `starred_at` timestamp for a song.
     pub fn get_starred_at_for_song(
         &self,
         user_id: i32,
@@ -1657,8 +1676,8 @@ impl StarredRepository {
         Ok(result)
     }
 
-    /// Get starred albums for a user with pagination, ordered by starred_at descending.
-    /// Returns albums with their starred_at timestamp.
+    /// Get starred albums for a user with pagination, ordered by `starred_at` descending.
+    /// Returns albums with their `starred_at` timestamp.
     pub fn get_starred_albums_paginated(
         &self,
         user_id: i32,
@@ -1687,15 +1706,13 @@ impl StarredRepository {
     // Batch query operations (to fix N+1 queries)
     // ========================================================================
 
-    /// Get starred_at timestamps for multiple songs in a single query.
-    /// Returns a HashMap mapping song_id to starred_at.
+    /// Get `starred_at` timestamps for multiple songs in a single query.
+    /// Returns a `HashMap` mapping `song_id` to `starred_at`.
     pub fn get_starred_at_for_songs_batch(
         &self,
         user_id: i32,
         song_ids: &[i32],
     ) -> Result<std::collections::HashMap<i32, NaiveDateTime>, MusicRepoError> {
-        use std::collections::HashMap;
-
         if song_ids.is_empty() {
             return Ok(HashMap::new());
         }
@@ -1711,15 +1728,13 @@ impl StarredRepository {
         Ok(results.into_iter().collect())
     }
 
-    /// Get starred_at timestamps for multiple albums in a single query.
-    /// Returns a HashMap mapping album_id to starred_at.
+    /// Get `starred_at` timestamps for multiple albums in a single query.
+    /// Returns a `HashMap` mapping `album_id` to `starred_at`.
     pub fn get_starred_at_for_albums_batch(
         &self,
         user_id: i32,
         album_ids: &[i32],
     ) -> Result<std::collections::HashMap<i32, NaiveDateTime>, MusicRepoError> {
-        use std::collections::HashMap;
-
         if album_ids.is_empty() {
             return Ok(HashMap::new());
         }
@@ -1735,15 +1750,13 @@ impl StarredRepository {
         Ok(results.into_iter().collect())
     }
 
-    /// Get starred_at timestamps for multiple artists in a single query.
-    /// Returns a HashMap mapping artist_id to starred_at.
+    /// Get `starred_at` timestamps for multiple artists in a single query.
+    /// Returns a `HashMap` mapping `artist_id` to `starred_at`.
     pub fn get_starred_at_for_artists_batch(
         &self,
         user_id: i32,
         artist_ids: &[i32],
     ) -> Result<std::collections::HashMap<i32, NaiveDateTime>, MusicRepoError> {
-        use std::collections::HashMap;
-
         if artist_ids.is_empty() {
             return Ok(HashMap::new());
         }
@@ -1805,7 +1818,8 @@ pub struct NowPlayingRepository {
 
 impl NowPlayingRepository {
     /// Create a new now playing repository.
-    pub fn new(pool: DbPool) -> Self {
+    #[must_use]
+    pub const fn new(pool: DbPool) -> Self {
         Self { pool }
     }
 
@@ -1826,7 +1840,7 @@ impl NowPlayingRepository {
         let new_entry = NewNowPlaying {
             user_id,
             song_id,
-            player_id: player_id.map(|s| s.to_string()),
+            player_id: player_id.map(std::string::ToString::to_string),
         };
 
         diesel::insert_into(now_playing::table)
@@ -1875,7 +1889,7 @@ impl NowPlayingRepository {
         Ok(results
             .into_iter()
             .map(|(np, song, user)| {
-                let minutes_ago = (now - np.started_at).num_minutes() as i32;
+                let minutes_ago = i32::try_from((now - np.started_at).num_minutes()).unwrap_or(0);
                 NowPlayingEntry {
                     song: Song::from(song),
                     username: user.username,
@@ -1923,7 +1937,8 @@ pub struct ScrobbleRepository {
 
 impl ScrobbleRepository {
     /// Create a new scrobble repository.
-    pub fn new(pool: DbPool) -> Self {
+    #[must_use]
+    pub const fn new(pool: DbPool) -> Self {
         Self { pool }
     }
 
@@ -1938,14 +1953,14 @@ impl ScrobbleRepository {
         let mut conn = self.pool.get()?;
 
         // Determine the played_at timestamp
-        let played_at = if let Some(timestamp_ms) = time {
-            // Convert milliseconds since epoch to NaiveDateTime
-            chrono::DateTime::from_timestamp_millis(timestamp_ms)
-                .map(|dt| dt.naive_utc())
-                .unwrap_or_else(|| chrono::Utc::now().naive_utc())
-        } else {
-            chrono::Utc::now().naive_utc()
-        };
+        let played_at = time.map_or_else(
+            || chrono::Utc::now().naive_utc(),
+            |timestamp_ms| {
+                // Convert milliseconds since epoch to NaiveDateTime
+                chrono::DateTime::from_timestamp_millis(timestamp_ms)
+                    .map_or_else(|| chrono::Utc::now().naive_utc(), |dt| dt.naive_utc())
+            },
+        );
 
         let new_scrobble = NewScrobble {
             user_id,
@@ -2044,7 +2059,8 @@ pub struct RatingRepository {
 
 impl RatingRepository {
     /// Create a new rating repository.
-    pub fn new(pool: DbPool) -> Self {
+    #[must_use]
+    pub const fn new(pool: DbPool) -> Self {
         Self { pool }
     }
 
@@ -2300,7 +2316,8 @@ pub struct PlaylistRepository {
 
 impl PlaylistRepository {
     /// Create a new playlist repository.
-    pub fn new(pool: DbPool) -> Self {
+    #[must_use]
+    pub const fn new(pool: DbPool) -> Self {
         Self { pool }
     }
 
@@ -2379,7 +2396,7 @@ impl PlaylistRepository {
     }
 
     /// Get cover art IDs for multiple playlists in a single query.
-    /// Returns a map of playlist_id -> cover_art (from the first song in each playlist).
+    /// Returns a map of `playlist_id` -> `cover_art` (from the first song in each playlist).
     pub fn get_playlist_cover_arts_batch(
         &self,
         playlist_ids: &[i32],
@@ -2451,7 +2468,7 @@ impl PlaylistRepository {
                     let new_song = NewPlaylistSong {
                         playlist_id,
                         song_id: *song_id,
-                        position: position as i32,
+                        position: i32::try_from(position).unwrap_or(0),
                     };
 
                     diesel::insert_into(playlist_songs::table)
@@ -2463,7 +2480,7 @@ impl PlaylistRepository {
             // Update playlist stats
             diesel::update(playlists::table.filter(playlists::id.eq(playlist_id)))
                 .set((
-                    playlists::song_count.eq(song_ids.len() as i32),
+                    playlists::song_count.eq(i32::try_from(song_ids.len()).unwrap_or(0)),
                     playlists::duration.eq(total_duration),
                 ))
                 .execute(&mut conn)?;
@@ -2517,7 +2534,7 @@ impl PlaylistRepository {
             }
 
             // Renumber positions
-            self.renumber_positions(&mut conn, playlist_id)?;
+            Self::renumber_positions(&mut conn, playlist_id)?;
         }
 
         // Add new songs
@@ -2546,7 +2563,7 @@ impl PlaylistRepository {
         }
 
         // Update playlist stats
-        self.update_playlist_stats(&mut conn, playlist_id)?;
+        Self::update_playlist_stats(&mut conn, playlist_id)?;
 
         Ok(())
     }
@@ -2581,7 +2598,6 @@ impl PlaylistRepository {
 
     /// Helper to renumber positions after removal.
     fn renumber_positions(
-        &self,
         conn: &mut diesel::SqliteConnection,
         playlist_id: i32,
     ) -> Result<(), MusicRepoError> {
@@ -2595,16 +2611,15 @@ impl PlaylistRepository {
         // Update positions
         for (new_pos, id) in song_ids.iter().enumerate() {
             diesel::update(playlist_songs::table.filter(playlist_songs::id.eq(id)))
-                .set(playlist_songs::position.eq(new_pos as i32))
+                .set(playlist_songs::position.eq(i32::try_from(new_pos).unwrap_or(0)))
                 .execute(conn)?;
         }
 
         Ok(())
     }
 
-    /// Helper to update playlist stats (song_count, duration).
+    /// Helper to update playlist stats (`song_count`, duration).
     fn update_playlist_stats(
-        &self,
         conn: &mut diesel::SqliteConnection,
         playlist_id: i32,
     ) -> Result<(), MusicRepoError> {
@@ -2615,7 +2630,7 @@ impl PlaylistRepository {
             .select(SongRow::as_select())
             .load(conn)?;
 
-        let song_count = results.len() as i32;
+        let song_count = i32::try_from(results.len()).unwrap_or(0);
         let total_duration: i32 = results.iter().map(|s| s.duration).sum();
 
         diesel::update(playlists::table.filter(playlists::id.eq(playlist_id)))
@@ -2696,7 +2711,8 @@ pub struct PlayQueueRepository {
 
 impl PlayQueueRepository {
     /// Create a new play queue repository.
-    pub fn new(pool: DbPool) -> Self {
+    #[must_use]
+    pub const fn new(pool: DbPool) -> Self {
         Self { pool }
     }
 
@@ -2715,10 +2731,7 @@ impl PlayQueueRepository {
             .first(&mut conn)
             .optional()?;
 
-        let queue = match queue {
-            Some(q) => q,
-            None => return Ok(None),
-        };
+        let Some(queue) = queue else { return Ok(None) };
 
         // Get the current song
         let current_song = if let Some(song_id) = queue.current_song_id {
@@ -2788,7 +2801,7 @@ impl PlayQueueRepository {
                     user_id,
                     current_song_id,
                     position,
-                    changed_by: changed_by.map(|s| s.to_string()),
+                    changed_by: changed_by.map(std::string::ToString::to_string),
                 };
 
                 diesel::insert_into(play_queue::table)
@@ -2813,7 +2826,7 @@ impl PlayQueueRepository {
             let new_song = NewPlayQueueSong {
                 play_queue_id: queue_id,
                 song_id: *song_id,
-                position: pos as i32,
+                position: i32::try_from(pos).unwrap_or(0),
             };
 
             diesel::insert_into(play_queue_songs::table)

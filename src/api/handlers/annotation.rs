@@ -1,4 +1,5 @@
 //! Annotation-related API handlers (star, unstar, getStarred2, scrobble, getNowPlaying, setRating, etc.)
+#![allow(clippy::unused_async)]
 
 use axum::extract::RawQuery;
 use axum::response::IntoResponse;
@@ -22,9 +23,7 @@ fn parse_repeated_param(query: &str, param_name: &str) -> Vec<String> {
         {
             // URL decode the value
             values.push(
-                urlencoding::decode(value)
-                    .map(|d| d.into_owned())
-                    .unwrap_or_else(|_| value.to_string()),
+                urlencoding::decode(value).map_or_else(|_| value.to_string(), std::borrow::Cow::into_owned),
             );
         }
     }
@@ -134,8 +133,12 @@ pub async fn get_starred2(auth: SubsonicAuth) -> impl IntoResponse {
     let artists: Vec<StarredArtistID3Response> = starred_artists
         .iter()
         .map(|(artist, starred_at)| {
-            let album_count = album_counts.get(&artist.id).copied().unwrap_or(0) as i32;
-            StarredArtistID3Response::from_artist_and_starred(artist, Some(album_count), starred_at)
+            let album_count = album_counts.get(&artist.id).copied().unwrap_or(0);
+            StarredArtistID3Response::from_artist_and_starred(
+                artist,
+                Some(i32::try_from(album_count).unwrap_or(0)),
+                starred_at,
+            )
         })
         .collect();
 
@@ -184,8 +187,7 @@ pub async fn scrobble(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl Int
     // Parse submission parameter (default is true)
     let submission = parse_repeated_param(&query, "submission")
         .first()
-        .map(|s| s != "false" && s != "0")
-        .unwrap_or(true);
+        .is_none_or(|s| s != "false" && s != "0");
 
     // Get player_id from the client identifier
     let player_id = if auth.params.c.is_empty() {
@@ -266,12 +268,9 @@ pub async fn set_rating(
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     // Validate required parameters
-    let id = match params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) {
-        Some(id) => id,
-        None => {
-            return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-                .into_response();
-        }
+    let Some(id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
+            .into_response();
     };
 
     let rating = match params.rating {

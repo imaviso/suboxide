@@ -2,3 +2,5 @@
 *.o
 *.db
 /open-subsonic-api
+subsonic.db-shm
+subsonic.db-wal

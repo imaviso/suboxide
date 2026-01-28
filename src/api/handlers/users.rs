@@ -1,4 +1,5 @@
 //! User management API handlers (getUser, getUsers, deleteUser, changePassword, createUser, updateUser)
+#![allow(clippy::unused_async)]
 
 use axum::response::IntoResponse;
 use serde::Deserialize;
@@ -6,7 +7,7 @@ use serde::Deserialize;
 use crate::api::auth::{AuthParams, SubsonicAuth};
 use crate::api::error::ApiError;
 use crate::api::response::{error_response, ok_empty, ok_user, ok_users};
-use crate::models::user::{UserResponse, UsersResponse};
+use crate::models::user::{UserResponse, UsersResponse, UserRoles};
 
 /// Query parameters for getUser.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -226,35 +227,26 @@ pub async fn create_user(
     let decoded_password = AuthParams::decode_password(password);
 
     // Apply default values per the Subsonic API spec
-    let admin_role = params.admin_role.unwrap_or(false);
-    let settings_role = params.settings_role.unwrap_or(true);
-    let stream_role = params.stream_role.unwrap_or(true);
-    let jukebox_role = params.jukebox_role.unwrap_or(false);
-    let download_role = params.download_role.unwrap_or(false);
-    let upload_role = params.upload_role.unwrap_or(false);
-    let playlist_role = params.playlist_role.unwrap_or(false);
-    let cover_art_role = params.cover_art_role.unwrap_or(false);
-    let comment_role = params.comment_role.unwrap_or(false);
-    let podcast_role = params.podcast_role.unwrap_or(false);
-    let share_role = params.share_role.unwrap_or(false);
-    let video_conversion_role = params.video_conversion_role.unwrap_or(false);
+    let roles = UserRoles {
+        admin_role: params.admin_role.unwrap_or(false),
+        settings_role: params.settings_role.unwrap_or(true),
+        stream_role: params.stream_role.unwrap_or(true),
+        jukebox_role: params.jukebox_role.unwrap_or(false),
+        download_role: params.download_role.unwrap_or(false),
+        upload_role: params.upload_role.unwrap_or(false),
+        playlist_role: params.playlist_role.unwrap_or(false),
+        cover_art_role: params.cover_art_role.unwrap_or(false),
+        comment_role: params.comment_role.unwrap_or(false),
+        podcast_role: params.podcast_role.unwrap_or(false),
+        share_role: params.share_role.unwrap_or(false),
+        video_conversion_role: params.video_conversion_role.unwrap_or(false),
+    };
 
     match auth.state.create_user(
         username,
         &decoded_password,
         email,
-        admin_role,
-        settings_role,
-        stream_role,
-        jukebox_role,
-        download_role,
-        upload_role,
-        playlist_role,
-        cover_art_role,
-        comment_role,
-        podcast_role,
-        share_role,
-        video_conversion_role,
+        roles,
     ) {
         Ok(_) => ok_empty(auth.format),
         Err(e) => error_response(auth.format, &ApiError::Generic(e)),

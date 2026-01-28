@@ -1,4 +1,5 @@
 //! Media retrieval handlers (stream, download, cover art).
+#![allow(clippy::unused_async)]
 
 use axum::{
     body::Body,
@@ -20,9 +21,7 @@ const COVER_ART_CACHE_DIR: &str = ".cache/subsonic/covers";
 
 /// Get the cover art cache directory path.
 fn get_cover_art_dir() -> std::path::PathBuf {
-    dirs::home_dir()
-        .map(|h| h.join(COVER_ART_CACHE_DIR))
-        .unwrap_or_else(|| std::path::PathBuf::from(COVER_ART_CACHE_DIR))
+    dirs::home_dir().map_or_else(|| std::path::PathBuf::from(COVER_ART_CACHE_DIR), |h| h.join(COVER_ART_CACHE_DIR))
 }
 
 /// Validate that a song's path is within one of the configured music folders.
@@ -32,9 +31,8 @@ fn validate_song_path(song: &Song, auth: &SubsonicAuth) -> Result<PathBuf, &'sta
     let song_path = Path::new(&song.path);
 
     // Canonicalize the song path to resolve any symlinks and ../ components
-    let canonical_path = match song_path.canonicalize() {
-        Ok(p) => p,
-        Err(_) => return Err("Audio file not found on disk"),
+    let Ok(canonical_path) = song_path.canonicalize() else {
+        return Err("Audio file not found on disk");
     };
 
     // Get all music folders and verify the song is within one of them
@@ -94,21 +92,15 @@ pub async fn stream(
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     // Get song ID
-    let song_id = match params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) {
-        Some(id) => id,
-        None => {
-            return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-                .into_response();
-        }
+    let Some(song_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
+            .into_response();
     };
 
     // Look up song in database
-    let song = match auth.state.get_song(song_id) {
-        Some(song) => song,
-        None => {
-            return error_response(auth.format, &ApiError::NotFound("Song not found".into()))
-                .into_response();
-        }
+    let Some(song) = auth.state.get_song(song_id) else {
+        return error_response(auth.format, &ApiError::NotFound("Song not found".into()))
+            .into_response();
     };
 
     // Check that user has stream permission
@@ -117,35 +109,27 @@ pub async fn stream(
     }
 
     // Validate the song path is within a music folder (prevents path traversal)
-    let path = match validate_song_path(&song, &auth) {
-        Ok(p) => p,
-        Err(msg) => {
-            return error_response(auth.format, &ApiError::NotFound(msg.into())).into_response();
-        }
+    let Ok(path) = validate_song_path(&song, &auth) else {
+        return error_response(auth.format, &ApiError::NotFound("Audio file not found".into()))
+            .into_response();
     };
 
     // Open the file
-    let file = match File::open(&path).await {
-        Ok(f) => f,
-        Err(_) => {
-            return error_response(
-                auth.format,
-                &ApiError::Generic("Failed to open audio file".into()),
-            )
-            .into_response();
-        }
+    let Ok(file) = File::open(&path).await else {
+        return error_response(
+            auth.format,
+            &ApiError::Generic("Failed to open audio file".into()),
+        )
+        .into_response();
     };
 
     // Get file metadata
-    let metadata = match file.metadata().await {
-        Ok(m) => m,
-        Err(_) => {
-            return error_response(
-                auth.format,
-                &ApiError::Generic("Failed to read file metadata".into()),
-            )
-            .into_response();
-        }
+    let Ok(metadata) = file.metadata().await else {
+        return error_response(
+            auth.format,
+            &ApiError::Generic("Failed to read file metadata".into()),
+        )
+        .into_response();
     };
 
     let file_size = metadata.len();
@@ -170,7 +154,7 @@ pub async fn stream(
                 if start >= file_size {
                     return (
                         StatusCode::RANGE_NOT_SATISFIABLE,
-                        [(header::CONTENT_RANGE, format!("bytes */{}", file_size))],
+                        [(header::CONTENT_RANGE, format!("bytes */{file_size}"))],
                     )
                         .into_response();
                 }
@@ -199,7 +183,7 @@ pub async fn stream(
                         (header::CONTENT_LENGTH, content_length.to_string()),
                         (
                             header::CONTENT_RANGE,
-                            format!("bytes {}-{}/{}", start, end, file_size),
+                            format!("bytes {start}-{end}/{file_size}"),
                         ),
                         (header::ACCEPT_RANGES, "bytes".to_string()),
                     ],
@@ -234,21 +218,15 @@ pub async fn download(
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     // Get song ID
-    let song_id = match params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) {
-        Some(id) => id,
-        None => {
-            return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-                .into_response();
-        }
+    let Some(song_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
+            .into_response();
     };
 
     // Look up song in database
-    let song = match auth.state.get_song(song_id) {
-        Some(song) => song,
-        None => {
-            return error_response(auth.format, &ApiError::NotFound("Song not found".into()))
-                .into_response();
-        }
+    let Some(song) = auth.state.get_song(song_id) else {
+        return error_response(auth.format, &ApiError::NotFound("Song not found".into()))
+            .into_response();
     };
 
     // Check that user has download permission
@@ -257,11 +235,9 @@ pub async fn download(
     }
 
     // Validate the song path is within a music folder (prevents path traversal)
-    let path = match validate_song_path(&song, &auth) {
-        Ok(p) => p,
-        Err(msg) => {
-            return error_response(auth.format, &ApiError::NotFound(msg.into())).into_response();
-        }
+    let Ok(path) = validate_song_path(&song, &auth) else {
+        return error_response(auth.format, &ApiError::NotFound("Audio file not found".into()))
+            .into_response();
     };
 
     // Get filename for Content-Disposition and sanitize it to prevent header injection
@@ -272,27 +248,21 @@ pub async fn download(
         .replace(['"', '\r', '\n'], "");
 
     // Open the file
-    let file = match File::open(&path).await {
-        Ok(f) => f,
-        Err(_) => {
-            return error_response(
-                auth.format,
-                &ApiError::Generic("Failed to open audio file".into()),
-            )
-            .into_response();
-        }
+    let Ok(file) = File::open(&path).await else {
+        return error_response(
+            auth.format,
+            &ApiError::Generic("Failed to open audio file".into()),
+        )
+        .into_response();
     };
 
     // Get file metadata
-    let metadata = match file.metadata().await {
-        Ok(m) => m,
-        Err(_) => {
-            return error_response(
-                auth.format,
-                &ApiError::Generic("Failed to read file metadata".into()),
-            )
-            .into_response();
-        }
+    let Ok(metadata) = file.metadata().await else {
+        return error_response(
+            auth.format,
+            &ApiError::Generic("Failed to read file metadata".into()),
+        )
+        .into_response();
     };
 
     let file_size = metadata.len();
@@ -309,7 +279,7 @@ pub async fn download(
             (header::CONTENT_LENGTH, file_size.to_string()),
             (
                 header::CONTENT_DISPOSITION,
-                format!("attachment; filename=\"{}\"", filename),
+                format!("attachment; filename=\"{filename}\""),
             ),
         ],
         body,
@@ -321,7 +291,7 @@ pub async fn download(
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 #[serde(default)]
 pub struct CoverArtParams {
-    /// The ID of the cover art to retrieve (the hash stored in album/song cover_art field).
+    /// The ID of the cover art to retrieve (the hash stored in album/song `cover_art` field).
     pub id: Option<String>,
     /// Requested size (width/height in pixels). Currently ignored - returns original size.
     pub size: Option<u32>,
@@ -339,12 +309,9 @@ pub async fn get_cover_art(
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     // Get cover art ID
-    let cover_art_id = match &params.id {
-        Some(id) if !id.is_empty() => id,
-        _ => {
-            return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-                .into_response();
-        }
+    let Some(cover_art_id) = params.id.as_ref().filter(|id| !id.is_empty()) else {
+        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
+            .into_response();
     };
 
     // Check that user has coverArt permission
@@ -361,10 +328,9 @@ pub async fn get_cover_art(
     let mut content_type = "image/jpeg";
 
     for ext in &extensions {
-        let path = cover_art_dir.join(format!("{}.{}", cover_art_id, ext));
+        let path = cover_art_dir.join(format!("{cover_art_id}.{ext}"));
         if path.exists() {
             content_type = match *ext {
-                "jpg" | "jpeg" => "image/jpeg",
                 "png" => "image/png",
                 "gif" => "image/gif",
                 "bmp" => "image/bmp",
@@ -376,39 +342,27 @@ pub async fn get_cover_art(
         }
     }
 
-    let path = match cover_art_path {
-        Some(p) => p,
-        None => {
-            return error_response(
-                auth.format,
-                &ApiError::NotFound("Cover art not found".into()),
-            )
+    let Some(path) = cover_art_path else {
+        return error_response(auth.format, &ApiError::NotFound("Cover art not found".into()))
             .into_response();
-        }
     };
 
     // Open the file
-    let file = match File::open(&path).await {
-        Ok(f) => f,
-        Err(_) => {
-            return error_response(
-                auth.format,
-                &ApiError::Generic("Failed to open cover art file".into()),
-            )
-            .into_response();
-        }
+    let Ok(file) = File::open(&path).await else {
+        return error_response(
+            auth.format,
+            &ApiError::Generic("Failed to open cover art file".into()),
+        )
+        .into_response();
     };
 
     // Get file metadata
-    let metadata = match file.metadata().await {
-        Ok(m) => m,
-        Err(_) => {
-            return error_response(
-                auth.format,
-                &ApiError::Generic("Failed to read file metadata".into()),
-            )
-            .into_response();
-        }
+    let Ok(metadata) = file.metadata().await else {
+        return error_response(
+            auth.format,
+            &ApiError::Generic("Failed to read file metadata".into()),
+        )
+        .into_response();
     };
 
     let file_size = metadata.len();

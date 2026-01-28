@@ -6,6 +6,7 @@ use crate::crypto::password::verify_password;
 
 /// User roles/permissions.
 #[derive(Debug, Clone, Default, Serialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct UserRoles {
     pub admin_role: bool,
     pub settings_role: bool,
@@ -31,9 +32,9 @@ pub struct User {
     /// Plaintext password stored for Subsonic token auth (MD5-based).
     /// This is needed because Subsonic's token auth requires: MD5(password + salt)
     /// where password is the original plaintext password.
-    /// In a more secure setup, you might store a separate "subsonic_token" field.
+    /// In a more secure setup, you might store a separate "`subsonic_token`" field.
     pub subsonic_password: Option<String>,
-    /// API key for OpenSubsonic apiKeyAuthentication extension.
+    /// API key for `OpenSubsonic` apiKeyAuthentication extension.
     pub api_key: Option<String>,
     pub email: Option<String>,
     pub roles: UserRoles,
@@ -43,11 +44,13 @@ pub struct User {
 
 impl User {
     /// Check if user is an admin.
-    pub fn is_admin(&self) -> bool {
+    #[must_use]
+    pub const fn is_admin(&self) -> bool {
         self.roles.admin_role
     }
 
     /// Verify password using Argon2.
+    #[must_use]
     pub fn verify_password(&self, password: &str) -> bool {
         verify_password(password, &self.password_hash).unwrap_or(false)
     }
@@ -58,10 +61,11 @@ impl User {
     /// Note: This requires storing the plaintext password or a dedicated token.
     /// For better security, consider using the password directly with Argon2
     /// and requiring clients to use the password auth method instead of tokens.
+    #[must_use]
     pub fn verify_token(&self, token: &str, salt: &str) -> bool {
         // Try using subsonic_password if available, otherwise fall back to
         // verifying against the provided token using a different approach
-        if let Some(ref password) = self.subsonic_password {
+        self.subsonic_password.as_ref().is_some_and(|password| {
             use md5::{Digest, Md5};
             let mut hasher = Md5::new();
             hasher.update(password.as_bytes());
@@ -69,15 +73,13 @@ impl User {
             let result = hasher.finalize();
             let expected_token = hex::encode(result);
             expected_token == token.to_lowercase()
-        } else {
-            // If no subsonic password stored, token auth is not available
-            false
-        }
+        })
     }
 }
 
 /// Subsonic API user response format.
 #[derive(Debug, Serialize, Clone)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct UserResponse {
     #[serde(rename = "@username")]
     pub username: String,

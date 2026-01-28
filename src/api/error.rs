@@ -1,8 +1,8 @@
 //! Subsonic API error codes and types.
 //!
 //! Error codes are defined by the Subsonic API specification.
-//! See: http://www.subsonic.org/pages/api.jsp
-//! OpenSubsonic extensions add additional error codes.
+//! See: <http://www.subsonic.org/pages/api.jsp>
+//! `OpenSubsonic` extensions add additional error codes.
 
 use axum::response::{IntoResponse, Response};
 use thiserror::Error;
@@ -11,7 +11,7 @@ use super::response::{Format, error_response};
 
 /// Subsonic API error codes.
 /// These are defined by the Subsonic API specification.
-/// OpenSubsonic extensions add codes 42-44.
+/// `OpenSubsonic` extensions add codes 42-44.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub enum ErrorCode {
@@ -27,11 +27,11 @@ pub enum ErrorCode {
     WrongCredentials = 40,
     /// Token authentication not supported for LDAP users.
     TokenAuthNotSupported = 41,
-    /// [OpenSubsonic] Provided authentication mechanism not supported.
+    /// [`OpenSubsonic`] Provided authentication mechanism not supported.
     AuthMechanismNotSupported = 42,
-    /// [OpenSubsonic] Multiple conflicting authentication mechanisms provided.
+    /// [`OpenSubsonic`] Multiple conflicting authentication mechanisms provided.
     ConflictingAuthMechanisms = 43,
-    /// [OpenSubsonic] API key not valid.
+    /// [`OpenSubsonic`] API key not valid.
     InvalidApiKey = 44,
     /// User is not authorized for the given operation.
     NotAuthorized = 50,
@@ -83,24 +83,26 @@ pub enum ApiError {
 
 impl ApiError {
     /// Get the Subsonic error code for this error.
-    pub fn code(&self) -> u32 {
+    #[must_use] 
+    pub const fn code(&self) -> u32 {
         match self {
-            ApiError::Generic(_) => ErrorCode::Generic as u32,
-            ApiError::MissingParameter(_) => ErrorCode::MissingParameter as u32,
-            ApiError::ClientTooOld => ErrorCode::ClientTooOld as u32,
-            ApiError::ServerTooOld => ErrorCode::ServerTooOld as u32,
-            ApiError::WrongCredentials => ErrorCode::WrongCredentials as u32,
-            ApiError::TokenAuthNotSupported => ErrorCode::TokenAuthNotSupported as u32,
-            ApiError::AuthMechanismNotSupported => ErrorCode::AuthMechanismNotSupported as u32,
-            ApiError::ConflictingAuthMechanisms => ErrorCode::ConflictingAuthMechanisms as u32,
-            ApiError::InvalidApiKey => ErrorCode::InvalidApiKey as u32,
-            ApiError::NotAuthorized => ErrorCode::NotAuthorized as u32,
-            ApiError::TrialExpired => ErrorCode::TrialExpired as u32,
-            ApiError::NotFound(_) => ErrorCode::NotFound as u32,
+            Self::Generic(_) => ErrorCode::Generic as u32,
+            Self::MissingParameter(_) => ErrorCode::MissingParameter as u32,
+            Self::ClientTooOld => ErrorCode::ClientTooOld as u32,
+            Self::ServerTooOld => ErrorCode::ServerTooOld as u32,
+            Self::WrongCredentials => ErrorCode::WrongCredentials as u32,
+            Self::TokenAuthNotSupported => ErrorCode::TokenAuthNotSupported as u32,
+            Self::AuthMechanismNotSupported => ErrorCode::AuthMechanismNotSupported as u32,
+            Self::ConflictingAuthMechanisms => ErrorCode::ConflictingAuthMechanisms as u32,
+            Self::InvalidApiKey => ErrorCode::InvalidApiKey as u32,
+            Self::NotAuthorized => ErrorCode::NotAuthorized as u32,
+            Self::TrialExpired => ErrorCode::TrialExpired as u32,
+            Self::NotFound(_) => ErrorCode::NotFound as u32,
         }
     }
 
     /// Get the error message.
+    #[must_use] 
     pub fn message(&self) -> String {
         self.to_string()
     }

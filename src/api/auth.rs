@@ -42,6 +42,7 @@ use crate::db::{
     UserUpdate,
 };
 use crate::models::User;
+use crate::models::user::UserRoles;
 use crate::models::music::{Album, Artist, MusicFolder, Song};
 use crate::scanner::ScanState;
 use crate::scanner::lyrics::ExtractedLyrics;
@@ -131,11 +132,11 @@ pub trait AuthState: Send + Sync + 'static {
     fn get_starred_albums(&self, user_id: i32) -> Vec<(Album, NaiveDateTime)>;
     /// Get all starred songs for a user.
     fn get_starred_songs(&self, user_id: i32) -> Vec<(Song, NaiveDateTime)>;
-    /// Get the starred_at timestamp for an artist.
+    /// Get the `starred_at` timestamp for an artist.
     fn get_starred_at_for_artist(&self, user_id: i32, artist_id: i32) -> Option<NaiveDateTime>;
-    /// Get the starred_at timestamp for an album.
+    /// Get the `starred_at` timestamp for an album.
     fn get_starred_at_for_album(&self, user_id: i32, album_id: i32) -> Option<NaiveDateTime>;
-    /// Get the starred_at timestamp for a song.
+    /// Get the `starred_at` timestamp for a song.
     fn get_starred_at_for_song(&self, user_id: i32, song_id: i32) -> Option<NaiveDateTime>;
 
     // Batch query methods (to fix N+1 queries)
@@ -144,19 +145,19 @@ pub trait AuthState: Send + Sync + 'static {
         &self,
         artist_ids: &[i32],
     ) -> std::collections::HashMap<i32, i64>;
-    /// Get starred_at timestamps for multiple songs in a single query.
+    /// Get `starred_at` timestamps for multiple songs in a single query.
     fn get_starred_at_for_songs_batch(
         &self,
         user_id: i32,
         song_ids: &[i32],
     ) -> std::collections::HashMap<i32, NaiveDateTime>;
-    /// Get starred_at timestamps for multiple albums in a single query.
+    /// Get `starred_at` timestamps for multiple albums in a single query.
     fn get_starred_at_for_albums_batch(
         &self,
         user_id: i32,
         album_ids: &[i32],
     ) -> std::collections::HashMap<i32, NaiveDateTime>;
-    /// Get starred_at timestamps for multiple artists in a single query.
+    /// Get `starred_at` timestamps for multiple artists in a single query.
     fn get_starred_at_for_artists_batch(
         &self,
         user_id: i32,
@@ -282,24 +283,12 @@ pub trait AuthState: Send + Sync + 'static {
     /// Change a user's password.
     fn change_password(&self, username: &str, new_password: &str) -> Result<(), String>;
     /// Create a new user.
-    #[allow(clippy::too_many_arguments)]
     fn create_user(
         &self,
         username: &str,
         password: &str,
         email: &str,
-        admin_role: bool,
-        settings_role: bool,
-        stream_role: bool,
-        jukebox_role: bool,
-        download_role: bool,
-        upload_role: bool,
-        playlist_role: bool,
-        cover_art_role: bool,
-        comment_role: bool,
-        podcast_role: bool,
-        share_role: bool,
-        video_conversion_role: bool,
+        roles: UserRoles,
     ) -> Result<User, String>;
     /// Update an existing user.
     #[allow(clippy::too_many_arguments)]
@@ -350,7 +339,7 @@ pub struct AuthParams {
     /// Salt used to generate the token
     #[serde(alias = "s")]
     pub s: Option<String>,
-    /// API key (OpenSubsonic extension)
+    /// API key (`OpenSubsonic` extension)
     #[serde(alias = "apiKey")]
     pub api_key: Option<String>,
     /// Client API version
@@ -366,26 +355,29 @@ pub struct AuthParams {
 
 impl AuthParams {
     /// Get the response format.
+    #[must_use] 
     pub fn format(&self) -> Format {
         Format::from_param(self.f.as_deref())
     }
 
     /// Decode password if it's hex-encoded (prefixed with "enc:").
+    #[must_use] 
     pub fn decode_password(password: &str) -> String {
-        if let Some(hex_encoded) = password.strip_prefix("enc:") {
-            // Decode hex to bytes, then to UTF-8 string
-            hex::decode(hex_encoded)
-                .ok()
-                .and_then(|bytes| String::from_utf8(bytes).ok())
-                .unwrap_or_else(|| password.to_string())
-        } else {
-            password.to_string()
-        }
+        password.strip_prefix("enc:").map_or_else(
+            || password.to_string(),
+            |hex_encoded| {
+                hex::decode(hex_encoded)
+                    .ok()
+                    .and_then(|bytes| String::from_utf8(bytes).ok())
+                    .unwrap_or_else(|| password.to_string())
+            },
+        )
     }
 
-    /// Merge with another AuthParams, taking non-empty values from self.
+    /// Merge with another `AuthParams`, taking non-empty values from self.
     /// This is used to combine query params (higher priority) with form params.
-    pub fn merge_with(mut self, other: AuthParams) -> Self {
+    #[must_use] 
+    pub fn merge_with(mut self, other: Self) -> Self {
         if self.u.is_empty() {
             self.u = other.u;
         }
@@ -414,12 +406,14 @@ impl AuthParams {
     }
 
     /// Check if API key auth is being used.
-    pub fn uses_api_key(&self) -> bool {
+    #[must_use] 
+    pub const fn uses_api_key(&self) -> bool {
         self.api_key.is_some()
     }
 
     /// Check if username/password auth is being used.
-    pub fn uses_user_auth(&self) -> bool {
+    #[must_use] 
+    pub const fn uses_user_auth(&self) -> bool {
         !self.u.is_empty() || self.p.is_some() || self.t.is_some()
     }
 }
@@ -467,6 +461,7 @@ where
 {
     type Rejection = AuthError;
 
+    #[allow(clippy::too_many_lines)]
     async fn from_request(req: Request<Body>, state: &S) -> Result<Self, Self::Rejection> {
         let is_post = req.method() == Method::POST;
 
@@ -548,7 +543,7 @@ where
                 format,
             })?;
 
-            Ok(SubsonicAuth {
+            Ok(Self {
                 user,
                 format,
                 params,
@@ -588,7 +583,7 @@ where
             };
 
             if authenticated {
-                Ok(SubsonicAuth {
+                Ok(Self {
                     user,
                     format,
                     params,
@@ -606,7 +601,7 @@ where
 
 /// Database-backed authentication state.
 ///
-/// Uses the user repository to look up users from SQLite.
+/// Uses the user repository to look up users from `SQLite`.
 #[derive(Clone)]
 pub struct DatabaseAuthState {
     pool: DbPool,
@@ -626,6 +621,7 @@ pub struct DatabaseAuthState {
 
 impl DatabaseAuthState {
     /// Create a new database auth state with its own scan state.
+    #[must_use] 
     pub fn new(pool: DbPool) -> Self {
         Self::with_scan_state(pool, Arc::new(ScanState::new()))
     }
@@ -650,12 +646,14 @@ impl DatabaseAuthState {
     }
 
     /// Get a reference to the user repository.
-    pub fn user_repo(&self) -> &UserRepository {
+    #[must_use] 
+    pub const fn user_repo(&self) -> &UserRepository {
         &self.user_repo
     }
 
     /// Get a reference to the music folder repository.
-    pub fn music_folder_repo(&self) -> &MusicFolderRepository {
+    #[must_use] 
+    pub const fn music_folder_repo(&self) -> &MusicFolderRepository {
         &self.music_folder_repo
     }
 }
@@ -1120,7 +1118,7 @@ impl AuthState for DatabaseAuthState {
             .user_repo
             .find_by_username(username)
             .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("User '{}' not found", username))?;
+            .ok_or_else(|| format!("User '{username}' not found"))?;
         self.user_repo.delete(user.id).map_err(|e| e.to_string())
     }
 
@@ -1129,7 +1127,7 @@ impl AuthState for DatabaseAuthState {
             .user_repo
             .find_by_username(username)
             .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("User '{}' not found", username))?;
+            .ok_or_else(|| format!("User '{username}' not found"))?;
 
         let password_hash = hash_password(new_password).map_err(|e| e.to_string())?;
 
@@ -1150,18 +1148,7 @@ impl AuthState for DatabaseAuthState {
         username: &str,
         password: &str,
         email: &str,
-        admin_role: bool,
-        settings_role: bool,
-        stream_role: bool,
-        jukebox_role: bool,
-        download_role: bool,
-        upload_role: bool,
-        playlist_role: bool,
-        cover_art_role: bool,
-        comment_role: bool,
-        podcast_role: bool,
-        share_role: bool,
-        video_conversion_role: bool,
+        roles: UserRoles,
     ) -> Result<User, String> {
         let password_hash = hash_password(password).map_err(|e| e.to_string())?;
 
@@ -1170,18 +1157,18 @@ impl AuthState for DatabaseAuthState {
             password_hash: &password_hash,
             subsonic_password: Some(password),
             email: Some(email),
-            admin_role,
-            settings_role,
-            stream_role,
-            jukebox_role,
-            download_role,
-            upload_role,
-            playlist_role,
-            cover_art_role,
-            comment_role,
-            podcast_role,
-            share_role,
-            video_conversion_role,
+            admin_role: roles.admin_role,
+            settings_role: roles.settings_role,
+            stream_role: roles.stream_role,
+            jukebox_role: roles.jukebox_role,
+            download_role: roles.download_role,
+            upload_role: roles.upload_role,
+            playlist_role: roles.playlist_role,
+            cover_art_role: roles.cover_art_role,
+            comment_role: roles.comment_role,
+            podcast_role: roles.podcast_role,
+            share_role: roles.share_role,
+            video_conversion_role: roles.video_conversion_role,
             max_bit_rate: 0,
         };
 
@@ -1215,7 +1202,7 @@ impl AuthState for DatabaseAuthState {
         // Build update struct
         let update = UserUpdate {
             username: username.to_string(),
-            email: email.map(|e| e.to_string()),
+            email: email.map(std::string::ToString::to_string),
             admin_role,
             settings_role,
             stream_role,
@@ -1267,9 +1254,8 @@ impl AuthState for DatabaseAuthState {
         use std::path::Path;
 
         // Get the song to find its file path
-        let song = match self.get_song(song_id) {
-            Some(s) => s,
-            None => return Vec::new(),
+        let Some(song) = self.get_song(song_id) else {
+            return Vec::new();
         };
 
         // Extract lyrics from the audio file

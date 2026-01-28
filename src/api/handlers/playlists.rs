@@ -1,4 +1,5 @@
 //! Playlist-related API handlers (getPlaylists, getPlaylist, createPlaylist, updatePlaylist, deletePlaylist)
+#![allow(clippy::unused_async)]
 
 use axum::extract::RawQuery;
 use axum::response::IntoResponse;
@@ -21,9 +22,7 @@ fn parse_repeated_param(query: &str, param_name: &str) -> Vec<String> {
         {
             // URL decode the value
             values.push(
-                urlencoding::decode(value)
-                    .map(|d| d.into_owned())
-                    .unwrap_or_else(|_| value.to_string()),
+                urlencoding::decode(value).map_or_else(|_| value.to_string(), std::borrow::Cow::into_owned),
             );
         }
     }
@@ -97,21 +96,15 @@ pub async fn get_playlist(
     axum::extract::Query(params): axum::extract::Query<GetPlaylistParams>,
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
-    let playlist_id = match params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) {
-        Some(id) => id,
-        None => {
-            return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-                .into_response();
-        }
+    let Some(playlist_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
+            .into_response();
     };
 
     // Get the playlist
-    let playlist = match auth.state.get_playlist(playlist_id) {
-        Some(p) => p,
-        None => {
-            return error_response(auth.format, &ApiError::NotFound("Playlist".into()))
-                .into_response();
-        }
+    let Some(playlist) = auth.state.get_playlist(playlist_id) else {
+        return error_response(auth.format, &ApiError::NotFound("Playlist".into()))
+            .into_response();
     };
 
     // Check access: user must own the playlist or it must be public
@@ -182,6 +175,7 @@ pub struct CreatePlaylistParams {
 /// - `playlistId`: The playlist ID (if updating an existing playlist)
 /// - `name`: The playlist name (required if creating a new playlist)
 /// - `songId`: ID of a song to add (can be repeated)
+#[allow(clippy::too_many_lines)]
 pub async fn create_playlist(
     RawQuery(query): RawQuery,
     axum::extract::Query(params): axum::extract::Query<CreatePlaylistParams>,
@@ -199,15 +193,12 @@ pub async fn create_playlist(
     // Check if we're updating an existing playlist or creating a new one
     if let Some(playlist_id_str) = params.playlist_id.as_ref() {
         // Update existing playlist
-        let playlist_id = match playlist_id_str.parse::<i32>() {
-            Ok(id) => id,
-            Err(_) => {
-                return error_response(
-                    auth.format,
-                    &ApiError::Generic("Invalid playlistId".into()),
-                )
-                .into_response();
-            }
+        let Ok(playlist_id) = playlist_id_str.parse::<i32>() else {
+            return error_response(
+                auth.format,
+                &ApiError::Generic("Invalid playlistId".into()),
+            )
+            .into_response();
         };
 
         // Check ownership
@@ -366,19 +357,16 @@ pub async fn update_playlist(
     let query = query.unwrap_or_default();
     let user_id = auth.user.id;
 
-    let playlist_id = match params
+    let Some(playlist_id) = params
         .playlist_id
         .as_ref()
         .and_then(|id| id.parse::<i32>().ok())
-    {
-        Some(id) => id,
-        None => {
-            return error_response(
-                auth.format,
-                &ApiError::MissingParameter("playlistId".into()),
-            )
-            .into_response();
-        }
+    else {
+        return error_response(
+            auth.format,
+            &ApiError::MissingParameter("playlistId".into()),
+        )
+        .into_response();
     };
 
     // Check ownership
@@ -427,12 +415,9 @@ pub async fn delete_playlist(
     axum::extract::Query(params): axum::extract::Query<DeletePlaylistParams>,
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
-    let playlist_id = match params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) {
-        Some(id) => id,
-        None => {
-            return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-                .into_response();
-        }
+    let Some(playlist_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
+            .into_response();
     };
 
     let user_id = auth.user.id;

@@ -97,6 +97,7 @@ pub struct ArtistID3Response {
 }
 
 impl ArtistID3Response {
+    #[must_use]
     pub fn from_artist(artist: &Artist, album_count: Option<i32>) -> Self {
         Self {
             id: artist.id.to_string(),
@@ -110,6 +111,7 @@ impl ArtistID3Response {
         }
     }
 
+    #[must_use]
     pub fn from_artist_with_starred(
         artist: &Artist,
         album_count: Option<i32>,
@@ -199,6 +201,7 @@ impl From<&Album> for AlbumID3Response {
 }
 
 impl AlbumID3Response {
+    #[must_use]
     pub fn from_album_with_starred(album: &Album, starred_at: Option<&NaiveDateTime>) -> Self {
         Self {
             id: album.id.to_string(),
@@ -343,6 +346,7 @@ impl From<&Song> for ChildResponse {
 }
 
 impl ChildResponse {
+    #[must_use]
     pub fn from_song_with_starred(song: &Song, starred_at: Option<&NaiveDateTime>) -> Self {
         Self {
             id: song.id.to_string(),
@@ -445,6 +449,7 @@ pub struct AlbumWithSongsID3Response {
 }
 
 impl AlbumWithSongsID3Response {
+    #[must_use]
     pub fn from_album_and_songs(album: &Album, songs: Vec<ChildResponse>) -> Self {
         Self {
             id: album.id.to_string(),
@@ -466,6 +471,7 @@ impl AlbumWithSongsID3Response {
         }
     }
 
+    #[must_use]
     pub fn from_album_and_songs_with_starred(
         album: &Album,
         songs: Vec<ChildResponse>,
@@ -516,13 +522,14 @@ pub struct ArtistWithAlbumsID3Response {
 }
 
 impl ArtistWithAlbumsID3Response {
+    #[must_use]
     pub fn from_artist_and_albums(artist: &Artist, albums: Vec<AlbumID3Response>) -> Self {
         Self {
             id: artist.id.to_string(),
             name: artist.name.clone(),
             cover_art: artist.cover_art.clone(),
             artist_image_url: artist.artist_image_url.clone(),
-            album_count: Some(albums.len() as i32),
+            album_count: Some(i32::try_from(albums.len()).unwrap_or(0)),
             starred: None,
             musicbrainz_id: artist.musicbrainz_id.clone(),
             sort_name: artist.sort_name.clone(),
@@ -530,6 +537,7 @@ impl ArtistWithAlbumsID3Response {
         }
     }
 
+    #[must_use]
     pub fn from_artist_and_albums_with_starred(
         artist: &Artist,
         albums: Vec<AlbumID3Response>,
@@ -540,7 +548,7 @@ impl ArtistWithAlbumsID3Response {
             name: artist.name.clone(),
             cover_art: artist.cover_art.clone(),
             artist_image_url: artist.artist_image_url.clone(),
-            album_count: Some(albums.len() as i32),
+            album_count: Some(i32::try_from(albums.len()).unwrap_or(0)),
             starred: starred_at.map(|dt| dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()),
             musicbrainz_id: artist.musicbrainz_id.clone(),
             sort_name: artist.sort_name.clone(),
@@ -682,7 +690,7 @@ pub struct SearchResult3Response {
 // Response types for starred (getStarred2)
 // ============================================================================
 
-/// ChildResponse with starred timestamp for getStarred2.
+/// `ChildResponse` with starred timestamp for getStarred2.
 #[derive(Debug, Serialize, Clone)]
 pub struct StarredChildResponse {
     #[serde(rename = "@id")]
@@ -740,6 +748,7 @@ pub struct StarredChildResponse {
 }
 
 impl StarredChildResponse {
+    #[must_use]
     pub fn from_song_and_starred(song: &Song, starred_at: &chrono::NaiveDateTime) -> Self {
         Self {
             id: song.id.to_string(),
@@ -772,7 +781,7 @@ impl StarredChildResponse {
     }
 }
 
-/// ArtistID3Response with starred timestamp for getStarred2.
+/// `ArtistID3Response` with starred timestamp for getStarred2.
 #[derive(Debug, Serialize, Clone)]
 pub struct StarredArtistID3Response {
     #[serde(rename = "@id")]
@@ -794,6 +803,7 @@ pub struct StarredArtistID3Response {
 }
 
 impl StarredArtistID3Response {
+    #[must_use]
     pub fn from_artist_and_starred(
         artist: &Artist,
         album_count: Option<i32>,
@@ -812,7 +822,7 @@ impl StarredArtistID3Response {
     }
 }
 
-/// AlbumID3Response with starred timestamp for getStarred2.
+/// `AlbumID3Response` with starred timestamp for getStarred2.
 #[derive(Debug, Serialize, Clone)]
 pub struct StarredAlbumID3Response {
     #[serde(rename = "@id")]
@@ -842,6 +852,7 @@ pub struct StarredAlbumID3Response {
 }
 
 impl StarredAlbumID3Response {
+    #[must_use]
     pub fn from_album_and_starred(album: &Album, starred_at: &chrono::NaiveDateTime) -> Self {
         Self {
             id: album.id.to_string(),
@@ -929,6 +940,7 @@ pub struct NowPlayingEntryResponse {
 }
 
 impl NowPlayingEntryResponse {
+    #[must_use]
     pub fn from_now_playing(
         song: &Song,
         username: String,
@@ -1071,7 +1083,7 @@ pub struct PlayQueueResponse {
     pub entries: Vec<ChildResponse>,
 }
 
-/// Play queue by index response for getPlayQueueByIndex (OpenSubsonic).
+/// Play queue by index response for getPlayQueueByIndex (`OpenSubsonic`).
 /// Uses currentIndex instead of current (song ID).
 #[derive(Debug, Serialize, Clone)]
 pub struct PlayQueueByIndexResponse {
@@ -1089,7 +1101,7 @@ pub struct PlayQueueByIndexResponse {
     pub entries: Vec<ChildResponse>,
 }
 
-/// Token info response for tokenInfo (OpenSubsonic).
+/// Token info response for tokenInfo (`OpenSubsonic`).
 /// Returns information about the API key used for authentication.
 #[derive(Debug, Serialize, Clone)]
 pub struct TokenInfoResponse {
@@ -1122,7 +1134,8 @@ pub struct ArtistInfo2Response {
 
 impl ArtistInfo2Response {
     /// Create an empty artist info response (stub).
-    pub fn empty() -> Self {
+    #[must_use]
+    pub const fn empty() -> Self {
         Self {
             biography: None,
             musicbrainz_id: None,
@@ -1134,7 +1147,8 @@ impl ArtistInfo2Response {
         }
     }
 
-    /// Create an artist info response with musicbrainz_id from the artist.
+    /// Create an artist info response with `musicbrainz_id` from the artist.
+    #[must_use]
     pub fn from_artist(artist: &Artist) -> Self {
         Self {
             biography: None,
@@ -1167,7 +1181,8 @@ pub struct AlbumInfoResponse {
 
 impl AlbumInfoResponse {
     /// Create an empty album info response (stub).
-    pub fn empty() -> Self {
+    #[must_use]
+    pub const fn empty() -> Self {
         Self {
             notes: None,
             musicbrainz_id: None,
@@ -1179,6 +1194,7 @@ impl AlbumInfoResponse {
     }
 
     /// Create an album info response with data from the album.
+    #[must_use]
     pub fn from_album(album: &Album) -> Self {
         Self {
             notes: None,
@@ -1218,7 +1234,8 @@ pub struct LyricsResponse {
 
 impl LyricsResponse {
     /// Create an empty lyrics response.
-    pub fn empty() -> Self {
+    #[must_use]
+    pub const fn empty() -> Self {
         Self {
             artist: None,
             title: None,
@@ -1227,7 +1244,12 @@ impl LyricsResponse {
     }
 
     /// Create a lyrics response with data.
-    pub fn new(artist: Option<String>, title: Option<String>, lyrics: Option<String>) -> Self {
+    #[must_use]
+    pub const fn new(
+        artist: Option<String>,
+        title: Option<String>,
+        lyrics: Option<String>,
+    ) -> Self {
         Self {
             artist,
             title,
@@ -1321,25 +1343,28 @@ impl StructuredLyrics {
     }
 
     /// Set the display artist.
+    #[must_use]
     pub fn with_display_artist(mut self, artist: impl Into<String>) -> Self {
         self.display_artist = Some(artist.into());
         self
     }
 
     /// Set the display title.
+    #[must_use]
     pub fn with_display_title(mut self, title: impl Into<String>) -> Self {
         self.display_title = Some(title.into());
         self
     }
 
     /// Set the offset.
-    pub fn with_offset(mut self, offset: i64) -> Self {
+    #[must_use]
+    pub const fn with_offset(mut self, offset: i64) -> Self {
         self.offset = Some(offset);
         self
     }
 }
 
-/// Lyrics list response for getLyricsBySongId (OpenSubsonic extension).
+/// Lyrics list response for getLyricsBySongId (`OpenSubsonic` extension).
 #[derive(Debug, Serialize, Clone)]
 pub struct LyricsListResponse {
     /// Array of structured lyrics. May have multiple entries for different languages.
@@ -1349,14 +1374,16 @@ pub struct LyricsListResponse {
 
 impl LyricsListResponse {
     /// Create an empty lyrics list response.
-    pub fn empty() -> Self {
+    #[must_use]
+    pub const fn empty() -> Self {
         Self {
             structured_lyrics: Vec::new(),
         }
     }
 
     /// Create a lyrics list response with structured lyrics.
-    pub fn new(structured_lyrics: Vec<StructuredLyrics>) -> Self {
+    #[must_use]
+    pub const fn new(structured_lyrics: Vec<StructuredLyrics>) -> Self {
         Self { structured_lyrics }
     }
 }
@@ -1384,6 +1411,7 @@ pub struct DirectoryResponse {
 
 impl DirectoryResponse {
     /// Create a directory response from a music folder.
+    #[must_use]
     pub fn from_music_folder(folder: &MusicFolder, children: Vec<ChildResponse>) -> Self {
         Self {
             id: folder.id.to_string(),
@@ -1396,6 +1424,7 @@ impl DirectoryResponse {
     }
 
     /// Create a directory response from an artist.
+    #[must_use]
     pub fn from_artist(artist: &Artist, children: Vec<ChildResponse>) -> Self {
         Self {
             id: artist.id.to_string(),
@@ -1408,6 +1437,7 @@ impl DirectoryResponse {
     }
 
     /// Create a directory response from an album.
+    #[must_use]
     pub fn from_album(album: &Album, children: Vec<ChildResponse>) -> Self {
         Self {
             id: album.id.to_string(),
@@ -1422,6 +1452,7 @@ impl DirectoryResponse {
 
 impl ChildResponse {
     /// Create a child response representing an artist (as directory).
+    #[must_use]
     pub fn from_artist_as_dir(artist: &Artist) -> Self {
         Self {
             id: artist.id.to_string(),
@@ -1459,6 +1490,7 @@ impl ChildResponse {
     }
 
     /// Create a child response representing an album (as directory).
+    #[must_use]
     pub fn from_album_as_dir(album: &Album) -> Self {
         Self {
             id: album.id.to_string(),
@@ -1524,6 +1556,7 @@ pub struct StarredResponse {
 
 impl ArtistResponse {
     /// Create an artist response with starred timestamp.
+    #[must_use]
     pub fn from_artist_with_starred(
         artist: &Artist,
         starred_at: Option<&chrono::NaiveDateTime>,
@@ -1657,6 +1690,7 @@ pub struct ArtistInfoResponse {
 
 impl ArtistInfoResponse {
     /// Create an artist info response from an artist.
+    #[must_use]
     pub fn from_artist(artist: &Artist) -> Self {
         Self {
             biography: None,

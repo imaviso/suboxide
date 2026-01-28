@@ -1,4 +1,5 @@
 //! Play queue API handlers (getPlayQueue, savePlayQueue, getPlayQueueByIndex, savePlayQueueByIndex)
+#![allow(clippy::unused_async)]
 
 use axum::extract::RawQuery;
 use axum::response::IntoResponse;
@@ -17,9 +18,7 @@ fn parse_repeated_param(query: &str, param_name: &str) -> Vec<String> {
         {
             // URL decode the value
             values.push(
-                urlencoding::decode(value)
-                    .map(|d| d.into_owned())
-                    .unwrap_or_else(|_| value.to_string()),
+                urlencoding::decode(value).map_or_else(|_| value.to_string(), std::borrow::Cow::into_owned),
             );
         }
     }
@@ -33,52 +32,49 @@ pub async fn get_play_queue(auth: SubsonicAuth) -> impl IntoResponse {
     let user_id = auth.user.id;
     let username = &auth.user.username;
 
-    match auth.state.get_play_queue(user_id, username) {
-        Some(play_queue) => {
-            // Batch fetch starred status for all songs
-            let song_ids: Vec<i32> = play_queue.songs.iter().map(|s| s.id).collect();
-            let starred_map = auth
-                .state
-                .get_starred_at_for_songs_batch(user_id, &song_ids);
+    if let Some(play_queue) = auth.state.get_play_queue(user_id, username) {
+        // Batch fetch starred status for all songs
+        let song_ids: Vec<i32> = play_queue.songs.iter().map(|s| s.id).collect();
+        let starred_map = auth
+            .state
+            .get_starred_at_for_songs_batch(user_id, &song_ids);
 
-            let song_responses: Vec<ChildResponse> = play_queue
-                .songs
-                .iter()
-                .map(|s| {
-                    let starred_at = starred_map.get(&s.id);
-                    ChildResponse::from_song_with_starred(s, starred_at)
-                })
-                .collect();
+        let song_responses: Vec<ChildResponse> = play_queue
+            .songs
+            .iter()
+            .map(|s| {
+                let starred_at = starred_map.get(&s.id);
+                ChildResponse::from_song_with_starred(s, starred_at)
+            })
+            .collect();
 
-            let response = PlayQueueResponse {
-                current: play_queue.current_song.as_ref().map(|s| s.id.to_string()),
-                position: play_queue.position,
-                username: play_queue.username.clone(),
-                changed: play_queue
-                    .changed_at
-                    .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                    .to_string(),
-                changed_by: play_queue.changed_by.clone(),
-                entries: song_responses,
-            };
+        let response = PlayQueueResponse {
+            current: play_queue.current_song.as_ref().map(|s| s.id.to_string()),
+            position: play_queue.position,
+            username: play_queue.username.clone(),
+            changed: play_queue
+                .changed_at
+                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                .to_string(),
+            changed_by: play_queue.changed_by.clone(),
+            entries: song_responses,
+        };
 
-            ok_play_queue(auth.format, response)
-        }
-        None => {
-            // Return empty play queue
-            let response = PlayQueueResponse {
-                current: None,
-                position: None,
-                username: username.clone(),
-                changed: chrono::Utc::now()
-                    .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                    .to_string(),
-                changed_by: None,
-                entries: vec![],
-            };
+        ok_play_queue(auth.format, response)
+    } else {
+        // Return empty play queue
+        let response = PlayQueueResponse {
+            current: None,
+            position: None,
+            username: username.clone(),
+            changed: chrono::Utc::now()
+                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                .to_string(),
+            changed_by: None,
+            entries: vec![],
+        };
 
-            ok_play_queue(auth.format, response)
-        }
+        ok_play_queue(auth.format, response)
     }
 }
 
@@ -131,73 +127,70 @@ pub async fn save_play_queue(RawQuery(query): RawQuery, auth: SubsonicAuth) -> i
 /// GET/POST /rest/getPlayQueueByIndex[.view]
 ///
 /// Returns the current play queue for the user using queue index instead of song ID.
-/// This is an OpenSubsonic extension.
+/// This is an `OpenSubsonic` extension.
 pub async fn get_play_queue_by_index(auth: SubsonicAuth) -> impl IntoResponse {
     let user_id = auth.user.id;
     let username = &auth.user.username;
 
-    match auth.state.get_play_queue(user_id, username) {
-        Some(play_queue) => {
-            // Batch fetch starred status for all songs
-            let song_ids: Vec<i32> = play_queue.songs.iter().map(|s| s.id).collect();
-            let starred_map = auth
-                .state
-                .get_starred_at_for_songs_batch(user_id, &song_ids);
+    if let Some(play_queue) = auth.state.get_play_queue(user_id, username) {
+        // Batch fetch starred status for all songs
+        let song_ids: Vec<i32> = play_queue.songs.iter().map(|s| s.id).collect();
+        let starred_map = auth
+            .state
+            .get_starred_at_for_songs_batch(user_id, &song_ids);
 
-            let song_responses: Vec<ChildResponse> = play_queue
+        let song_responses: Vec<ChildResponse> = play_queue
+            .songs
+            .iter()
+            .map(|s| {
+                let starred_at = starred_map.get(&s.id);
+                ChildResponse::from_song_with_starred(s, starred_at)
+            })
+            .collect();
+
+        // Calculate current_index by finding the position of the current song in the queue
+        let current_index = play_queue.current_song.as_ref().and_then(|current_song| {
+            play_queue
                 .songs
                 .iter()
-                .map(|s| {
-                    let starred_at = starred_map.get(&s.id);
-                    ChildResponse::from_song_with_starred(s, starred_at)
-                })
-                .collect();
+                .position(|s| s.id == current_song.id)
+                .and_then(|idx| i32::try_from(idx).ok())
+        });
 
-            // Calculate current_index by finding the position of the current song in the queue
-            let current_index = play_queue.current_song.as_ref().and_then(|current_song| {
-                play_queue
-                    .songs
-                    .iter()
-                    .position(|s| s.id == current_song.id)
-                    .map(|idx| idx as i32)
-            });
+        let response = PlayQueueByIndexResponse {
+            current_index,
+            position: play_queue.position,
+            username: play_queue.username.clone(),
+            changed: play_queue
+                .changed_at
+                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                .to_string(),
+            changed_by: play_queue.changed_by.clone(),
+            entries: song_responses,
+        };
 
-            let response = PlayQueueByIndexResponse {
-                current_index,
-                position: play_queue.position,
-                username: play_queue.username.clone(),
-                changed: play_queue
-                    .changed_at
-                    .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                    .to_string(),
-                changed_by: play_queue.changed_by.clone(),
-                entries: song_responses,
-            };
+        ok_play_queue_by_index(auth.format, response)
+    } else {
+        // Return empty play queue
+        let response = PlayQueueByIndexResponse {
+            current_index: None,
+            position: None,
+            username: username.clone(),
+            changed: chrono::Utc::now()
+                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                .to_string(),
+            changed_by: None,
+            entries: vec![],
+        };
 
-            ok_play_queue_by_index(auth.format, response)
-        }
-        None => {
-            // Return empty play queue
-            let response = PlayQueueByIndexResponse {
-                current_index: None,
-                position: None,
-                username: username.clone(),
-                changed: chrono::Utc::now()
-                    .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                    .to_string(),
-                changed_by: None,
-                entries: vec![],
-            };
-
-            ok_play_queue_by_index(auth.format, response)
-        }
+        ok_play_queue_by_index(auth.format, response)
     }
 }
 
 /// GET/POST /rest/savePlayQueueByIndex[.view]
 ///
 /// Saves the current play queue for the user using queue index instead of song ID.
-/// This is an OpenSubsonic extension.
+/// This is an `OpenSubsonic` extension.
 ///
 /// Parameters:
 /// - `id`: ID of a song in the play queue (can be repeated to define the entire queue)
