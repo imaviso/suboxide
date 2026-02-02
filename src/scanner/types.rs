@@ -1,0 +1,115 @@
+//! Scanner types and constants.
+
+use std::path::PathBuf;
+use thiserror::Error;
+
+use crate::db::MusicRepoError;
+
+/// Errors that can occur during scanning.
+#[derive(Debug, Error)]
+pub enum ScanError {
+    #[error("Database error: {0}")]
+    Database(#[from] MusicRepoError),
+
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("No music folders configured")]
+    NoMusicFolders,
+
+    #[error("Music folder not found: {0}")]
+    FolderNotFound(String),
+}
+
+/// Supported audio file extensions.
+pub const AUDIO_EXTENSIONS: &[&str] = &[
+    "mp3", "flac", "ogg", "opus", "m4a", "aac", "wav", "wma", "aiff", "ape", "wv",
+];
+
+/// Common cover art filenames to look for in album directories.
+/// These are tried in order of preference.
+pub const COVER_ART_FILENAMES: &[&str] = &[
+    "cover",
+    "folder",
+    "front",
+    "album",
+    "albumart",
+    "albumartsmall",
+    "thumb",
+    "art",
+];
+
+/// Supported image file extensions for external cover art.
+pub const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "gif", "bmp", "webp"];
+
+/// Batch size for song inserts (`SQLite` has a limit of ~999 variables per query)
+pub const BATCH_SIZE: usize = 100;
+
+/// Default cover art cache directory.
+pub const COVER_ART_CACHE_DIR: &str = ".cache/subsonic/covers";
+
+/// Default auto-scan interval (5 minutes).
+pub const DEFAULT_AUTO_SCAN_INTERVAL_SECS: u64 = 300;
+
+/// Scan mode controlling how files are scanned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ScanMode {
+    /// Full scan - re-scan all files regardless of modification time.
+    Full,
+    /// Incremental scan - only scan new or modified files.
+    #[default]
+    Incremental,
+}
+
+/// Metadata extracted from an audio file.
+#[derive(Debug, Clone)]
+pub struct ScannedTrack {
+    pub path: PathBuf,
+    pub parent_path: String,
+    pub file_size: u64,
+    pub content_type: String,
+    pub suffix: String,
+    pub title: String,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub album_artist: Option<String>,
+    pub track_number: Option<u32>,
+    pub disc_number: Option<u32>,
+    pub year: Option<u32>,
+    pub genre: Option<String>,
+    pub duration_secs: u32,
+    pub bit_rate: Option<u32>,
+    pub bit_depth: Option<u8>,
+    pub sample_rate: Option<u32>,
+    pub channels: Option<u8>,
+    /// Embedded cover art data (bytes).
+    pub cover_art_data: Option<Vec<u8>>,
+    /// MIME type of the embedded cover art.
+    pub cover_art_mime: Option<String>,
+    /// File modification time (Unix timestamp in seconds).
+    pub file_modified_at: Option<i64>,
+}
+
+#[derive(Debug)]
+pub(crate) struct PreparedTrack {
+    pub track: ScannedTrack,
+    pub path_str: String,
+    pub artist_id: Option<i32>,
+    pub album_id: Option<i32>,
+    pub cover_art: Option<String>,
+    pub is_update: bool,
+}
+
+/// Result of scanning a music folder.
+#[derive(Debug, Default)]
+pub struct ScanResult {
+    pub tracks_found: usize,
+    pub tracks_added: usize,
+    pub tracks_updated: usize,
+    pub tracks_skipped: usize,
+    pub tracks_removed: usize,
+    pub tracks_failed: usize,
+    pub artists_added: usize,
+    pub albums_added: usize,
+    pub cover_art_saved: usize,
+}
