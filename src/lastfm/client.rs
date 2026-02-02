@@ -237,12 +237,15 @@ impl LastFmClient {
         extra.insert("autocorrect".to_string(), "1".to_string());
 
         // For public data, no session key needed
-        let mut params = self.build_params("artist.getInfo", None, extra);
-        // Remove session key if it was added (it shouldn't be)
-        params.remove("sk");
-        // Regenerate signature without sk
-        let signature = self.sign_params(&params);
-        params.insert("api_sig".to_string(), signature);
+        // Important: api_sig is NOT required for artist.getInfo unless authenticated
+        // Including it with invalid logic causes "Invalid method signature" (error 13)
+        // We simply build params manually to avoid signing logic
+        let mut params = BTreeMap::new();
+        params.insert("method".to_string(), "artist.getInfo".to_string());
+        params.insert("api_key".to_string(), self.api_key.clone());
+        params.insert("format".to_string(), "json".to_string());
+        params.insert("artist".to_string(), artist_name.to_string());
+        params.insert("autocorrect".to_string(), "1".to_string());
 
         let response = self
             .client
