@@ -3,9 +3,9 @@
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 
-use crate::db::DbPool;
 use crate::db::repo::error::{MusicRepoError, MusicRepoErrorKind};
 use crate::db::schema::{albums, artists, music_folders, songs};
+use crate::db::DbPool;
 use crate::models::music::{Album, Artist, MusicFolder, NewMusicFolder, Song};
 
 // ============================================================================
@@ -259,6 +259,21 @@ impl ArtistRepository {
             .optional()?;
 
         Ok(result.map(Artist::from))
+    }
+
+    /// Update an artist's cover art ID.
+    pub fn update_cover_art(
+        &self,
+        artist_id: i32,
+        cover_art_id: Option<&str>,
+    ) -> Result<(), MusicRepoError> {
+        let mut conn = self.pool.get()?;
+
+        diesel::update(artists::table.filter(artists::id.eq(artist_id)))
+            .set(artists::cover_art.eq(cover_art_id))
+            .execute(&mut conn)?;
+
+        Ok(())
     }
 
     /// Count albums for an artist.

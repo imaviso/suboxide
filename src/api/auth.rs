@@ -1380,6 +1380,8 @@ impl AuthState for DatabaseAuthState {
     ) -> crate::models::music::ArtistInfo2Response {
         use crate::lastfm::models::LastFmArtistCache;
         use crate::models::music::{ArtistID3Response, ArtistInfo2Response};
+        use std::path::PathBuf;
+        use tokio::io::AsyncWriteExt;
 
         // Get the artist from the database
         let Some(artist) = self.get_artist(artist_id) else {
@@ -1424,9 +1426,9 @@ impl AuthState for DatabaseAuthState {
                     let artist_name = artist.name;
                     let artist_id_copy = artist_id;
                     let cache_repo = self.artist_cache_repo.clone();
-                    let _artist_repo = self.artist_repo.clone();
+                    let artist_repo = self.artist_repo.clone();
 
-                    // Spawn async task to fetch and cache
+                    // Spawn async task to fetch, cache, and download image
                     tokio::spawn(async move {
                         match client.get_artist_info(&artist_name).await {
                             Ok(Some(lastfm_artist)) => {
@@ -1448,7 +1450,7 @@ impl AuthState for DatabaseAuthState {
                                     last_fm_url: lastfm_artist.url,
                                     small_image_url: small,
                                     medium_image_url: medium,
-                                    large_image_url: large,
+                                    large_image_url: large.clone(),
                                     similar_artists: similar_names,
                                     updated_at: chrono::Local::now().naive_local(),
                                 };
@@ -1457,6 +1459,70 @@ impl AuthState for DatabaseAuthState {
                                     tracing::warn!(error = %e, "Failed to save artist cache");
                                 } else {
                                     tracing::debug!(artist = %artist_name, "Cached Last.fm artist info");
+                                }
+
+                                // Download and persist artist image if available
+                                if let Some(image_url) = large {
+                                    // Use a simpler approach for cover art dir to avoid circular dependency or complex moves
+                                    // This duplicates logic from media.rs/scanner but is safe
+                                    let cover_art_dir = dirs::home_dir().map_or_else(
+                                        || PathBuf::from(".cache/subsonic/covers"),
+                                        |h| h.join(".cache/subsonic/covers"),
+                                    );
+
+                                    // Ensure directory exists
+                                    if !cover_art_dir.exists() {
+                                        let _ = tokio::fs::create_dir_all(&cover_art_dir).await;
+                                    }
+
+                                    // Determine extension
+                                    let ext = if image_url.ends_with(".png") {
+                                        "png"
+                                    } else if image_url.ends_with(".gif") {
+                                        "gif"
+                                    } else {
+                                        "jpg"
+                                    };
+
+                                    let cover_art_id = format!("artist-{artist_id_copy}");
+                                    let filename = format!("{cover_art_id}.{ext}");
+                                    let filepath = cover_art_dir.join(&filename);
+
+                                    // Check if we need to download (skip if exists)
+                                    if !filepath.exists() {
+                                        match reqwest::get(&image_url).await {
+                                            Ok(resp) => {
+                                                if resp.status().is_success() {
+                                                    match resp.bytes().await {
+                                                        Ok(bytes) => {
+                                                            if let Ok(mut file) =
+                                                                tokio::fs::File::create(&filepath).await
+                                                            {
+                                                                if file.write_all(&bytes).await.is_ok() {
+                                                                    tracing::debug!(
+                                                                        artist = %artist_name,
+                                                                        "Downloaded artist image"
+                                                                    );
+                                                                    // Update artist record with cover art ID
+                                                                    if let Err(e) = artist_repo.update_cover_art(
+                                                                        artist_id_copy,
+                                                                        Some(&cover_art_id),
+                                                                    ) {
+                                                                        tracing::warn!(
+                                                                            error = %e,
+                                                                            "Failed to update artist cover art"
+                                                                        );
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                        Err(e) => tracing::warn!(error = %e, "Failed to get image bytes"),
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => tracing::warn!(error = %e, "Failed to download artist image"),
+                                        }
+                                    }
                                 }
                             }
                             Ok(None) => {
