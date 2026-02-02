@@ -1165,25 +1165,23 @@ impl AuthState for DatabaseAuthState {
     ) -> Result<User, String> {
         let password_hash = hash_password(password).map_err(|e| e.to_string())?;
 
-        let new_user = NewUser {
-            username,
-            password_hash: &password_hash,
-            subsonic_password: Some(password),
-            email: Some(email),
-            admin_role: roles.admin_role,
-            settings_role: roles.settings_role,
-            stream_role: roles.stream_role,
-            jukebox_role: roles.jukebox_role,
-            download_role: roles.download_role,
-            upload_role: roles.upload_role,
-            playlist_role: roles.playlist_role,
-            cover_art_role: roles.cover_art_role,
-            comment_role: roles.comment_role,
-            podcast_role: roles.podcast_role,
-            share_role: roles.share_role,
-            video_conversion_role: roles.video_conversion_role,
-            max_bit_rate: 0,
-        };
+        let new_user = NewUser::builder(username, &password_hash)
+            .subsonic_password(password)
+            .email(email)
+            .admin_role(roles.admin_role)
+            .settings_role(roles.settings_role)
+            .stream_role(roles.stream_role)
+            .jukebox_role(roles.jukebox_role)
+            .download_role(roles.download_role)
+            .upload_role(roles.upload_role)
+            .playlist_role(roles.playlist_role)
+            .cover_art_role(roles.cover_art_role)
+            .comment_role(roles.comment_role)
+            .podcast_role(roles.podcast_role)
+            .share_role(roles.share_role)
+            .video_conversion_role(roles.video_conversion_role)
+            .max_bit_rate(0)
+            .build();
 
         self.user_repo.create(&new_user).map_err(|e| e.to_string())
     }

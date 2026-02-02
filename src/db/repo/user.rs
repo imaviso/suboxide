@@ -2,11 +2,11 @@
 
 use diesel::prelude::*;
 
-use crate::db::DbPool;
 use crate::db::repo::error::UserRepoError;
 use crate::db::schema::users;
-use crate::models::User;
+use crate::db::DbPool;
 use crate::models::user::UserRoles;
+use crate::models::User;
 
 /// Database row representation for users.
 #[derive(Debug, Clone, Queryable, Selectable)]
@@ -91,7 +91,172 @@ pub struct NewUser<'a> {
     pub max_bit_rate: i32,
 }
 
+/// Builder for `NewUser`.
+#[derive(Debug, Clone)]
+pub struct NewUserBuilder<'a> {
+    username: &'a str,
+    password_hash: &'a str,
+    subsonic_password: Option<&'a str>,
+    email: Option<&'a str>,
+    admin_role: bool,
+    settings_role: bool,
+    stream_role: bool,
+    jukebox_role: bool,
+    download_role: bool,
+    upload_role: bool,
+    playlist_role: bool,
+    cover_art_role: bool,
+    comment_role: bool,
+    podcast_role: bool,
+    share_role: bool,
+    video_conversion_role: bool,
+    max_bit_rate: i32,
+}
+
+impl<'a> NewUserBuilder<'a> {
+    /// Create a new builder with required fields.
+    pub const fn new(username: &'a str, password_hash: &'a str) -> Self {
+        Self {
+            username,
+            password_hash,
+            subsonic_password: None,
+            email: None,
+            admin_role: false,
+            settings_role: true,
+            stream_role: true,
+            jukebox_role: false,
+            download_role: true,
+            upload_role: false,
+            playlist_role: true,
+            cover_art_role: true,
+            comment_role: false,
+            podcast_role: false,
+            share_role: false,
+            video_conversion_role: false,
+            max_bit_rate: 0,
+        }
+    }
+
+    /// Set the subsonic password.
+    pub const fn subsonic_password(mut self, password: &'a str) -> Self {
+        self.subsonic_password = Some(password);
+        self
+    }
+
+    /// Set the email.
+    pub const fn email(mut self, email: &'a str) -> Self {
+        self.email = Some(email);
+        self
+    }
+
+    /// Set admin role.
+    pub const fn admin_role(mut self, admin: bool) -> Self {
+        self.admin_role = admin;
+        self
+    }
+
+    /// Set settings role.
+    pub const fn settings_role(mut self, settings: bool) -> Self {
+        self.settings_role = settings;
+        self
+    }
+
+    /// Set stream role.
+    pub const fn stream_role(mut self, stream: bool) -> Self {
+        self.stream_role = stream;
+        self
+    }
+
+    /// Set jukebox role.
+    pub const fn jukebox_role(mut self, jukebox: bool) -> Self {
+        self.jukebox_role = jukebox;
+        self
+    }
+
+    /// Set download role.
+    pub const fn download_role(mut self, download: bool) -> Self {
+        self.download_role = download;
+        self
+    }
+
+    /// Set upload role.
+    pub const fn upload_role(mut self, upload: bool) -> Self {
+        self.upload_role = upload;
+        self
+    }
+
+    /// Set playlist role.
+    pub const fn playlist_role(mut self, playlist: bool) -> Self {
+        self.playlist_role = playlist;
+        self
+    }
+
+    /// Set cover art role.
+    pub const fn cover_art_role(mut self, cover_art: bool) -> Self {
+        self.cover_art_role = cover_art;
+        self
+    }
+
+    /// Set comment role.
+    pub const fn comment_role(mut self, comment: bool) -> Self {
+        self.comment_role = comment;
+        self
+    }
+
+    /// Set podcast role.
+    pub const fn podcast_role(mut self, podcast: bool) -> Self {
+        self.podcast_role = podcast;
+        self
+    }
+
+    /// Set share role.
+    pub const fn share_role(mut self, share: bool) -> Self {
+        self.share_role = share;
+        self
+    }
+
+    /// Set video conversion role.
+    pub const fn video_conversion_role(mut self, video: bool) -> Self {
+        self.video_conversion_role = video;
+        self
+    }
+
+    /// Set max bit rate.
+    pub const fn max_bit_rate(mut self, rate: i32) -> Self {
+        self.max_bit_rate = rate;
+        self
+    }
+
+    /// Build the `NewUser`.
+    pub const fn build(self) -> NewUser<'a> {
+        NewUser {
+            username: self.username,
+            password_hash: self.password_hash,
+            subsonic_password: self.subsonic_password,
+            email: self.email,
+            admin_role: self.admin_role,
+            settings_role: self.settings_role,
+            stream_role: self.stream_role,
+            jukebox_role: self.jukebox_role,
+            download_role: self.download_role,
+            upload_role: self.upload_role,
+            playlist_role: self.playlist_role,
+            cover_art_role: self.cover_art_role,
+            comment_role: self.comment_role,
+            podcast_role: self.podcast_role,
+            share_role: self.share_role,
+            video_conversion_role: self.video_conversion_role,
+            max_bit_rate: self.max_bit_rate,
+        }
+    }
+}
+
 impl<'a> NewUser<'a> {
+    /// Create a builder for `NewUser`.
+    pub const fn builder(username: &'a str, password_hash: &'a str) -> NewUserBuilder<'a> {
+        NewUserBuilder::new(username, password_hash)
+    }
+
     /// Create a new admin user.
     #[must_use]
     pub const fn admin(
@@ -380,4 +545,144 @@ pub struct UserUpdate {
     pub share_role: Option<bool>,
     pub video_conversion_role: Option<bool>,
     pub max_bit_rate: Option<i32>,
+}
+
+/// Builder for `UserUpdate`.
+#[derive(Debug, Clone)]
+pub struct UserUpdateBuilder {
+    username: String,
+    email: Option<String>,
+    admin_role: Option<bool>,
+    settings_role: Option<bool>,
+    stream_role: Option<bool>,
+    jukebox_role: Option<bool>,
+    download_role: Option<bool>,
+    upload_role: Option<bool>,
+    playlist_role: Option<bool>,
+    cover_art_role: Option<bool>,
+    comment_role: Option<bool>,
+    podcast_role: Option<bool>,
+    share_role: Option<bool>,
+    video_conversion_role: Option<bool>,
+    max_bit_rate: Option<i32>,
+}
+
+impl UserUpdateBuilder {
+    /// Create a new builder for updating a user.
+    pub fn new(username: impl Into<String>) -> Self {
+        Self {
+            username: username.into(),
+            email: None,
+            admin_role: None,
+            settings_role: None,
+            stream_role: None,
+            jukebox_role: None,
+            download_role: None,
+            upload_role: None,
+            playlist_role: None,
+            cover_art_role: None,
+            comment_role: None,
+            podcast_role: None,
+            share_role: None,
+            video_conversion_role: None,
+            max_bit_rate: None,
+        }
+    }
+
+    pub fn email(mut self, email: impl Into<String>) -> Self {
+        self.email = Some(email.into());
+        self
+    }
+
+    pub const fn admin_role(mut self, val: bool) -> Self {
+        self.admin_role = Some(val);
+        self
+    }
+
+    pub const fn settings_role(mut self, val: bool) -> Self {
+        self.settings_role = Some(val);
+        self
+    }
+
+    pub const fn stream_role(mut self, val: bool) -> Self {
+        self.stream_role = Some(val);
+        self
+    }
+
+    pub const fn jukebox_role(mut self, val: bool) -> Self {
+        self.jukebox_role = Some(val);
+        self
+    }
+
+    pub const fn download_role(mut self, val: bool) -> Self {
+        self.download_role = Some(val);
+        self
+    }
+
+    pub const fn upload_role(mut self, val: bool) -> Self {
+        self.upload_role = Some(val);
+        self
+    }
+
+    pub const fn playlist_role(mut self, val: bool) -> Self {
+        self.playlist_role = Some(val);
+        self
+    }
+
+    pub const fn cover_art_role(mut self, val: bool) -> Self {
+        self.cover_art_role = Some(val);
+        self
+    }
+
+    pub const fn comment_role(mut self, val: bool) -> Self {
+        self.comment_role = Some(val);
+        self
+    }
+
+    pub const fn podcast_role(mut self, val: bool) -> Self {
+        self.podcast_role = Some(val);
+        self
+    }
+
+    pub const fn share_role(mut self, val: bool) -> Self {
+        self.share_role = Some(val);
+        self
+    }
+
+    pub const fn video_conversion_role(mut self, val: bool) -> Self {
+        self.video_conversion_role = Some(val);
+        self
+    }
+
+    pub const fn max_bit_rate(mut self, val: i32) -> Self {
+        self.max_bit_rate = Some(val);
+        self
+    }
+
+    pub fn build(self) -> UserUpdate {
+        UserUpdate {
+            username: self.username,
+            email: self.email,
+            admin_role: self.admin_role,
+            settings_role: self.settings_role,
+            stream_role: self.stream_role,
+            jukebox_role: self.jukebox_role,
+            download_role: self.download_role,
+            upload_role: self.upload_role,
+            playlist_role: self.playlist_role,
+            cover_art_role: self.cover_art_role,
+            comment_role: self.comment_role,
+            podcast_role: self.podcast_role,
+            share_role: self.share_role,
+            video_conversion_role: self.video_conversion_role,
+            max_bit_rate: self.max_bit_rate,
+        }
+    }
+}
+
+impl UserUpdate {
+    /// Create a builder for `UserUpdate`.
+    pub fn builder(username: impl Into<String>) -> UserUpdateBuilder {
+        UserUpdateBuilder::new(username)
+    }
 }
