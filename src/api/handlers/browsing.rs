@@ -332,11 +332,8 @@ pub async fn get_album_list2(
         }
         "byGenre" => {
             let Some(genre) = params.genre.as_deref() else {
-                return error_response(
-                    auth.format,
-                    &ApiError::MissingParameter("genre".into()),
-                )
-                .into_response();
+                return error_response(auth.format, &ApiError::MissingParameter("genre".into()))
+                    .into_response();
             };
             auth.state.get_albums_by_genre(genre, offset, size)
         }
@@ -898,11 +895,8 @@ pub async fn get_album_list(
         }
         "byGenre" => {
             let Some(genre) = params.genre.as_deref() else {
-                return error_response(
-                    auth.format,
-                    &ApiError::MissingParameter("genre".into()),
-                )
-                .into_response();
+                return error_response(auth.format, &ApiError::MissingParameter("genre".into()))
+                    .into_response();
             };
             auth.state.get_albums_by_genre(genre, offset, size)
         }

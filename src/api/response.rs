@@ -4,7 +4,7 @@
 //! The format is determined by the `f` query parameter (xml, json, jsonp).
 
 use axum::{
-    http::{header, StatusCode},
+    http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
 use serde::Serialize;
@@ -113,7 +113,7 @@ pub fn supported_extensions() -> Vec<OpenSubsonicExtension> {
 // ============================================================================
 
 mod xml {
-    use super::{ResponseStatus, Serialize, API_VERSION, SERVER_NAME, SERVER_VERSION};
+    use super::{API_VERSION, ResponseStatus, SERVER_NAME, SERVER_VERSION, Serialize};
 
     // Note: quick_xml doesn't support #[serde(flatten)], so we need to include
     // all base attributes directly in each response struct.
@@ -1475,7 +1475,7 @@ mod xml {
 
 mod json {
     use super::{
-        OpenSubsonicExtension, ResponseStatus, Serialize, API_VERSION, SERVER_NAME, SERVER_VERSION,
+        API_VERSION, OpenSubsonicExtension, ResponseStatus, SERVER_NAME, SERVER_VERSION, Serialize,
     };
 
     #[derive(Debug, Serialize)]
@@ -2436,7 +2436,7 @@ impl SubsonicResponse {
                     .into_response()
             }
             Err(e) => {
-                tracing::error!("XML serialization error: {}", e);
+                tracing::error!(error = %e, "XML serialization error");
                 (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
             }
         }
@@ -2556,7 +2556,7 @@ impl SubsonicResponse {
                     .into_response()
             }
             Err(e) => {
-                tracing::error!("JSON serialization error: {}", e);
+                tracing::error!(error = %e, "JSON serialization error");
                 (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
             }
         }

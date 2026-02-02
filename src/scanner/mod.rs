@@ -133,6 +133,35 @@ pub struct ScanState {
     current_folder: std::sync::RwLock<Option<String>>,
 }
 
+/// A handle to a shared scan state.
+///
+/// This is a cheap-to-clone handle that provides access to the scan state
+/// without exposing the internal `Arc`.
+#[derive(Debug, Clone)]
+pub struct ScanStateHandle(Arc<ScanState>);
+
+impl ScanStateHandle {
+    /// Create a new handle wrapping the given scan state.
+    #[must_use]
+    pub fn new(state: ScanState) -> Self {
+        Self(Arc::new(state))
+    }
+
+    /// Get a reference to the underlying scan state.
+    #[must_use]
+    pub fn get(&self) -> &ScanState {
+        &self.0
+    }
+}
+
+impl std::ops::Deref for ScanStateHandle {
+    type Target = ScanState;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// Scan phase for progress tracking.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum ScanPhase {
@@ -149,7 +178,7 @@ pub enum ScanPhase {
 
 impl ScanPhase {
     /// Get the phase as a string for API responses.
-    #[must_use] 
+    #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Idle => "idle",
@@ -162,7 +191,7 @@ impl ScanPhase {
 
 impl ScanState {
     /// Create a new scan state.
-    #[must_use] 
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             scanning: AtomicBool::new(false),
@@ -190,12 +219,18 @@ impl ScanState {
 
     /// Get the current scan phase.
     pub fn get_phase(&self) -> ScanPhase {
-        self.phase.read().unwrap().clone()
+        self.phase
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// Get the current folder being scanned.
     pub fn get_current_folder(&self) -> Option<String> {
-        self.current_folder.read().unwrap().clone()
+        self.current_folder
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// Try to start a scan. Returns false if a scan is already in progress.
@@ -208,8 +243,14 @@ impl ScanState {
     /// Mark the scan as complete.
     pub fn finish(&self) {
         self.scanning.store(false, Ordering::SeqCst);
-        *self.phase.write().unwrap() = ScanPhase::Idle;
-        *self.current_folder.write().unwrap() = None;
+        *self
+            .phase
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = ScanPhase::Idle;
+        *self
+            .current_folder
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
 
     /// Reset the count to 0.
@@ -221,8 +262,14 @@ impl ScanState {
     pub fn reset(&self) {
         self.count.store(0, Ordering::SeqCst);
         self.total.store(0, Ordering::SeqCst);
-        *self.phase.write().unwrap() = ScanPhase::Idle;
-        *self.current_folder.write().unwrap() = None;
+        *self
+            .phase
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = ScanPhase::Idle;
+        *self
+            .current_folder
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
 
     /// Increment the count by 1 and return the new value.
@@ -242,12 +289,18 @@ impl ScanState {
 
     /// Set the current scan phase.
     pub fn set_phase(&self, phase: ScanPhase) {
-        *self.phase.write().unwrap() = phase;
+        *self
+            .phase
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = phase;
     }
 
     /// Set the current folder being scanned.
     pub fn set_current_folder(&self, folder: Option<String>) {
-        *self.current_folder.write().unwrap() = folder;
+        *self
+            .current_folder
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = folder;
     }
 }
 
@@ -274,20 +327,24 @@ pub struct Scanner {
 }
 
 /// Auto-scanner that runs periodic scans in the background.
+#[derive(Clone, Debug)]
 pub struct AutoScanner {
     pool: DbPool,
     cover_art_dir: PathBuf,
     interval: Duration,
-    scan_state: Arc<ScanState>,
+    scan_state: ScanStateHandle,
     shutdown_tx: Option<watch::Sender<bool>>,
 }
 
 impl Scanner {
     /// Create a new scanner.
-    #[must_use] 
+    #[must_use]
     pub fn new(pool: DbPool) -> Self {
         // Use home directory for cover art cache
-        let cover_art_dir = dirs::home_dir().map_or_else(|| PathBuf::from(COVER_ART_CACHE_DIR), |h| h.join(COVER_ART_CACHE_DIR));
+        let cover_art_dir = dirs::home_dir().map_or_else(
+            || PathBuf::from(COVER_ART_CACHE_DIR),
+            |h| h.join(COVER_ART_CACHE_DIR),
+        );
 
         Self {
             pool,
@@ -296,7 +353,7 @@ impl Scanner {
     }
 
     /// Create a new scanner with a custom cover art directory.
-    #[must_use] 
+    #[must_use]
     pub const fn with_cover_art_dir(pool: DbPool, cover_art_dir: PathBuf) -> Self {
         Self {
             pool,
@@ -343,7 +400,7 @@ impl Scanner {
     }
 
     /// Get the cover art cache directory path.
-    #[must_use] 
+    #[must_use]
     pub fn cover_art_dir(&self) -> &Path {
         &self.cover_art_dir
     }
@@ -423,10 +480,7 @@ impl Scanner {
     /// Scan all enabled music folders with optional progress tracking.
     ///
     /// If a `ScanState` is provided, the count will be updated as tracks are processed.
-    pub fn scan_all_with_state(
-        &self,
-        state: Option<&ScanState>,
-    ) -> Result<ScanResult, ScanError> {
+    pub fn scan_all_with_state(&self, state: Option<&ScanState>) -> Result<ScanResult, ScanError> {
         self.scan_all_with_options(state, ScanMode::Full)
     }
 
@@ -752,12 +806,11 @@ impl Scanner {
             genre,
             cover_art_data,
             cover_art_mime,
-        ) = tag.map_or((None, None, None, None, None, None, None, None, None, None), |tag| {
-            // Extract embedded cover art (first picture)
-            let (art_data, art_mime) = tag
-                .pictures()
-                .first()
-                .map_or((None, None), |p| {
+        ) = tag.map_or(
+            (None, None, None, None, None, None, None, None, None, None),
+            |tag| {
+                // Extract embedded cover art (first picture)
+                let (art_data, art_mime) = tag.pictures().first().map_or((None, None), |p| {
                     let mime = match p.mime_type() {
                         Some(lofty::picture::MimeType::Png) => "image/png",
                         Some(lofty::picture::MimeType::Gif) => "image/gif",
@@ -768,19 +821,21 @@ impl Scanner {
                     (Some(p.data().to_vec()), Some(mime.to_string()))
                 });
 
-            (
-                tag.title().map(|s| s.to_string()),
-                tag.artist().map(|s| s.to_string()),
-                tag.album().map(|s| s.to_string()),
-                tag.get_string(&ItemKey::AlbumArtist).map(std::string::ToString::to_string),
-                tag.track(),
-                tag.disk(),
-                tag.year(),
-                tag.genre().map(|s| s.to_string()),
-                art_data,
-                art_mime,
-            )
-        });
+                (
+                    tag.title().map(|s| s.to_string()),
+                    tag.artist().map(|s| s.to_string()),
+                    tag.album().map(|s| s.to_string()),
+                    tag.get_string(&ItemKey::AlbumArtist)
+                        .map(std::string::ToString::to_string),
+                    tag.track(),
+                    tag.disk(),
+                    tag.year(),
+                    tag.genre().map(|s| s.to_string()),
+                    art_data,
+                    art_mime,
+                )
+            },
+        );
 
         // Use filename as title if no tag
         let title = title.unwrap_or_else(|| {
@@ -1100,17 +1155,30 @@ impl Scanner {
                                 songs::artist_id.eq(prepared.artist_id),
                                 songs::artist_name.eq(&prepared.track.artist),
                                 songs::album_name.eq(&prepared.track.album),
-                                songs::file_size.eq(i64::try_from(prepared.track.file_size).unwrap_or(0)),
-                                songs::duration.eq(i32::try_from(prepared.track.duration_secs).unwrap_or(0)),
-                                songs::bit_rate.eq(prepared.track.bit_rate.map(|b| i32::try_from(b).unwrap_or(0))),
+                                songs::file_size
+                                    .eq(i64::try_from(prepared.track.file_size).unwrap_or(0)),
+                                songs::duration
+                                    .eq(i32::try_from(prepared.track.duration_secs).unwrap_or(0)),
+                                songs::bit_rate.eq(prepared
+                                    .track
+                                    .bit_rate
+                                    .map(|b| i32::try_from(b).unwrap_or(0))),
                                 songs::bit_depth.eq(prepared.track.bit_depth.map(i32::from)),
-                                songs::sampling_rate
-                                    .eq(prepared.track.sample_rate.map(|s| i32::try_from(s).unwrap_or(0))),
+                                songs::sampling_rate.eq(prepared
+                                    .track
+                                    .sample_rate
+                                    .map(|s| i32::try_from(s).unwrap_or(0))),
                                 songs::channel_count.eq(prepared.track.channels.map(i32::from)),
-                                songs::track_number
-                                    .eq(prepared.track.track_number.map(|t| i32::try_from(t).unwrap_or(0))),
-                                songs::disc_number.eq(prepared.track.disc_number.map(|d| i32::try_from(d).unwrap_or(0))),
-                                songs::year.eq(prepared.track.year.map(|y| i32::try_from(y).unwrap_or(0))),
+                                songs::track_number.eq(prepared
+                                    .track
+                                    .track_number
+                                    .map(|t| i32::try_from(t).unwrap_or(0))),
+                                songs::disc_number.eq(prepared
+                                    .track
+                                    .disc_number
+                                    .map(|d| i32::try_from(d).unwrap_or(0))),
+                                songs::year
+                                    .eq(prepared.track.year.map(|y| i32::try_from(y).unwrap_or(0))),
                                 songs::genre.eq(&prepared.track.genre),
                                 songs::cover_art.eq(&prepared.cover_art),
                                 songs::file_modified_at.eq(prepared.track.file_modified_at),
@@ -1128,19 +1196,32 @@ impl Scanner {
                                 songs::music_folder_id.eq(folder.id),
                                 songs::path.eq(&prepared.path_str),
                                 songs::parent_path.eq(&prepared.track.parent_path),
-                                songs::file_size.eq(i64::try_from(prepared.track.file_size).unwrap_or(0)),
+                                songs::file_size
+                                    .eq(i64::try_from(prepared.track.file_size).unwrap_or(0)),
                                 songs::content_type.eq(&prepared.track.content_type),
                                 songs::suffix.eq(&prepared.track.suffix),
-                                songs::duration.eq(i32::try_from(prepared.track.duration_secs).unwrap_or(0)),
-                                songs::bit_rate.eq(prepared.track.bit_rate.map(|b| i32::try_from(b).unwrap_or(0))),
+                                songs::duration
+                                    .eq(i32::try_from(prepared.track.duration_secs).unwrap_or(0)),
+                                songs::bit_rate.eq(prepared
+                                    .track
+                                    .bit_rate
+                                    .map(|b| i32::try_from(b).unwrap_or(0))),
                                 songs::bit_depth.eq(prepared.track.bit_depth.map(i32::from)),
-                                songs::sampling_rate
-                                    .eq(prepared.track.sample_rate.map(|s| i32::try_from(s).unwrap_or(0))),
+                                songs::sampling_rate.eq(prepared
+                                    .track
+                                    .sample_rate
+                                    .map(|s| i32::try_from(s).unwrap_or(0))),
                                 songs::channel_count.eq(prepared.track.channels.map(i32::from)),
-                                songs::track_number
-                                    .eq(prepared.track.track_number.map(|t| i32::try_from(t).unwrap_or(0))),
-                                songs::disc_number.eq(prepared.track.disc_number.map(|d| i32::try_from(d).unwrap_or(0))),
-                                songs::year.eq(prepared.track.year.map(|y| i32::try_from(y).unwrap_or(0))),
+                                songs::track_number.eq(prepared
+                                    .track
+                                    .track_number
+                                    .map(|t| i32::try_from(t).unwrap_or(0))),
+                                songs::disc_number.eq(prepared
+                                    .track
+                                    .disc_number
+                                    .map(|d| i32::try_from(d).unwrap_or(0))),
+                                songs::year
+                                    .eq(prepared.track.year.map(|y| i32::try_from(y).unwrap_or(0))),
                                 songs::genre.eq(&prepared.track.genre),
                                 songs::cover_art.eq(&prepared.cover_art),
                                 songs::file_modified_at.eq(prepared.track.file_modified_at),
@@ -1208,8 +1289,12 @@ impl Scanner {
 
 impl AutoScanner {
     /// Create a new auto-scanner with default interval (5 minutes).
-    pub fn new(pool: DbPool, scan_state: Arc<ScanState>) -> Self {
-        let cover_art_dir = dirs::home_dir().map_or_else(|| PathBuf::from(COVER_ART_CACHE_DIR), |h| h.join(COVER_ART_CACHE_DIR));
+    #[must_use]
+    pub fn new(pool: DbPool, scan_state: ScanStateHandle) -> Self {
+        let cover_art_dir = dirs::home_dir().map_or_else(
+            || PathBuf::from(COVER_ART_CACHE_DIR),
+            |h| h.join(COVER_ART_CACHE_DIR),
+        );
 
         Self {
             pool,
@@ -1221,8 +1306,12 @@ impl AutoScanner {
     }
 
     /// Create a new auto-scanner with a custom interval.
-    pub fn with_interval(pool: DbPool, scan_state: Arc<ScanState>, interval_secs: u64) -> Self {
-        let cover_art_dir = dirs::home_dir().map_or_else(|| PathBuf::from(COVER_ART_CACHE_DIR), |h| h.join(COVER_ART_CACHE_DIR));
+    #[must_use]
+    pub fn with_interval(pool: DbPool, scan_state: ScanStateHandle, interval_secs: u64) -> Self {
+        let cover_art_dir = dirs::home_dir().map_or_else(
+            || PathBuf::from(COVER_ART_CACHE_DIR),
+            |h| h.join(COVER_ART_CACHE_DIR),
+        );
 
         Self {
             pool,
@@ -1256,10 +1345,10 @@ impl AutoScanner {
         pool: DbPool,
         cover_art_dir: PathBuf,
         interval: Duration,
-        scan_state: Arc<ScanState>,
+        scan_state: ScanStateHandle,
         mut shutdown_rx: watch::Receiver<bool>,
     ) {
-        tracing::info!("Auto-scanner started with interval {:?}", interval);
+        tracing::info!(interval = ?interval, "Auto-scanner started");
 
         loop {
             // Wait for the interval or shutdown signal
@@ -1281,17 +1370,16 @@ impl AutoScanner {
                 continue;
             }
 
-            tracing::info!("Starting auto-scan (incremental)");
+            tracing::info!(scan_mode = "incremental", "Starting auto-scan");
             scan_state.reset_count();
 
             // Run the scan in a blocking task since it uses diesel
             let pool_clone = pool.clone();
             let cover_art_dir_clone = cover_art_dir.clone();
             let scan_state_clone = scan_state.clone();
-
             let result = tokio::task::spawn_blocking(move || {
                 let scanner = Scanner::with_cover_art_dir(pool_clone, cover_art_dir_clone);
-                scanner.scan_all_with_options(Some(&scan_state_clone), ScanMode::Incremental)
+                scanner.scan_all_with_options(Some(scan_state_clone.get()), ScanMode::Incremental)
             })
             .await;
 
@@ -1300,23 +1388,23 @@ impl AutoScanner {
             match result {
                 Ok(Ok(stats)) => {
                     tracing::info!(
-                        "Auto-scan complete: found={}, added={}, updated={}, skipped={}, removed={}, failed={}",
-                        stats.tracks_found,
-                        stats.tracks_added,
-                        stats.tracks_updated,
-                        stats.tracks_skipped,
-                        stats.tracks_removed,
-                        stats.tracks_failed
+                        tracks.found = stats.tracks_found,
+                        tracks.added = stats.tracks_added,
+                        tracks.updated = stats.tracks_updated,
+                        tracks.skipped = stats.tracks_skipped,
+                        tracks.removed = stats.tracks_removed,
+                        tracks.failed = stats.tracks_failed,
+                        "Auto-scan complete"
                     );
                 }
                 Ok(Err(ScanError::NoMusicFolders)) => {
                     tracing::debug!("Auto-scan skipped: no music folders configured");
                 }
                 Ok(Err(e)) => {
-                    tracing::error!("Auto-scan failed: {}", e);
+                    tracing::error!(error = %e, "Auto-scan failed");
                 }
                 Err(e) => {
-                    tracing::error!("Auto-scan task panicked: {}", e);
+                    tracing::error!(error = %e, "Auto-scan task panicked");
                 }
             }
         }

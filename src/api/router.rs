@@ -3,7 +3,7 @@
 //! Provides utilities for registering endpoints with common patterns like
 //! automatic .view suffix handling and GET+POST method support.
 
-use axum::{handler::Handler, routing::get, Router};
+use axum::{Router, handler::Handler, routing::get};
 
 /// Extension trait for Router to simplify Subsonic API route registration.
 pub trait SubsonicRouterExt<S>

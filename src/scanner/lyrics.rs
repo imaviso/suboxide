@@ -33,7 +33,7 @@ pub struct SyncedLine {
 /// Extract lyrics from an audio file.
 ///
 /// Returns a list of extracted lyrics (may have multiple for different languages).
-#[must_use] 
+#[must_use]
 pub fn extract_lyrics(path: &Path) -> Vec<ExtractedLyrics> {
     let mut results = Vec::new();
 
@@ -105,7 +105,7 @@ fn looks_like_lrc(text: &str) -> bool {
 /// Parse LRC formatted lyrics into synchronized lines.
 ///
 /// LRC format: [mm:ss.xx]text or [mm:ss:xx]text or [mm:ss]text
-#[must_use] 
+#[must_use]
 pub fn parse_lrc(text: &str) -> Vec<SyncedLine> {
     let mut lines = Vec::new();
 
@@ -183,7 +183,7 @@ fn parse_lrc_timestamp(s: &str) -> Option<i64> {
 }
 
 /// Parse unsynchronized lyrics into individual lines.
-#[must_use] 
+#[must_use]
 pub fn parse_unsynced(text: &str) -> Vec<String> {
     text.lines()
         .map(|l| l.trim().to_string())

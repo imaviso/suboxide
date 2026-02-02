@@ -7,7 +7,7 @@ use serde::Deserialize;
 use crate::api::auth::{AuthParams, SubsonicAuth};
 use crate::api::error::ApiError;
 use crate::api::response::{error_response, ok_empty, ok_user, ok_users};
-use crate::models::user::{UserResponse, UsersResponse, UserRoles};
+use crate::models::user::{UserResponse, UserRoles, UsersResponse};
 
 /// Query parameters for getUser.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -242,12 +242,10 @@ pub async fn create_user(
         video_conversion_role: params.video_conversion_role.unwrap_or(false),
     };
 
-    match auth.state.create_user(
-        username,
-        &decoded_password,
-        email,
-        roles,
-    ) {
+    match auth
+        .state
+        .create_user(username, &decoded_password, email, roles)
+    {
         Ok(_) => ok_empty(auth.format),
         Err(e) => error_response(auth.format, &ApiError::Generic(e)),
     }

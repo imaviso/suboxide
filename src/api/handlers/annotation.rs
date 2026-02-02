@@ -23,7 +23,8 @@ fn parse_repeated_param(query: &str, param_name: &str) -> Vec<String> {
         {
             // URL decode the value
             values.push(
-                urlencoding::decode(value).map_or_else(|_| value.to_string(), std::borrow::Cow::into_owned),
+                urlencoding::decode(value)
+                    .map_or_else(|_| value.to_string(), std::borrow::Cow::into_owned),
             );
         }
     }
@@ -48,7 +49,7 @@ pub async fn star(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoRes
         if let Ok(artist_id) = artist_id_str.parse::<i32>()
             && let Err(e) = auth.state.star_artist(user_id, artist_id)
         {
-            tracing::warn!("Failed to star artist {}: {}", artist_id, e);
+            tracing::warn!(artist_id = artist_id, error = %e, "Failed to star artist");
         }
     }
 
@@ -57,7 +58,7 @@ pub async fn star(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoRes
         if let Ok(album_id) = album_id_str.parse::<i32>()
             && let Err(e) = auth.state.star_album(user_id, album_id)
         {
-            tracing::warn!("Failed to star album {}: {}", album_id, e);
+            tracing::warn!(album_id = album_id, error = %e, "Failed to star album");
         }
     }
 
@@ -66,7 +67,7 @@ pub async fn star(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoRes
         if let Ok(song_id) = song_id_str.parse::<i32>()
             && let Err(e) = auth.state.star_song(user_id, song_id)
         {
-            tracing::warn!("Failed to star song {}: {}", song_id, e);
+            tracing::warn!(song_id = song_id, error = %e, "Failed to star song");
         }
     }
 
@@ -91,7 +92,7 @@ pub async fn unstar(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoR
         if let Ok(artist_id) = artist_id_str.parse::<i32>()
             && let Err(e) = auth.state.unstar_artist(user_id, artist_id)
         {
-            tracing::warn!("Failed to unstar artist {}: {}", artist_id, e);
+            tracing::warn!(artist_id = artist_id, error = %e, "Failed to unstar artist");
         }
     }
 
@@ -100,7 +101,7 @@ pub async fn unstar(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoR
         if let Ok(album_id) = album_id_str.parse::<i32>()
             && let Err(e) = auth.state.unstar_album(user_id, album_id)
         {
-            tracing::warn!("Failed to unstar album {}: {}", album_id, e);
+            tracing::warn!(album_id = album_id, error = %e, "Failed to unstar album");
         }
     }
 
@@ -109,7 +110,7 @@ pub async fn unstar(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoR
         if let Ok(song_id) = song_id_str.parse::<i32>()
             && let Err(e) = auth.state.unstar_song(user_id, song_id)
         {
-            tracing::warn!("Failed to unstar song {}: {}", song_id, e);
+            tracing::warn!(song_id = song_id, error = %e, "Failed to unstar song");
         }
     }
 
@@ -204,12 +205,12 @@ pub async fn scrobble(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl Int
 
             // Register the scrobble
             if let Err(e) = auth.state.scrobble(user_id, song_id, time, submission) {
-                tracing::warn!("Failed to scrobble song {}: {}", song_id, e);
+                tracing::warn!(song_id = song_id, error = %e, "Failed to scrobble song");
             }
 
             // If this is a "now playing" notification (submission=false), also update now playing
             if !submission && let Err(e) = auth.state.set_now_playing(user_id, song_id, player_id) {
-                tracing::warn!("Failed to set now playing for song {}: {}", song_id, e);
+                tracing::warn!(song_id = song_id, error = %e, "Failed to set now playing for song");
             }
         }
     }
@@ -292,7 +293,7 @@ pub async fn set_rating(
 
     // Try to set rating (we default to song rating as that's most common)
     if let Err(e) = auth.state.set_song_rating(user_id, id, rating) {
-        tracing::warn!("Failed to set rating for item {}: {}", id, e);
+        tracing::warn!(item_id = id, error = %e, "Failed to set rating for item");
         // Don't return an error - the API spec says this should succeed silently
     }
 

@@ -53,17 +53,17 @@ pub async fn start_scan(auth: SubsonicAuth) -> impl IntoResponse {
             match result {
                 Ok(Ok(stats)) => {
                     tracing::info!(
-                        "Scan complete: {} tracks found, {} added, {} failed",
-                        stats.tracks_found,
-                        stats.tracks_added,
-                        stats.tracks_failed
+                        tracks.found = stats.tracks_found,
+                        tracks.added = stats.tracks_added,
+                        tracks.failed = stats.tracks_failed,
+                        "Scan complete"
                     );
                 }
                 Ok(Err(e)) => {
-                    tracing::error!("Scan failed: {}", e);
+                    tracing::error!(error = %e, "Scan failed");
                 }
                 Err(e) => {
-                    tracing::error!("Scan task panicked: {}", e);
+                    tracing::error!(error = %e, "Scan task panicked");
                 }
             }
         });

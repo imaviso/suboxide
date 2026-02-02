@@ -18,7 +18,8 @@ fn parse_repeated_param(query: &str, param_name: &str) -> Vec<String> {
         {
             // URL decode the value
             values.push(
-                urlencoding::decode(value).map_or_else(|_| value.to_string(), std::borrow::Cow::into_owned),
+                urlencoding::decode(value)
+                    .map_or_else(|_| value.to_string(), std::borrow::Cow::into_owned),
             );
         }
     }
@@ -117,7 +118,7 @@ pub async fn save_play_queue(RawQuery(query): RawQuery, auth: SubsonicAuth) -> i
         auth.state
             .save_play_queue(user_id, &song_ids, current_song_id, position, changed_by)
     {
-        tracing::warn!("Failed to save play queue: {}", e);
+        tracing::warn!(error = %e, "Failed to save play queue");
         // Don't return an error - the API spec says this should succeed silently
     }
 
@@ -233,7 +234,7 @@ pub async fn save_play_queue_by_index(
         auth.state
             .save_play_queue(user_id, &song_ids, current_song_id, position, changed_by)
     {
-        tracing::warn!("Failed to save play queue by index: {}", e);
+        tracing::warn!(error = %e, "Failed to save play queue by index");
         // Don't return an error - the API spec says this should succeed silently
     }
 

@@ -83,7 +83,7 @@ pub enum ApiError {
 
 impl ApiError {
     /// Get the Subsonic error code for this error.
-    #[must_use] 
+    #[must_use]
     pub const fn code(&self) -> u32 {
         match self {
             Self::Generic(_) => ErrorCode::Generic as u32,
@@ -102,7 +102,7 @@ impl ApiError {
     }
 
     /// Get the error message.
-    #[must_use] 
+    #[must_use]
     pub fn message(&self) -> String {
         self.to_string()
     }

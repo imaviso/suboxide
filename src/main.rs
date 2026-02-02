@@ -3,6 +3,10 @@
 use std::sync::Arc;
 
 use axum::{Router, extract::FromRef};
+use mimalloc::MiMalloc;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 use clap::{Parser, Subcommand};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
@@ -14,7 +18,7 @@ use subsonic::db::{
     DbConfig, DbPool, MusicFolderRepository, NewUser, UserRepository, run_migrations,
 };
 use subsonic::models::music::NewMusicFolder;
-use subsonic::scanner::{AutoScanner, ScanMode, ScanState, Scanner};
+use subsonic::scanner::{AutoScanner, ScanMode, ScanState, ScanStateHandle, Scanner};
 
 /// Subsonic-compatible music streaming server.
 #[derive(Parser)]
@@ -119,13 +123,14 @@ enum Commands {
 #[derive(Clone)]
 pub struct AppState {
     auth: Arc<DatabaseAuthState>,
-    scan_state: Arc<ScanState>,
+    scan_state: ScanStateHandle,
 }
 
 impl AppState {
+    /// Create a new application state with the given database pool.
     #[must_use]
     pub fn new(pool: DbPool) -> Self {
-        let scan_state = Arc::new(ScanState::new());
+        let scan_state = ScanStateHandle::new(ScanState::new());
         Self {
             auth: Arc::new(DatabaseAuthState::with_scan_state(pool, scan_state.clone())),
             scan_state,
@@ -134,7 +139,7 @@ impl AppState {
 
     /// Get the shared scan state for use by `AutoScanner`.
     #[must_use]
-    pub fn scan_state(&self) -> Arc<ScanState> {
+    pub fn scan_state(&self) -> ScanStateHandle {
         self.scan_state.clone()
     }
 }
@@ -237,15 +242,39 @@ fn create_router(state: AppState) -> Router {
         .with_state(state)
 }
 
-fn setup_database(database_url: &str) -> DbPool {
+/// Errors that can occur during database setup.
+#[derive(Debug)]
+enum SetupError {
+    PoolCreation(String),
+    Connection(String),
+    Migration(String),
+}
+
+impl std::fmt::Display for SetupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PoolCreation(msg) => write!(f, "Failed to create database pool: {msg}"),
+            Self::Connection(msg) => write!(f, "Failed to get database connection: {msg}"),
+            Self::Migration(msg) => write!(f, "Failed to run migrations: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for SetupError {}
+
+fn setup_database(database_url: &str) -> Result<DbPool, SetupError> {
     let config = DbConfig::new(database_url);
-    let pool = config.build_pool().expect("Failed to create database pool");
+    let pool = config
+        .build_pool()
+        .map_err(|e| SetupError::PoolCreation(e.to_string()))?;
 
     // Run migrations
-    let mut conn = pool.get().expect("Failed to get database connection");
-    run_migrations(&mut conn).expect("Failed to run migrations");
+    let mut conn = pool
+        .get()
+        .map_err(|e| SetupError::Connection(e.to_string()))?;
+    run_migrations(&mut conn).map_err(|e| SetupError::Migration(e.to_string()))?;
 
-    pool
+    Ok(pool)
 }
 
 fn create_user(
@@ -293,7 +322,13 @@ async fn main() {
         .init();
 
     // Setup database
-    let pool = setup_database(&cli.database);
+    let pool = match setup_database(&cli.database) {
+        Ok(pool) => pool,
+        Err(e) => {
+            tracing::error!(error = %e, "Database setup failed");
+            std::process::exit(1);
+        }
+    };
 
     match cli.command {
         Some(Commands::CreateUser {
@@ -314,16 +349,16 @@ async fn main() {
                         println!("{api_key}");
                     }
                     Err(e) => {
-                        eprintln!("Failed to generate API key: {e}");
+                        tracing::error!(error = %e, username = %username, "Failed to generate API key");
                         std::process::exit(1);
                     }
                 },
                 Ok(None) => {
-                    eprintln!("User '{username}' not found");
+                    tracing::error!(username = %username, "User not found");
                     std::process::exit(1);
                 }
                 Err(e) => {
-                    eprintln!("Database error: {e}");
+                    tracing::error!(error = %e, username = %username, "Database error while finding user");
                     std::process::exit(1);
                 }
             }
@@ -336,20 +371,20 @@ async fn main() {
                         println!("Revoked API key for user '{username}'");
                     }
                     Ok(false) => {
-                        eprintln!("User '{username}' not found");
+                        tracing::error!(username = %username, "User not found when revoking API key");
                         std::process::exit(1);
                     }
                     Err(e) => {
-                        eprintln!("Failed to revoke API key: {e}");
+                        tracing::error!(error = %e, username = %username, "Failed to revoke API key");
                         std::process::exit(1);
                     }
                 },
                 Ok(None) => {
-                    eprintln!("User '{username}' not found");
+                    tracing::error!(username = %username, "User not found");
                     std::process::exit(1);
                 }
                 Err(e) => {
-                    eprintln!("Database error: {e}");
+                    tracing::error!(error = %e, username = %username, "Database error");
                     std::process::exit(1);
                 }
             }
@@ -367,11 +402,11 @@ async fn main() {
                     }
                 }
                 Ok(None) => {
-                    eprintln!("User '{username}' not found");
+                    tracing::error!(username = %username, "User not found");
                     std::process::exit(1);
                 }
                 Err(e) => {
-                    eprintln!("Database error: {e}");
+                    tracing::error!(error = %e, username = %username, "Database error");
                     std::process::exit(1);
                 }
             }
@@ -385,7 +420,7 @@ async fn main() {
                     println!("  Path: {}", folder.path);
                 }
                 Err(e) => {
-                    eprintln!("Failed to add music folder: {e}");
+                    tracing::error!(error = %e, folder_name = %name, "Failed to add music folder");
                     std::process::exit(1);
                 }
             }
@@ -413,7 +448,7 @@ async fn main() {
                     }
                 }
                 Err(e) => {
-                    eprintln!("Failed to list music folders: {e}");
+                    tracing::error!(error = %e, "Failed to list music folders");
                     std::process::exit(1);
                 }
             }
@@ -425,11 +460,11 @@ async fn main() {
                     println!("Removed music folder with id {id}");
                 }
                 Ok(false) => {
-                    eprintln!("Music folder with id {id} not found");
+                    tracing::error!(folder_id = id, "Music folder not found");
                     std::process::exit(1);
                 }
                 Err(e) => {
-                    eprintln!("Failed to remove music folder: {e}");
+                    tracing::error!(error = %e, folder_id = id, "Failed to remove music folder");
                     std::process::exit(1);
                 }
             }
@@ -461,7 +496,7 @@ async fn main() {
                     println!("  Cover art saved:  {}", stats.cover_art_saved);
                 }
                 Err(e) => {
-                    eprintln!("Scan failed: {e}");
+                    tracing::error!(error = %e, "Scan failed");
                     std::process::exit(1);
                 }
             }
@@ -470,21 +505,67 @@ async fn main() {
             auto_scan,
             auto_scan_interval,
         }) => {
-            run_server(pool, cli.port, auto_scan, auto_scan_interval).await;
+            if let Err(e) = run_server(pool, cli.port, auto_scan, auto_scan_interval).await {
+                tracing::error!(error = %e, "Server failed");
+                std::process::exit(1);
+            }
         }
         None => {
             // Default: start server without auto-scan
-            run_server(pool, cli.port, false, 300).await;
+            if let Err(e) = run_server(pool, cli.port, false, 300).await {
+                tracing::error!(error = %e, "Server failed");
+                std::process::exit(1);
+            }
         }
     }
 }
 
-async fn run_server(pool: DbPool, port: u16, auto_scan: bool, auto_scan_interval: u64) {
+/// Errors that can occur during server startup.
+#[derive(Debug)]
+enum ServerError {
+    UserCheck(Box<dyn std::error::Error + Send + Sync + 'static>),
+    Bind(std::io::Error),
+    LocalAddr(std::io::Error),
+    Serve(std::io::Error),
+}
+
+impl std::fmt::Display for ServerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UserCheck(e) => write!(f, "Failed to check users: {e}"),
+            Self::Bind(e) => write!(f, "Failed to bind to address: {e}"),
+            Self::LocalAddr(e) => write!(f, "Failed to get local address: {e}"),
+            Self::Serve(e) => write!(f, "Server error: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for ServerError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::UserCheck(e) => Some(e.as_ref()),
+            Self::Bind(e) | Self::LocalAddr(e) | Self::Serve(e) => Some(e),
+        }
+    }
+}
+
+async fn run_server(
+    pool: DbPool,
+    port: u16,
+    auto_scan: bool,
+    auto_scan_interval: u64,
+) -> Result<(), ServerError> {
     // Check if there are any users
     let repo = UserRepository::new(pool.clone());
-    if !repo.has_users().unwrap_or(false) {
-        tracing::warn!("No users found in database. Create one with:");
-        tracing::warn!("  subsonic create-user --username admin --password <password> --admin");
+    let has_users = repo
+        .has_users()
+        .map_err(|e| ServerError::UserCheck(Box::new(e)))?;
+    if !has_users {
+        tracing::warn!("No users found in database");
+        tracing::warn!(
+            command = "subsonic create-user --username admin --password <password> --admin",
+            "Create a user with"
+        );
     }
 
     let state = AppState::new(pool.clone());
@@ -495,8 +576,8 @@ async fn run_server(pool: DbPool, port: u16, auto_scan: bool, auto_scan_interval
         let scan_state = state.scan_state();
         let mut auto_scanner = AutoScanner::with_interval(pool, scan_state, auto_scan_interval);
         tracing::info!(
-            "Auto-scan enabled with interval {} seconds",
-            auto_scan_interval
+            auto_scan_interval_secs = auto_scan_interval,
+            "Auto-scan enabled"
         );
         Some(auto_scanner.start())
     } else {
@@ -504,23 +585,16 @@ async fn run_server(pool: DbPool, port: u16, auto_scan: bool, auto_scan_interval
     };
 
     let addr = format!("0.0.0.0:{port}");
-    let listener = match tokio::net::TcpListener::bind(&addr).await {
-        Ok(l) => l,
-        Err(e) => {
-            tracing::error!("Failed to bind to {}: {}", addr, e);
-            tracing::error!("Is another process already using port {}?", port);
-            std::process::exit(1);
-        }
-    };
-    tracing::info!(
-        "Subsonic server listening on {}",
-        listener
-            .local_addr()
-            .expect("listener should have local addr")
-    );
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
+        .map_err(ServerError::Bind)?;
 
-    if let Err(e) = axum::serve(listener, app).await {
-        tracing::error!("Server error: {}", e);
-        std::process::exit(1);
-    }
+    let local_addr = listener.local_addr().map_err(ServerError::LocalAddr)?;
+    tracing::info!(addr = %local_addr, "Subsonic server listening");
+
+    axum::serve(listener, app)
+        .await
+        .map_err(ServerError::Serve)?;
+
+    Ok(())
 }

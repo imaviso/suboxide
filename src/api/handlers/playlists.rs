@@ -22,7 +22,8 @@ fn parse_repeated_param(query: &str, param_name: &str) -> Vec<String> {
         {
             // URL decode the value
             values.push(
-                urlencoding::decode(value).map_or_else(|_| value.to_string(), std::borrow::Cow::into_owned),
+                urlencoding::decode(value)
+                    .map_or_else(|_| value.to_string(), std::borrow::Cow::into_owned),
             );
         }
     }
@@ -103,8 +104,7 @@ pub async fn get_playlist(
 
     // Get the playlist
     let Some(playlist) = auth.state.get_playlist(playlist_id) else {
-        return error_response(auth.format, &ApiError::NotFound("Playlist".into()))
-            .into_response();
+        return error_response(auth.format, &ApiError::NotFound("Playlist".into())).into_response();
     };
 
     // Check access: user must own the playlist or it must be public
@@ -194,11 +194,8 @@ pub async fn create_playlist(
     if let Some(playlist_id_str) = params.playlist_id.as_ref() {
         // Update existing playlist
         let Ok(playlist_id) = playlist_id_str.parse::<i32>() else {
-            return error_response(
-                auth.format,
-                &ApiError::Generic("Invalid playlistId".into()),
-            )
-            .into_response();
+            return error_response(auth.format, &ApiError::Generic("Invalid playlistId".into()))
+                .into_response();
         };
 
         // Check ownership
@@ -215,7 +212,7 @@ pub async fn create_playlist(
             &song_ids,
             &[], // no songs to remove
         ) {
-            tracing::warn!("Failed to update playlist {}: {}", playlist_id, e);
+            tracing::warn!(playlist_id = playlist_id, error = %e, "Failed to update playlist");
             return error_response(auth.format, &ApiError::Generic(e)).into_response();
         }
 
@@ -317,7 +314,7 @@ pub async fn create_playlist(
             ok_playlist(auth.format, response).into_response()
         }
         Err(e) => {
-            tracing::warn!("Failed to create playlist: {}", e);
+            tracing::warn!(error = %e, "Failed to create playlist");
             error_response(auth.format, &ApiError::Generic(e)).into_response()
         }
     }
@@ -393,7 +390,7 @@ pub async fn update_playlist(
         &songs_to_add,
         &indices_to_remove,
     ) {
-        tracing::warn!("Failed to update playlist {}: {}", playlist_id, e);
+        tracing::warn!(playlist_id = playlist_id, error = %e, "Failed to update playlist");
         return error_response(auth.format, &ApiError::Generic(e)).into_response();
     }
 
@@ -433,7 +430,7 @@ pub async fn delete_playlist(
             error_response(auth.format, &ApiError::NotFound("Playlist".into())).into_response()
         }
         Err(e) => {
-            tracing::warn!("Failed to delete playlist {}: {}", playlist_id, e);
+            tracing::warn!(playlist_id = playlist_id, error = %e, "Failed to delete playlist");
             error_response(auth.format, &ApiError::Generic(e)).into_response()
         }
     }

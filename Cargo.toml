@@ -1,6 +1,6 @@
 [package]
 name = "subsonic"
-version = "0.9.1"
+version = "0.1.0"
 edition = "2024"
 
 [dependencies]
@@ -40,8 +40,12 @@ rayon = "1.10"
 dirs = "6"
 urlencoding = "2"
 
+# Allocator
+mimalloc = { version = "0.1", default-features = false }
+
 [profile.release]
 lto = true
+panic = "abort"
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }

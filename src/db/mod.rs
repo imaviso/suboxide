@@ -2,7 +2,7 @@
 
 pub mod connection;
 pub mod repository;
-pub mod schema;
+pub(crate) mod schema;
 
 pub use connection::{DbConfig, DbConn, DbPool, run_migrations};
 pub use repository::{

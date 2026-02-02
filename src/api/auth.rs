@@ -42,10 +42,10 @@ use crate::db::{
     UserUpdate,
 };
 use crate::models::User;
-use crate::models::user::UserRoles;
 use crate::models::music::{Album, Artist, MusicFolder, Song};
-use crate::scanner::ScanState;
+use crate::models::user::UserRoles;
 use crate::scanner::lyrics::ExtractedLyrics;
+use crate::scanner::{ScanState, ScanStateHandle};
 use chrono::NaiveDateTime;
 
 /// Application state that must be available for auth.
@@ -320,7 +320,7 @@ pub trait AuthState: Send + Sync + 'static {
     /// Get the database pool for scanning operations.
     fn get_db_pool(&self) -> DbPool;
     /// Get the scan state for checking/updating scan progress.
-    fn get_scan_state(&self) -> Arc<ScanState>;
+    fn get_scan_state(&self) -> ScanStateHandle;
 }
 
 /// Common query parameters for all Subsonic API requests.
@@ -355,13 +355,13 @@ pub struct AuthParams {
 
 impl AuthParams {
     /// Get the response format.
-    #[must_use] 
+    #[must_use]
     pub fn format(&self) -> Format {
         Format::from_param(self.f.as_deref())
     }
 
     /// Decode password if it's hex-encoded (prefixed with "enc:").
-    #[must_use] 
+    #[must_use]
     pub fn decode_password(password: &str) -> String {
         password.strip_prefix("enc:").map_or_else(
             || password.to_string(),
@@ -376,7 +376,7 @@ impl AuthParams {
 
     /// Merge with another `AuthParams`, taking non-empty values from self.
     /// This is used to combine query params (higher priority) with form params.
-    #[must_use] 
+    #[must_use]
     pub fn merge_with(mut self, other: Self) -> Self {
         if self.u.is_empty() {
             self.u = other.u;
@@ -406,13 +406,13 @@ impl AuthParams {
     }
 
     /// Check if API key auth is being used.
-    #[must_use] 
+    #[must_use]
     pub const fn uses_api_key(&self) -> bool {
         self.api_key.is_some()
     }
 
     /// Check if username/password auth is being used.
-    #[must_use] 
+    #[must_use]
     pub const fn uses_user_auth(&self) -> bool {
         !self.u.is_empty() || self.p.is_some() || self.t.is_some()
     }
@@ -442,7 +442,19 @@ pub struct SubsonicAuth {
     pub state: Arc<dyn AuthState>,
 }
 
+impl std::fmt::Debug for SubsonicAuth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SubsonicAuth")
+            .field("user", &self.user)
+            .field("format", &self.format)
+            .field("params", &self.params)
+            .field("state", &"<dyn AuthState>")
+            .finish()
+    }
+}
+
 /// Error wrapper that includes format information for proper error responses.
+#[derive(Debug)]
 pub struct AuthError {
     pub error: ApiError,
     pub format: Format,
@@ -616,18 +628,19 @@ pub struct DatabaseAuthState {
     rating_repo: RatingRepository,
     playlist_repo: PlaylistRepository,
     play_queue_repo: PlayQueueRepository,
-    scan_state: Arc<ScanState>,
+    scan_state: ScanStateHandle,
 }
 
 impl DatabaseAuthState {
     /// Create a new database auth state with its own scan state.
-    #[must_use] 
+    #[must_use]
     pub fn new(pool: DbPool) -> Self {
-        Self::with_scan_state(pool, Arc::new(ScanState::new()))
+        Self::with_scan_state(pool, ScanStateHandle::new(ScanState::new()))
     }
 
     /// Create a new database auth state with a shared scan state.
-    pub fn with_scan_state(pool: DbPool, scan_state: Arc<ScanState>) -> Self {
+    #[must_use]
+    pub fn with_scan_state(pool: DbPool, scan_state: ScanStateHandle) -> Self {
         Self {
             pool: pool.clone(),
             user_repo: UserRepository::new(pool.clone()),
@@ -646,13 +659,13 @@ impl DatabaseAuthState {
     }
 
     /// Get a reference to the user repository.
-    #[must_use] 
+    #[must_use]
     pub const fn user_repo(&self) -> &UserRepository {
         &self.user_repo
     }
 
     /// Get a reference to the music folder repository.
-    #[must_use] 
+    #[must_use]
     pub const fn music_folder_repo(&self) -> &MusicFolderRepository {
         &self.music_folder_repo
     }
@@ -1228,7 +1241,7 @@ impl AuthState for DatabaseAuthState {
         self.pool.clone()
     }
 
-    fn get_scan_state(&self) -> Arc<ScanState> {
+    fn get_scan_state(&self) -> ScanStateHandle {
         self.scan_state.clone()
     }
 

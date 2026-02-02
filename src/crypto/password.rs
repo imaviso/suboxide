@@ -31,8 +31,11 @@ pub enum PasswordError {
 /// ```
 /// use subsonic::crypto::password::hash_password;
 ///
-/// let hash = hash_password("my_secure_password").unwrap();
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let hash = hash_password("my_secure_password")?;
 /// assert!(hash.starts_with("$argon2id$"));
+/// # Ok(())
+/// # }
 /// ```
 pub fn hash_password(password: &str) -> Result<String, PasswordError> {
     let salt = SaltString::generate(&mut OsRng);
@@ -60,9 +63,12 @@ pub fn hash_password(password: &str) -> Result<String, PasswordError> {
 /// ```
 /// use subsonic::crypto::password::{hash_password, verify_password};
 ///
-/// let hash = hash_password("my_password").unwrap();
-/// assert!(verify_password("my_password", &hash).unwrap());
-/// assert!(!verify_password("wrong_password", &hash).unwrap());
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let hash = hash_password("my_password")?;
+/// assert!(verify_password("my_password", &hash)?);
+/// assert!(!verify_password("wrong_password", &hash)?);
+/// # Ok(())
+/// # }
 /// ```
 pub fn verify_password(password: &str, hash: &str) -> Result<bool, PasswordError> {
     let parsed_hash = PasswordHash::new(hash).map_err(|_| PasswordError::InvalidHash)?;

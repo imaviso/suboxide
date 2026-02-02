@@ -21,7 +21,10 @@ const COVER_ART_CACHE_DIR: &str = ".cache/subsonic/covers";
 
 /// Get the cover art cache directory path.
 fn get_cover_art_dir() -> std::path::PathBuf {
-    dirs::home_dir().map_or_else(|| std::path::PathBuf::from(COVER_ART_CACHE_DIR), |h| h.join(COVER_ART_CACHE_DIR))
+    dirs::home_dir().map_or_else(
+        || std::path::PathBuf::from(COVER_ART_CACHE_DIR),
+        |h| h.join(COVER_ART_CACHE_DIR),
+    )
 }
 
 /// Validate that a song's path is within one of the configured music folders.
@@ -47,9 +50,9 @@ fn validate_song_path(song: &Song, auth: &SubsonicAuth) -> Result<PathBuf, &'sta
 
     // Song path is not within any music folder - potential path traversal
     tracing::warn!(
-        "Path traversal attempt blocked: song {} has path outside music folders: {}",
-        song.id,
-        song.path
+        song.id = song.id,
+        song.path = %song.path,
+        "Path traversal attempt blocked: song path outside music folders"
     );
     Err("Audio file not found in music library")
 }
@@ -110,8 +113,11 @@ pub async fn stream(
 
     // Validate the song path is within a music folder (prevents path traversal)
     let Ok(path) = validate_song_path(&song, &auth) else {
-        return error_response(auth.format, &ApiError::NotFound("Audio file not found".into()))
-            .into_response();
+        return error_response(
+            auth.format,
+            &ApiError::NotFound("Audio file not found".into()),
+        )
+        .into_response();
     };
 
     // Open the file
@@ -236,8 +242,11 @@ pub async fn download(
 
     // Validate the song path is within a music folder (prevents path traversal)
     let Ok(path) = validate_song_path(&song, &auth) else {
-        return error_response(auth.format, &ApiError::NotFound("Audio file not found".into()))
-            .into_response();
+        return error_response(
+            auth.format,
+            &ApiError::NotFound("Audio file not found".into()),
+        )
+        .into_response();
     };
 
     // Get filename for Content-Disposition and sanitize it to prevent header injection
@@ -343,8 +352,11 @@ pub async fn get_cover_art(
     }
 
     let Some(path) = cover_art_path else {
-        return error_response(auth.format, &ApiError::NotFound("Cover art not found".into()))
-            .into_response();
+        return error_response(
+            auth.format,
+            &ApiError::NotFound("Cover art not found".into()),
+        )
+        .into_response();
     };
 
     // Open the file

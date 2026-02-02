@@ -6,14 +6,14 @@ use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use thiserror::Error;
 
+use crate::db::DbPool;
 use crate::db::schema::{
     albums, artists, music_folders, play_queue, play_queue_songs, playlist_songs, playlists, songs,
     starred, user_ratings, users,
 };
-use crate::db::DbPool;
+use crate::models::User;
 use crate::models::music::{Album, Artist, MusicFolder, NewMusicFolder, Song};
 use crate::models::user::UserRoles;
-use crate::models::User;
 
 /// Errors that can occur during user repository operations.
 #[derive(Debug, Error)]
@@ -173,7 +173,7 @@ impl<'a> NewUser<'a> {
 }
 
 /// Repository for user database operations.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct UserRepository {
     pool: DbPool,
 }
@@ -475,7 +475,7 @@ impl<'a> From<&'a NewMusicFolder> for NewMusicFolderRow<'a> {
 }
 
 /// Repository for music folder database operations.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MusicFolderRepository {
     pool: DbPool,
 }
@@ -623,7 +623,7 @@ impl From<ArtistRow> for Artist {
 }
 
 /// Repository for artist database operations.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ArtistRepository {
     pool: DbPool,
 }
@@ -803,7 +803,7 @@ impl From<AlbumRow> for Album {
 }
 
 /// Repository for album database operations.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AlbumRepository {
     pool: DbPool,
 }
@@ -1108,7 +1108,7 @@ impl From<SongRow> for Song {
 }
 
 /// Repository for song database operations.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SongRepository {
     pool: DbPool,
 }
@@ -1395,7 +1395,7 @@ pub struct NewStarred {
 }
 
 /// Repository for starred items database operations.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct StarredRepository {
     pool: DbPool,
 }
@@ -1811,7 +1811,7 @@ pub struct NowPlayingEntry {
 }
 
 /// Repository for now playing database operations.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct NowPlayingRepository {
     pool: DbPool,
 }
@@ -1930,7 +1930,7 @@ pub struct NewScrobble {
 }
 
 /// Repository for scrobble database operations.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ScrobbleRepository {
     pool: DbPool,
 }
@@ -2052,7 +2052,7 @@ pub struct NewUserRating {
 }
 
 /// Repository for user rating database operations.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RatingRepository {
     pool: DbPool,
 }
@@ -2309,7 +2309,7 @@ pub struct Playlist {
 }
 
 /// Repository for playlist database operations.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PlaylistRepository {
     pool: DbPool,
 }
@@ -2704,7 +2704,7 @@ pub struct PlayQueue {
 }
 
 /// Repository for play queue database operations.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PlayQueueRepository {
     pool: DbPool,
 }
