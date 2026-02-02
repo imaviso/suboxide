@@ -62,11 +62,19 @@ pub struct LastFmAttr {
     pub status: String,
 }
 
-/// Last.fm error response.
+/// Last.fm API error response.
 #[derive(Debug, Clone, Deserialize)]
 pub struct LastFmError {
     pub error: i32,
     pub message: String,
+}
+
+/// Last.fm session info.
+#[derive(Debug, Clone, Deserialize)]
+pub struct LastFmSession {
+    pub name: String,
+    pub key: String,
+    pub subscriber: i32,
 }
 
 /// Cache entry for Last.fm artist info.

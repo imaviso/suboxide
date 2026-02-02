@@ -137,6 +137,13 @@ enum Commands {
         #[arg(short, long)]
         username: String,
     },
+
+    /// Interactively link a user's Last.fm account
+    LinkLastfm {
+        /// Username of the user
+        #[arg(short, long)]
+        username: String,
+    },
 }
 
 /// Application state shared across all handlers.
@@ -504,6 +511,66 @@ async fn main() {
                 }
                 Err(e) => {
                     tracing::error!(error = %e, username = %username, "Database error");
+                    std::process::exit(1);
+                }
+            }
+        }
+        Some(Commands::LinkLastfm { username }) => {
+            // Check if Last.fm is configured
+            let api_key = std::env::var("LASTFM_API_KEY").unwrap_or_default();
+            let api_secret = std::env::var("LASTFM_API_SECRET").unwrap_or_default();
+            
+            let Some(client) = LastFmClient::new(api_key.clone(), api_secret) else {
+                eprintln!("Error: Last.fm integration is not configured.");
+                eprintln!("Please set LASTFM_API_KEY and LASTFM_API_SECRET environment variables.");
+                std::process::exit(1);
+            };
+
+            // Find user first
+            let repo = UserRepository::new(pool);
+            let user = match repo.find_by_username(&username) {
+                Ok(Some(user)) => user,
+                Ok(None) => {
+                    eprintln!("Error: User '{username}' not found.");
+                    std::process::exit(1);
+                }
+                Err(e) => {
+                    eprintln!("Error finding user: {e}");
+                    std::process::exit(1);
+                }
+            };
+
+            println!("To link your Last.fm account, please visit:");
+            println!(
+                "http://www.last.fm/api/auth/?api_key={}&cb=http://localhost:8080/callback",
+                client.api_key()
+            );
+            println!("\nAfter approving access, you will be redirected to a URL (or see a token).");
+            println!("Please paste the 'token' parameter from the URL here:");
+
+            let mut token = String::new();
+            if std::io::stdin().read_line(&mut token).is_err() {
+                eprintln!("Error reading input");
+                std::process::exit(1);
+            }
+            let token = token.trim();
+
+            if token.is_empty() {
+                eprintln!("Operation cancelled.");
+                std::process::exit(1);
+            }
+
+            println!("Exchanging token for session...");
+            match client.get_session(token).await {
+                Ok(session) => {
+                    println!("Successfully authenticated as Last.fm user: {}", session.name);
+                    match repo.set_lastfm_session_key(user.id, Some(&session.key)) {
+                        Ok(_) => println!("Last.fm session linked successfully!"),
+                        Err(e) => eprintln!("Failed to save session key: {e}"),
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to get session from Last.fm: {e}");
                     std::process::exit(1);
                 }
             }

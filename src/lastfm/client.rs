@@ -6,7 +6,7 @@ use md5::{Digest, Md5};
 use reqwest::Client;
 use serde::Deserialize;
 
-use super::models::LastFmArtist;
+use super::models::{LastFmArtist, LastFmSession};
 
 const LASTFM_API_URL: &str = "https://ws.audioscrobbler.com/2.0/";
 
@@ -65,6 +65,12 @@ impl LastFmClient {
         true // If we exist, we're configured
     }
 
+    /// Get the API key.
+    #[must_use]
+    pub fn api_key(&self) -> &str {
+        &self.api_key
+    }
+
     /// Sign API parameters according to Last.fm rules.
     /// The signature is: `md5(sorted_param_names_concatenated_with_values` + secret)
     fn sign_params(&self, params: &BTreeMap<String, String>) -> String {
@@ -111,6 +117,48 @@ impl LastFmClient {
         params.insert("format".to_string(), "json".to_string());
 
         params
+    }
+
+    /// Get a Last.fm session from a token.
+    pub async fn get_session(&self, token: &str) -> Result<LastFmSession> {
+        // Response struct defined locally
+        #[derive(Deserialize)]
+        struct SessionResponse {
+            session: LastFmSession,
+        }
+
+        let mut extra = BTreeMap::new();
+        extra.insert("token".to_string(), token.to_string());
+
+        let params = self.build_params("auth.getSession", None, extra);
+
+        let response = self
+            .client
+            .get(LASTFM_API_URL)
+            .query(&params)
+            .send()
+            .await?;
+
+        let status = response.status();
+        let body: String = response.text().await?;
+
+        if !status.is_success() {
+            if let Ok(error) = serde_json::from_str::<LastFmApiError>(&body) {
+                return Err(LastFmError::Api {
+                    code: error.error,
+                    message: error.message,
+                });
+            }
+            return Err(LastFmError::Api {
+                code: i32::from(status.as_u16()),
+                message: body,
+            });
+        }
+
+        let parsed: SessionResponse = serde_json::from_str(&body)
+            .map_err(|e| LastFmError::InvalidResponse(format!("Failed to parse: {e}")))?;
+
+        Ok(parsed.session)
     }
 
     /// Submit a scrobble to Last.fm.
