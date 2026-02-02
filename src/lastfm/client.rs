@@ -232,10 +232,6 @@ impl LastFmClient {
             artist: Option<LastFmArtist>,
         }
 
-        let mut extra = BTreeMap::new();
-        extra.insert("artist".to_string(), artist_name.to_string());
-        extra.insert("autocorrect".to_string(), "1".to_string());
-
         // For public data, no session key needed
         // Important: api_sig is NOT required for artist.getInfo unless authenticated
         // Including it with invalid logic causes "Invalid method signature" (error 13)
