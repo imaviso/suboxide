@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use md5::{Digest, Md5};
 use reqwest::Client;
+use scraper::{Html, Selector};
 use serde::Deserialize;
 
 use super::models::{LastFmArtist, LastFmSession};
@@ -272,6 +273,36 @@ impl LastFmClient {
             .map_err(|e| LastFmError::InvalidResponse(format!("Failed to parse: {e}")))?;
 
         Ok(parsed.artist)
+    }
+
+    /// Fetch the artist image from their Last.fm page by scraping the og:image meta tag.
+    pub async fn fetch_artist_image_from_page(&self, url: &str) -> Result<Option<String>> {
+        let response = self.client.get(url).send().await?;
+        let status = response.status();
+        let body = response.text().await?;
+
+        if !status.is_success() {
+            return Err(LastFmError::Api {
+                code: i32::from(status.as_u16()),
+                message: format!("Failed to fetch artist page: {body}"),
+            });
+        }
+
+        let document = Html::parse_document(&body);
+        let selector = Selector::parse("meta[property=\"og:image\"]")
+            .map_err(|e| LastFmError::InvalidResponse(format!("Invalid selector: {e:?}")))?;
+
+        let image_url = if let Some(element) = document.select(&selector).next()
+            && let Some(content) = element.value().attr("content")
+            && !content.is_empty()
+            && !content.contains("2a96cbd8b46e442fc41c2b86b821562f")
+        {
+            Some(content.to_string())
+        } else {
+            None
+        };
+
+        Ok(image_url)
     }
 
     /// Handle API response and check for errors.

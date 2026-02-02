@@ -1436,16 +1436,57 @@ impl AuthState for DatabaseAuthState {
                                 let (mut small, mut medium, mut large) =
                                     extract_image_urls(&lastfm_artist.image);
 
-                                // Filter out Last.fm placeholder images (star image)
-                                if let Some(ref url) = large
-                                    && url.contains("2a96cbd8b46e442fc41c2b86b821562f") {
-                                        tracing::warn!(artist = %artist_name, "Ignoring Last.fm placeholder image");
-                                        small = None;
-                                        medium = None;
-                                        large = None;
+                                // If API image is missing or a placeholder, try scraping the artist page
+                                if (large.is_none()
+                                    || large.as_ref().is_some_and(|u| {
+                                        u.contains("2a96cbd8b46e442fc41c2b86b821562f")
+                                    }))
+                                    && let Some(ref page_url) = lastfm_artist.url
+                                {
+                                    tracing::debug!(
+                                        artist = %artist_name,
+                                        url = %page_url,
+                                        "Attempting to scrape artist image from page"
+                                    );
+                                    match client.fetch_artist_image_from_page(page_url).await {
+                                        Ok(Some(scraped_url)) => {
+                                            tracing::debug!(
+                                                artist = %artist_name,
+                                                url = %scraped_url,
+                                                "Successfully scraped artist image"
+                                            );
+                                            large = Some(scraped_url);
+                                            // We don't have small/medium for scraped image usually, so just use large
+                                            if small.is_none() {
+                                                small = large.clone();
+                                            }
+                                            if medium.is_none() {
+                                                medium = large.clone();
+                                            }
+                                        }
+                                        Ok(None) => {
+                                            tracing::debug!(
+                                                artist = %artist_name,
+                                                "No image found on scraped page"
+                                            );
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                error = %e,
+                                                artist = %artist_name,
+                                                "Failed to scrape artist page"
+                                            );
+                                        }
                                     }
+                                }
 
-                                tracing::debug!(artist = %artist_name, small = ?small, medium = ?medium, large = ?large, "Extracted Last.fm image URLs");
+                                tracing::debug!(
+                                    artist = %artist_name,
+                                    small = ?small,
+                                    medium = ?medium,
+                                    large = ?large,
+                                    "Final Last.fm image URLs"
+                                );
                                 let bio = extract_biography(&lastfm_artist.bio);
 
                                 // Get similar artist names

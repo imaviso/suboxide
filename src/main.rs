@@ -595,7 +595,7 @@ async fn main() {
                 std::process::exit(1);
             };
 
-            println!("Querying Last.fm for artist: '{}'", artist);
+            println!("Querying Last.fm for artist: '{artist}'");
             match client.get_artist_info(&artist).await {
                 Ok(Some(info)) => {
                     println!("Found artist: {}", info.name);
