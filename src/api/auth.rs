@@ -1435,6 +1435,7 @@ impl AuthState for DatabaseAuthState {
                             Ok(Some(lastfm_artist)) => {
                                 let (small, medium, large) =
                                     extract_image_urls(&lastfm_artist.image);
+                                    tracing::debug!(artist = %artist_name, small = ?small, medium = ?medium, large = ?large, "Extracted Last.fm image URLs");
                                 let bio = extract_biography(&lastfm_artist.bio);
 
                                 // Get similar artist names
@@ -1464,6 +1465,18 @@ impl AuthState for DatabaseAuthState {
 
                                 // Download and persist artist image if available
                                 if let Some(image_url) = large {
+                                    // Check for known Last.fm placeholder (star image)
+                                    // The known generic "star" image from Last.fm often has this hash in the URL
+                                    // Example: https://lastfm.freetls.fastly.net/i/u/300x300/2a96cbd8b46e442fc41c2b86b821562f.png
+                                    if image_url.contains("2a96cbd8b46e442fc41c2b86b821562f") {
+                                        tracing::warn!(
+                                            artist = %artist_name,
+                                            url = %image_url,
+                                            "Skipping Last.fm placeholder image"
+                                        );
+                                        return;
+                                    }
+
                                     // Use a simpler approach for cover art dir to avoid circular dependency or complex moves
                                     // This duplicates logic from media.rs/scanner but is safe
                                     let cover_art_dir = dirs::home_dir().map_or_else(
