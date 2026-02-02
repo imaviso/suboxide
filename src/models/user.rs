@@ -36,6 +36,8 @@ pub struct User {
     pub subsonic_password: Option<String>,
     /// API key for `OpenSubsonic` apiKeyAuthentication extension.
     pub api_key: Option<String>,
+    /// Last.fm session key for scrobbling.
+    pub lastfm_session_key: Option<String>,
     pub email: Option<String>,
     pub roles: UserRoles,
     /// Max bitrate for streaming (0 = unlimited).
@@ -47,6 +49,12 @@ impl User {
     #[must_use]
     pub const fn is_admin(&self) -> bool {
         self.roles.admin_role
+    }
+
+    /// Check if user has Last.fm configured.
+    #[must_use]
+    pub const fn has_lastfm(&self) -> bool {
+        self.lastfm_session_key.is_some()
     }
 
     /// Verify password using Argon2.

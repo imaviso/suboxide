@@ -40,6 +40,10 @@ rayon = "1.10"
 dirs = "6"
 urlencoding = "2"
 
+# HTTP client for external APIs
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "form", "query", "charset", "http2"] }
+serde_urlencoded = "0.7"
+
 # Allocator
 mimalloc = { version = "0.1", default-features = false }
 

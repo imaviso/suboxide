@@ -1,10 +1,14 @@
 //! Database repository module.
 
+pub mod artist_cache;
 pub mod error;
 pub mod interaction;
 pub mod music;
 pub mod playlist;
 pub mod user;
+
+// Re-export artist cache types
+pub use artist_cache::ArtistInfoCacheRepository;
 
 // Re-export error types
 pub use error::{MusicRepoError, MusicRepoErrorKind, UserRepoError, UserRepoErrorKind};

@@ -23,6 +23,20 @@ diesel::table! {
         updated_at -> Timestamp,
         subsonic_password -> Nullable<Text>,
         api_key -> Nullable<Text>,
+        lastfm_session_key -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    artist_lastfm_info (artist_id) {
+        artist_id -> Integer,
+        biography -> Nullable<Text>,
+        last_fm_url -> Nullable<Text>,
+        small_image_url -> Nullable<Text>,
+        medium_image_url -> Nullable<Text>,
+        large_image_url -> Nullable<Text>,
+        similar_artists -> Nullable<Text>,
+        updated_at -> Timestamp,
     }
 }
 
@@ -193,6 +207,7 @@ diesel::table! {
 
 // Define foreign key relationships
 diesel::joinable!(albums -> artists (artist_id));
+diesel::joinable!(artist_lastfm_info -> artists (artist_id));
 diesel::joinable!(songs -> albums (album_id));
 diesel::joinable!(songs -> artists (artist_id));
 diesel::joinable!(songs -> music_folders (music_folder_id));
@@ -223,4 +238,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     playlist_songs,
     play_queue,
     play_queue_songs,
+    artist_lastfm_info,
 );

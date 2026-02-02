@@ -37,6 +37,7 @@ pub struct UserRow {
     pub updated_at: String,
     pub subsonic_password: Option<String>,
     pub api_key: Option<String>,
+    pub lastfm_session_key: Option<String>,
 }
 
 impl From<UserRow> for User {
@@ -47,6 +48,7 @@ impl From<UserRow> for User {
             password_hash: row.password_hash,
             subsonic_password: row.subsonic_password,
             api_key: row.api_key,
+            lastfm_session_key: row.lastfm_session_key,
             email: row.email,
             roles: UserRoles {
                 admin_role: row.admin_role,
@@ -493,6 +495,34 @@ impl UserRepository {
         self.set_api_key(user_id, None)
     }
 
+    /// Set or update a user's Last.fm session key.
+    pub fn set_lastfm_session_key(
+        &self,
+        user_id: i32,
+        session_key: Option<&str>,
+    ) -> Result<bool, UserRepoError> {
+        let mut conn = self.pool.get()?;
+
+        let updated = diesel::update(users::table.filter(users::id.eq(user_id)))
+            .set(users::lastfm_session_key.eq(session_key))
+            .execute(&mut conn)?;
+
+        Ok(updated > 0)
+    }
+
+    /// Get a user's Last.fm session key.
+    pub fn get_lastfm_session_key(&self, user_id: i32) -> Result<Option<String>, UserRepoError> {
+        let mut conn = self.pool.get()?;
+
+        let result = users::table
+            .filter(users::id.eq(user_id))
+            .select(users::lastfm_session_key)
+            .first::<Option<String>>(&mut conn)
+            .optional()?;
+
+        Ok(result.flatten())
+    }
+
     /// Update a user's subsonic password (used for token auth).
     pub fn update_subsonic_password(
         &self,
@@ -544,6 +574,10 @@ impl UserRepository {
                     .video_conversion_role
                     .map(|v| users::video_conversion_role.eq(v)),
                 update.max_bit_rate.map(|v| users::max_bit_rate.eq(v)),
+                update
+                    .lastfm_session_key
+                    .as_ref()
+                    .map(|sk| users::lastfm_session_key.eq(Some(sk.as_str()))),
             ))
             .execute(&mut conn)?;
 
@@ -569,6 +603,7 @@ pub struct UserUpdate {
     pub share_role: Option<bool>,
     pub video_conversion_role: Option<bool>,
     pub max_bit_rate: Option<i32>,
+    pub lastfm_session_key: Option<String>,
 }
 
 /// Builder for `UserUpdate`.
@@ -589,6 +624,7 @@ pub struct UserUpdateBuilder {
     share_role: Option<bool>,
     video_conversion_role: Option<bool>,
     max_bit_rate: Option<i32>,
+    lastfm_session_key: Option<String>,
 }
 
 impl UserUpdateBuilder {
@@ -610,7 +646,15 @@ impl UserUpdateBuilder {
             share_role: None,
             video_conversion_role: None,
             max_bit_rate: None,
+            lastfm_session_key: None,
         }
+    }
+
+    /// Set the Last.fm session key.
+    #[must_use]
+    pub fn lastfm_session_key(mut self, sk: impl Into<String>) -> Self {
+        self.lastfm_session_key = Some(sk.into());
+        self
     }
 
     #[must_use]
@@ -715,6 +759,7 @@ impl UserUpdateBuilder {
             share_role: self.share_role,
             video_conversion_role: self.video_conversion_role,
             max_bit_rate: self.max_bit_rate,
+            lastfm_session_key: self.lastfm_session_key,
         }
     }
 }

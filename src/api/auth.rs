@@ -35,12 +35,14 @@ use serde::Deserialize;
 use super::error::ApiError;
 use super::response::{Format, error_response};
 use crate::crypto::hash_password;
+use crate::db::repo::ArtistInfoCacheRepository;
 use crate::db::{
     AlbumRepository, ArtistRepository, DbPool, MusicFolderRepository, NewUser, NowPlayingEntry,
     NowPlayingRepository, PlayQueue, PlayQueueRepository, Playlist, PlaylistRepository,
     RatingRepository, ScrobbleRepository, SongRepository, StarredRepository, UserRepository,
     UserUpdate,
 };
+use crate::lastfm::{LastFmClient, models::extract_biography, models::extract_image_urls};
 use crate::models::User;
 use crate::models::music::{Album, Artist, MusicFolder, Song};
 use crate::models::user::UserRoles;
@@ -323,6 +325,18 @@ pub trait AuthState: Send + Sync + 'static {
     fn get_db_pool(&self) -> DbPool;
     /// Get the scan state for checking/updating scan progress.
     fn get_scan_state(&self) -> ScanStateHandle;
+
+    // Last.fm methods
+    /// Get artist info with Last.fm data and caching.
+    fn get_artist_info_with_cache(
+        &self,
+        artist_id: i32,
+    ) -> crate::models::music::ArtistInfo2Response;
+    /// Get artist info (non-ID3) with Last.fm data and caching.
+    fn get_artist_info_non_id3_with_cache(
+        &self,
+        artist_id: i32,
+    ) -> crate::models::music::ArtistInfoResponse;
 }
 
 /// Common query parameters for all Subsonic API requests.
@@ -630,19 +644,25 @@ pub struct DatabaseAuthState {
     rating_repo: RatingRepository,
     playlist_repo: PlaylistRepository,
     play_queue_repo: PlayQueueRepository,
+    artist_cache_repo: ArtistInfoCacheRepository,
     scan_state: ScanStateHandle,
+    lastfm_client: Option<LastFmClient>,
 }
 
 impl DatabaseAuthState {
     /// Create a new database auth state with its own scan state.
     #[must_use]
     pub fn new(pool: DbPool) -> Self {
-        Self::with_scan_state(pool, ScanStateHandle::new(ScanState::new()))
+        Self::with_scan_state(pool, ScanStateHandle::new(ScanState::new()), None)
     }
 
-    /// Create a new database auth state with a shared scan state.
+    /// Create a new database auth state with a shared scan state and optional Last.fm client.
     #[must_use]
-    pub fn with_scan_state(pool: DbPool, scan_state: ScanStateHandle) -> Self {
+    pub fn with_scan_state(
+        pool: DbPool,
+        scan_state: ScanStateHandle,
+        lastfm_client: Option<LastFmClient>,
+    ) -> Self {
         Self {
             pool: pool.clone(),
             user_repo: UserRepository::new(pool.clone()),
@@ -655,8 +675,10 @@ impl DatabaseAuthState {
             scrobble_repo: ScrobbleRepository::new(pool.clone()),
             rating_repo: RatingRepository::new(pool.clone()),
             playlist_repo: PlaylistRepository::new(pool.clone()),
-            play_queue_repo: PlayQueueRepository::new(pool),
+            play_queue_repo: PlayQueueRepository::new(pool.clone()),
+            artist_cache_repo: ArtistInfoCacheRepository::new(pool),
             scan_state,
+            lastfm_client,
         }
     }
 
@@ -670,6 +692,58 @@ impl DatabaseAuthState {
     #[must_use]
     pub const fn music_folder_repo(&self) -> &MusicFolderRepository {
         &self.music_folder_repo
+    }
+
+    /// Submit a scrobble to Last.fm in the background.
+    fn submit_lastfm_scrobble(
+        &self,
+        user_id: i32,
+        song: &crate::models::music::Song,
+        timestamp: i64,
+    ) {
+        if let Some(client) = &self.lastfm_client
+            && let Ok(Some(session_key)) = self.user_repo.get_lastfm_session_key(user_id)
+        {
+            let client = client.clone();
+            let artist = song.artist_name.clone().unwrap_or_default();
+            let track = song.title.clone();
+            let album = song.album_name.clone();
+
+            tokio::spawn(async move {
+                if let Err(e) = client
+                    .scrobble(&session_key, &artist, &track, album.as_deref(), timestamp)
+                    .await
+                {
+                    tracing::warn!(error = %e, "Failed to submit scrobble to Last.fm");
+                } else {
+                    tracing::debug!(artist = %artist, track = %track, "Submitted scrobble to Last.fm");
+                }
+            });
+        }
+    }
+
+    /// Update Last.fm now playing in the background.
+    fn update_lastfm_now_playing(&self, user_id: i32, song: &crate::models::music::Song) {
+        if let Some(client) = &self.lastfm_client
+            && let Ok(Some(session_key)) = self.user_repo.get_lastfm_session_key(user_id)
+        {
+            let client = client.clone();
+            let artist = song.artist_name.clone().unwrap_or_default();
+            let track = song.title.clone();
+            let album = song.album_name.clone();
+            let duration = Some(song.duration);
+
+            tokio::spawn(async move {
+                if let Err(e) = client
+                    .update_now_playing(&session_key, &artist, &track, album.as_deref(), duration)
+                    .await
+                {
+                    tracing::warn!(error = %e, "Failed to update Last.fm now playing");
+                } else {
+                    tracing::debug!(artist = %artist, track = %track, "Updated Last.fm now playing");
+                }
+            });
+        }
     }
 }
 
@@ -958,9 +1032,18 @@ impl AuthState for DatabaseAuthState {
         time: Option<i64>,
         submission: bool,
     ) -> Result<(), String> {
+        // Record scrobble locally
         self.scrobble_repo
             .scrobble(user_id, song_id, time, submission)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+
+        // Submit to Last.fm if configured and this is a real submission (not "now playing")
+        if submission && let Some(song) = self.get_song(song_id) {
+            let timestamp = time.unwrap_or_else(|| chrono::Utc::now().timestamp());
+            self.submit_lastfm_scrobble(user_id, &song, timestamp);
+        }
+
+        Ok(())
     }
 
     fn set_now_playing(
@@ -969,9 +1052,17 @@ impl AuthState for DatabaseAuthState {
         song_id: i32,
         player_id: Option<&str>,
     ) -> Result<(), String> {
+        // Record locally
         self.now_playing_repo
             .set_now_playing(user_id, song_id, player_id)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+
+        // Update Last.fm now playing if configured
+        if let Some(song) = self.get_song(song_id) {
+            self.update_lastfm_now_playing(user_id, &song);
+        }
+
+        Ok(())
     }
 
     fn get_now_playing(&self) -> Vec<NowPlayingEntry> {
@@ -1236,6 +1327,7 @@ impl AuthState for DatabaseAuthState {
             share_role,
             video_conversion_role,
             max_bit_rate,
+            lastfm_session_key: None, // Not updated through this method
         };
 
         self.user_repo
@@ -1280,6 +1372,132 @@ impl AuthState for DatabaseAuthState {
 
         // Extract lyrics from the audio file
         extract_lyrics(Path::new(&song.path))
+    }
+
+    fn get_artist_info_with_cache(
+        &self,
+        artist_id: i32,
+    ) -> crate::models::music::ArtistInfo2Response {
+        use crate::lastfm::models::LastFmArtistCache;
+        use crate::models::music::{ArtistID3Response, ArtistInfo2Response};
+
+        // Get the artist from the database
+        let Some(artist) = self.get_artist(artist_id) else {
+            return ArtistInfo2Response::empty();
+        };
+
+        // Start with basic info from the artist record
+        let mut response = ArtistInfo2Response::from_artist(&artist);
+
+        // Try to get cached Last.fm data
+        match self.artist_cache_repo.get_valid_cache(artist_id) {
+            Ok(Some(cache)) => {
+                // Use cached data
+                response.biography = cache.biography;
+                response.last_fm_url = cache.last_fm_url;
+                response.small_image_url = cache.small_image_url;
+                response.medium_image_url = cache.medium_image_url;
+                response.large_image_url = cache.large_image_url;
+
+                // Try to find similar artists by name
+                for similar_name in &cache.similar_artists {
+                    if let Some(similar_artist) =
+                        self.artist_repo.find_by_name(similar_name).ok().flatten()
+                    {
+                        let album_count = self.get_artist_album_count(similar_artist.id);
+                        response
+                            .similar_artists
+                            .push(ArtistID3Response::from_artist(
+                                &similar_artist,
+                                Some(i32::try_from(album_count).unwrap_or(0)),
+                            ));
+                    }
+                }
+            }
+            _ => {
+                // No valid cache, try to fetch from Last.fm if configured
+                if let Some(client) = &self.lastfm_client {
+                    let client = client.clone();
+                    let artist_name = artist.name.clone();
+                    let artist_id_copy = artist_id;
+                    let cache_repo = self.artist_cache_repo.clone();
+                    let _artist_repo = self.artist_repo.clone();
+
+                    // Spawn async task to fetch and cache
+                    tokio::spawn(async move {
+                        match client.get_artist_info(&artist_name).await {
+                            Ok(Some(lastfm_artist)) => {
+                                let (small, medium, large) = extract_image_urls(&lastfm_artist.image);
+                                let bio = extract_biography(&lastfm_artist.bio);
+
+                                // Get similar artist names
+                                let similar_names: Vec<String> = lastfm_artist
+                                    .similar
+                                    .artist
+                                    .iter()
+                                    .map(|a| a.name.clone())
+                                    .collect();
+
+                                let cache = LastFmArtistCache {
+                                    artist_id: artist_id_copy,
+                                    biography: bio,
+                                    last_fm_url: lastfm_artist.url,
+                                    small_image_url: small,
+                                    medium_image_url: medium,
+                                    large_image_url: large,
+                                    similar_artists: similar_names,
+                                    updated_at: chrono::Local::now().naive_local(),
+                                };
+
+                                if let Err(e) = cache_repo.save_cache(&cache) {
+                                    tracing::warn!(error = %e, "Failed to save artist cache");
+                                } else {
+                                    tracing::debug!(artist = %artist_name, "Cached Last.fm artist info");
+                                }
+                            }
+                            Ok(None) => {
+                                tracing::debug!(artist = %artist_name, "No Last.fm info found");
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, artist = %artist_name, "Failed to fetch Last.fm artist info");
+                            }
+                        }
+                    });
+                }
+            }
+        }
+
+        response
+    }
+
+    fn get_artist_info_non_id3_with_cache(
+        &self,
+        artist_id: i32,
+    ) -> crate::models::music::ArtistInfoResponse {
+        use crate::models::music::{ArtistResponse, ArtistInfoResponse};
+
+        let info2 = self.get_artist_info_with_cache(artist_id);
+        
+        let similar_artists = info2.similar_artists.into_iter().map(|a| {
+            ArtistResponse {
+                id: a.id,
+                name: a.name,
+                artist_image_url: a.artist_image_url,
+                starred: a.starred,
+                user_rating: None,
+                average_rating: None,
+            }
+        }).collect();
+
+        ArtistInfoResponse {
+            biography: info2.biography,
+            musicbrainz_id: info2.musicbrainz_id,
+            last_fm_url: info2.last_fm_url,
+            small_image_url: info2.small_image_url,
+            medium_image_url: info2.medium_image_url,
+            large_image_url: info2.large_image_url,
+            similar_artists,
+        }
     }
 }
 

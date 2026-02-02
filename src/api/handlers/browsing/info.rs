@@ -10,8 +10,7 @@ use crate::api::response::{
     error_response, ok_album_info, ok_artist_info, ok_artist_info2, ok_lyrics, ok_lyrics_list,
 };
 use crate::models::music::{
-    AlbumInfoResponse, ArtistInfo2Response, ArtistInfoResponse, LyricLine, LyricsListResponse,
-    LyricsResponse, StructuredLyrics,
+    AlbumInfoResponse, LyricLine, LyricsListResponse, LyricsResponse, StructuredLyrics,
 };
 
 /// Query parameters for getArtistInfo2.
@@ -42,12 +41,7 @@ pub async fn get_artist_info2(
     };
 
     // Get the artist
-    let Some(artist) = auth.state.get_artist(artist_id) else {
-        return error_response(auth.format, &ApiError::NotFound("Artist".into())).into_response();
-    };
-
-    // Create response with available data from the artist
-    let response = ArtistInfo2Response::from_artist(&artist);
+    let response = auth.state.get_artist_info_with_cache(artist_id);
     ok_artist_info2(auth.format, response).into_response()
 }
 
@@ -96,12 +90,8 @@ pub async fn get_artist_info(
             .into_response();
     };
 
-    // Get the artist
-    let Some(artist) = auth.state.get_artist(artist_id) else {
-        return error_response(auth.format, &ApiError::NotFound("Artist".into())).into_response();
-    };
-
-    let response = ArtistInfoResponse::from_artist(&artist);
+    // Get the artist info with cache
+    let response = auth.state.get_artist_info_non_id3_with_cache(artist_id);
     ok_artist_info(auth.format, response).into_response()
 }
 

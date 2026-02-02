@@ -18,6 +18,7 @@ use subsonic::crypto::hash_password;
 use subsonic::db::{
     DbConfig, DbPool, MusicFolderRepository, NewUser, UserRepository, run_migrations,
 };
+use subsonic::lastfm::LastFmClient;
 use subsonic::models::music::NewMusicFolder;
 use subsonic::scanner::{AutoScanner, ScanMode, ScanState, ScanStateHandle, Scanner};
 
@@ -118,6 +119,24 @@ enum Commands {
         #[arg(long, default_value = "300")]
         auto_scan_interval: u64,
     },
+
+    /// Set a user's Last.fm session key
+    SetLastfmKey {
+        /// Username of the user
+        #[arg(short, long)]
+        username: String,
+
+        /// Last.fm session key for the user
+        #[arg(short, long)]
+        session_key: String,
+    },
+
+    /// Clear a user's Last.fm session key
+    ClearLastfmKey {
+        /// Username of the user
+        #[arg(short, long)]
+        username: String,
+    },
 }
 
 /// Application state shared across all handlers.
@@ -132,8 +151,26 @@ impl AppState {
     #[must_use]
     pub fn new(pool: DbPool) -> Self {
         let scan_state = ScanStateHandle::new(ScanState::new());
+
+        // Read Last.fm credentials from environment
+        let api_key = std::env::var("LASTFM_API_KEY").unwrap_or_default();
+        let api_secret = std::env::var("LASTFM_API_SECRET").unwrap_or_default();
+        let lastfm_client = LastFmClient::new(api_key, api_secret);
+
+        if lastfm_client.is_some() {
+            tracing::info!("Last.fm integration enabled");
+        } else {
+            tracing::debug!(
+                "Last.fm not configured (set LASTFM_API_KEY and LASTFM_API_SECRET to enable)"
+            );
+        }
+
         Self {
-            auth: Arc::new(DatabaseAuthState::with_scan_state(pool, scan_state.clone())),
+            auth: Arc::new(DatabaseAuthState::with_scan_state(
+                pool,
+                scan_state.clone(),
+                lastfm_client,
+            )),
             scan_state,
         }
     }
@@ -406,6 +443,61 @@ async fn main() {
                         println!("  subsonic generate-api-key --username {username}");
                     }
                 }
+                Ok(None) => {
+                    tracing::error!(username = %username, "User not found");
+                    std::process::exit(1);
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, username = %username, "Database error");
+                    std::process::exit(1);
+                }
+            }
+        }
+        Some(Commands::SetLastfmKey {
+            username,
+            session_key,
+        }) => {
+            let repo = UserRepository::new(pool);
+            match repo.find_by_username(&username) {
+                Ok(Some(user)) => match repo.set_lastfm_session_key(user.id, Some(&session_key)) {
+                    Ok(true) => {
+                        println!("Set Last.fm session key for user '{username}'");
+                    }
+                    Ok(false) => {
+                        tracing::error!(username = %username, "User not found when setting Last.fm key");
+                        std::process::exit(1);
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, username = %username, "Failed to set Last.fm session key");
+                        std::process::exit(1);
+                    }
+                },
+                Ok(None) => {
+                    tracing::error!(username = %username, "User not found");
+                    std::process::exit(1);
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, username = %username, "Database error");
+                    std::process::exit(1);
+                }
+            }
+        }
+        Some(Commands::ClearLastfmKey { username }) => {
+            let repo = UserRepository::new(pool);
+            match repo.find_by_username(&username) {
+                Ok(Some(user)) => match repo.set_lastfm_session_key(user.id, None) {
+                    Ok(true) => {
+                        println!("Cleared Last.fm session key for user '{username}'");
+                    }
+                    Ok(false) => {
+                        tracing::error!(username = %username, "User not found when clearing Last.fm key");
+                        std::process::exit(1);
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, username = %username, "Failed to clear Last.fm session key");
+                        std::process::exit(1);
+                    }
+                },
                 Ok(None) => {
                     tracing::error!(username = %username, "User not found");
                     std::process::exit(1);
