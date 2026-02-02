@@ -93,6 +93,7 @@ pub struct NewUser<'a> {
 
 /// Builder for `NewUser`.
 #[derive(Debug, Clone)]
+#[expect(clippy::struct_excessive_bools)]
 pub struct NewUserBuilder<'a> {
     username: &'a str,
     password_hash: &'a str,
@@ -115,6 +116,7 @@ pub struct NewUserBuilder<'a> {
 
 impl<'a> NewUserBuilder<'a> {
     /// Create a new builder with required fields.
+    #[must_use]
     pub const fn new(username: &'a str, password_hash: &'a str) -> Self {
         Self {
             username,
@@ -138,96 +140,112 @@ impl<'a> NewUserBuilder<'a> {
     }
 
     /// Set the subsonic password.
+    #[must_use]
     pub const fn subsonic_password(mut self, password: &'a str) -> Self {
         self.subsonic_password = Some(password);
         self
     }
 
     /// Set the email.
+    #[must_use]
     pub const fn email(mut self, email: &'a str) -> Self {
         self.email = Some(email);
         self
     }
 
     /// Set admin role.
+    #[must_use]
     pub const fn admin_role(mut self, admin: bool) -> Self {
         self.admin_role = admin;
         self
     }
 
     /// Set settings role.
+    #[must_use]
     pub const fn settings_role(mut self, settings: bool) -> Self {
         self.settings_role = settings;
         self
     }
 
     /// Set stream role.
+    #[must_use]
     pub const fn stream_role(mut self, stream: bool) -> Self {
         self.stream_role = stream;
         self
     }
 
     /// Set jukebox role.
+    #[must_use]
     pub const fn jukebox_role(mut self, jukebox: bool) -> Self {
         self.jukebox_role = jukebox;
         self
     }
 
     /// Set download role.
+    #[must_use]
     pub const fn download_role(mut self, download: bool) -> Self {
         self.download_role = download;
         self
     }
 
     /// Set upload role.
+    #[must_use]
     pub const fn upload_role(mut self, upload: bool) -> Self {
         self.upload_role = upload;
         self
     }
 
     /// Set playlist role.
+    #[must_use]
     pub const fn playlist_role(mut self, playlist: bool) -> Self {
         self.playlist_role = playlist;
         self
     }
 
     /// Set cover art role.
+    #[must_use]
     pub const fn cover_art_role(mut self, cover_art: bool) -> Self {
         self.cover_art_role = cover_art;
         self
     }
 
     /// Set comment role.
+    #[must_use]
     pub const fn comment_role(mut self, comment: bool) -> Self {
         self.comment_role = comment;
         self
     }
 
     /// Set podcast role.
+    #[must_use]
     pub const fn podcast_role(mut self, podcast: bool) -> Self {
         self.podcast_role = podcast;
         self
     }
 
     /// Set share role.
+    #[must_use]
     pub const fn share_role(mut self, share: bool) -> Self {
         self.share_role = share;
         self
     }
 
     /// Set video conversion role.
+    #[must_use]
     pub const fn video_conversion_role(mut self, video: bool) -> Self {
         self.video_conversion_role = video;
         self
     }
 
     /// Set max bit rate.
+    #[must_use]
     pub const fn max_bit_rate(mut self, rate: i32) -> Self {
         self.max_bit_rate = rate;
         self
     }
 
     /// Build the `NewUser`.
+    #[must_use]
     pub const fn build(self) -> NewUser<'a> {
         NewUser {
             username: self.username,
@@ -253,6 +271,7 @@ impl<'a> NewUserBuilder<'a> {
 
 impl<'a> NewUser<'a> {
     /// Create a builder for `NewUser`.
+    #[must_use]
     pub const fn builder(username: &'a str, password_hash: &'a str) -> NewUserBuilder<'a> {
         NewUserBuilder::new(username, password_hash)
     }
@@ -589,76 +608,91 @@ impl UserUpdateBuilder {
         }
     }
 
+    #[must_use]
     pub fn email(mut self, email: impl Into<String>) -> Self {
         self.email = Some(email.into());
         self
     }
 
+    #[must_use]
     pub const fn admin_role(mut self, val: bool) -> Self {
         self.admin_role = Some(val);
         self
     }
 
+    #[must_use]
     pub const fn settings_role(mut self, val: bool) -> Self {
         self.settings_role = Some(val);
         self
     }
 
+    #[must_use]
     pub const fn stream_role(mut self, val: bool) -> Self {
         self.stream_role = Some(val);
         self
     }
 
+    #[must_use]
     pub const fn jukebox_role(mut self, val: bool) -> Self {
         self.jukebox_role = Some(val);
         self
     }
 
+    #[must_use]
     pub const fn download_role(mut self, val: bool) -> Self {
         self.download_role = Some(val);
         self
     }
 
+    #[must_use]
     pub const fn upload_role(mut self, val: bool) -> Self {
         self.upload_role = Some(val);
         self
     }
 
+    #[must_use]
     pub const fn playlist_role(mut self, val: bool) -> Self {
         self.playlist_role = Some(val);
         self
     }
 
+    #[must_use]
     pub const fn cover_art_role(mut self, val: bool) -> Self {
         self.cover_art_role = Some(val);
         self
     }
 
+    #[must_use]
     pub const fn comment_role(mut self, val: bool) -> Self {
         self.comment_role = Some(val);
         self
     }
 
+    #[must_use]
     pub const fn podcast_role(mut self, val: bool) -> Self {
         self.podcast_role = Some(val);
         self
     }
 
+    #[must_use]
     pub const fn share_role(mut self, val: bool) -> Self {
         self.share_role = Some(val);
         self
     }
 
+    #[must_use]
     pub const fn video_conversion_role(mut self, val: bool) -> Self {
         self.video_conversion_role = Some(val);
         self
     }
 
+    #[must_use]
     pub const fn max_bit_rate(mut self, val: i32) -> Self {
         self.max_bit_rate = Some(val);
         self
     }
 
+    #[must_use]
     pub fn build(self) -> UserUpdate {
         UserUpdate {
             username: self.username,
