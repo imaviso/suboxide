@@ -12,7 +12,7 @@ use crate::models::user::UserRoles;
 #[derive(Debug, Clone, Queryable, Selectable)]
 #[diesel(table_name = users)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-#[allow(clippy::struct_excessive_bools)]
+#[expect(clippy::struct_excessive_bools)]
 pub struct UserRow {
     pub id: i32,
     pub username: String,
@@ -70,7 +70,7 @@ impl From<UserRow> for User {
 /// Data for inserting a new user.
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = users)]
-#[allow(clippy::struct_excessive_bools)]
+#[expect(clippy::struct_excessive_bools)]
 pub struct NewUser<'a> {
     pub username: &'a str,
     pub password_hash: &'a str,

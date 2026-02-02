@@ -291,7 +291,7 @@ pub trait AuthState: Send + Sync + 'static {
         roles: UserRoles,
     ) -> Result<User, String>;
     /// Update an existing user.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn update_user(
         &self,
         username: &str,
@@ -473,7 +473,7 @@ where
 {
     type Rejection = AuthError;
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     async fn from_request(req: Request<Body>, state: &S) -> Result<Self, Self::Rejection> {
         let is_post = req.method() == Method::POST;
 
@@ -497,7 +497,7 @@ where
 
         // Support for clients passing credentials in HTTP headers (e.g. SolidSonic)
         // Checks for X-Subsonic-Username, X-Subsonic-Token, and X-Subsonic-Salt
-        #[allow(clippy::collapsible_if)]
+        #[expect(clippy::collapsible_if)]
         if params.u.is_empty() {
             if let Some(Ok(u)) = parts.headers.get("X-Subsonic-Username").map(|h| h.to_str()) {
                 params.u = u.to_string();

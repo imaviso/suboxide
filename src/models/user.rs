@@ -6,7 +6,7 @@ use crate::crypto::password::verify_password;
 
 /// User roles/permissions.
 #[derive(Debug, Clone, Default, Serialize)]
-#[allow(clippy::struct_excessive_bools)]
+#[expect(clippy::struct_excessive_bools)]
 pub struct UserRoles {
     pub admin_role: bool,
     pub settings_role: bool,
@@ -79,7 +79,7 @@ impl User {
 
 /// Subsonic API user response format.
 #[derive(Debug, Serialize, Clone)]
-#[allow(clippy::struct_excessive_bools)]
+#[expect(clippy::struct_excessive_bools)]
 pub struct UserResponse {
     #[serde(rename = "@username")]
     pub username: String,

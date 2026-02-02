@@ -1932,7 +1932,7 @@ pub struct SubsonicResponse {
     kind: ResponseKind,
 }
 
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 enum ResponseKind {
     Empty,
     License,
@@ -2309,7 +2309,8 @@ impl IntoResponse for SubsonicResponse {
 }
 
 impl SubsonicResponse {
-    #[allow(clippy::wrong_self_convention, clippy::too_many_lines)]
+    #[expect(clippy::wrong_self_convention)]
+    #[expect(clippy::too_many_lines)]
     fn to_xml_response(self) -> Response {
         let xml_result = match self.kind {
             ResponseKind::Empty => quick_xml::se::to_string(&xml::EmptyResponse::ok()),
@@ -2442,7 +2443,8 @@ impl SubsonicResponse {
         }
     }
 
-    #[allow(clippy::wrong_self_convention, clippy::too_many_lines)]
+    #[expect(clippy::wrong_self_convention)]
+    #[expect(clippy::too_many_lines)]
     fn to_json_response(self) -> Response {
         let response = match self.kind {
             ResponseKind::Empty => json::SubsonicResponse::ok().wrap(),

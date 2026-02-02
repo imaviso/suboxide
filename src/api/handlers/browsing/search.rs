@@ -275,7 +275,7 @@ pub async fn search(
     let songs = auth.state.search_songs(query, offset, count);
 
     let matches: Vec<SearchMatch> = songs.iter().map(SearchMatch::from).collect();
-    #[allow(clippy::cast_possible_wrap)]
+    #[expect(clippy::cast_possible_wrap)]
     let total_hits = matches.len() as i64;
 
     let response = SearchResultResponse {

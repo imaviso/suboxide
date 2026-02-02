@@ -92,7 +92,7 @@ impl CustomizeConnection<SqliteConnection, diesel::r2d2::Error> for SqliteConnec
 }
 
 /// Run the SQL migrations to set up the database schema.
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result::Error> {
     // Enable WAL mode for better concurrent read/write performance
     // WAL mode allows readers to not block writers and vice versa,

@@ -453,7 +453,7 @@ impl Scanner {
     }
 
     /// Static version of `read_track_metadata` for use with rayon (no &self needed).
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     fn read_track_metadata_static(
         path: &Path,
         extension: &str,
@@ -587,7 +587,8 @@ impl Scanner {
 
     /// Process scanned tracks and populate the database with options.
     /// Returns (`artists_added`, `albums_added`, `tracks_added`, `tracks_updated`, `tracks_skipped`, `tracks_failed`, `cover_art_saved`)
-    #[allow(clippy::type_complexity, clippy::too_many_lines)]
+    #[expect(clippy::type_complexity)]
+    #[expect(clippy::too_many_lines)]
     fn process_tracks_with_options(
         &self,
         folder: &MusicFolder,

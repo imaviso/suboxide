@@ -308,7 +308,7 @@ fn create_user(
 }
 
 #[tokio::main]
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 async fn main() {
     let cli = Cli::parse();
 

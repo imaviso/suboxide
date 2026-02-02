@@ -175,7 +175,7 @@ pub struct CreatePlaylistParams {
 /// - `playlistId`: The playlist ID (if updating an existing playlist)
 /// - `name`: The playlist name (required if creating a new playlist)
 /// - `songId`: ID of a song to add (can be repeated)
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 pub async fn create_playlist(
     RawQuery(query): RawQuery,
     axum::extract::Query(params): axum::extract::Query<CreatePlaylistParams>,
