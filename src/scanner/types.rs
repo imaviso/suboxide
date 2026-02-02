@@ -65,7 +65,7 @@ pub enum ScanMode {
 #[derive(Debug, Clone)]
 pub struct ScannedTrack {
     pub path: PathBuf,
-    pub parent_path: String,
+    pub parent_path: PathBuf,
     pub file_size: u64,
     pub content_type: String,
     pub suffix: String,

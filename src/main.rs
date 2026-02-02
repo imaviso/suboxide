@@ -1,5 +1,6 @@
 //! Subsonic API compatible server.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::{Router, extract::FromRef};
@@ -27,7 +28,7 @@ use subsonic::scanner::{AutoScanner, ScanMode, ScanState, ScanStateHandle, Scann
 struct Cli {
     /// Database file path
     #[arg(short, long, default_value = "subsonic.db")]
-    database: String,
+    database: PathBuf,
 
     /// Server port
     #[arg(short, long, default_value = "4040")]
@@ -83,7 +84,7 @@ enum Commands {
 
         /// Path to the music folder
         #[arg(short, long)]
-        path: String,
+        path: PathBuf,
     },
 
     /// List all music folders
@@ -262,7 +263,11 @@ impl std::fmt::Display for SetupError {
 
 impl std::error::Error for SetupError {}
 
-fn setup_database(database_url: &str) -> Result<DbPool, SetupError> {
+fn setup_database(database_path: impl AsRef<std::path::Path>) -> Result<DbPool, SetupError> {
+    let database_url = database_path
+        .as_ref()
+        .to_str()
+        .ok_or_else(|| SetupError::PoolCreation("Invalid UTF-8 in database path".to_string()))?;
     let config = DbConfig::new(database_url);
     let pool = config
         .build_pool()
@@ -412,8 +417,9 @@ async fn main() {
             }
         }
         Some(Commands::AddFolder { name, path }) => {
+            let path_str = path.to_string_lossy().into_owned();
             let repo = MusicFolderRepository::new(pool);
-            let new_folder = NewMusicFolder::new(&name, &path);
+            let new_folder = NewMusicFolder::new(&name, &path_str);
             match repo.create(&new_folder) {
                 Ok(folder) => {
                     println!("Added music folder '{}' (id: {})", folder.name, folder.id);

@@ -472,12 +472,7 @@ impl Scanner {
         // Get parent path relative to music folder
         let parent_path = path
             .parent()
-            .map(|p| {
-                p.strip_prefix(folder_path)
-                    .unwrap_or(p)
-                    .to_string_lossy()
-                    .to_string()
-            })
+            .map(|p| p.strip_prefix(folder_path).unwrap_or(p).to_path_buf())
             .unwrap_or_default();
 
         // Read audio tags
@@ -896,7 +891,7 @@ impl Scanner {
                                 songs::album_name.eq(&prepared.track.album),
                                 songs::music_folder_id.eq(folder.id),
                                 songs::path.eq(&prepared.path_str),
-                                songs::parent_path.eq(&prepared.track.parent_path),
+                                songs::parent_path.eq(prepared.track.parent_path.to_string_lossy()),
                                 songs::file_size
                                     .eq(i64::try_from(prepared.track.file_size).unwrap_or(0)),
                                 songs::content_type.eq(&prepared.track.content_type),
