@@ -519,7 +519,7 @@ async fn main() {
             // Check if Last.fm is configured
             let api_key = std::env::var("LASTFM_API_KEY").unwrap_or_default();
             let api_secret = std::env::var("LASTFM_API_SECRET").unwrap_or_default();
-            
+
             let Some(client) = LastFmClient::new(api_key.clone(), api_secret) else {
                 eprintln!("Error: Last.fm integration is not configured.");
                 eprintln!("Please set LASTFM_API_KEY and LASTFM_API_SECRET environment variables.");
@@ -563,7 +563,10 @@ async fn main() {
             println!("Exchanging token for session...");
             match client.get_session(token).await {
                 Ok(session) => {
-                    println!("Successfully authenticated as Last.fm user: {}", session.name);
+                    println!(
+                        "Successfully authenticated as Last.fm user: {}",
+                        session.name
+                    );
                     match repo.set_lastfm_session_key(user.id, Some(&session.key)) {
                         Ok(_) => println!("Last.fm session linked successfully!"),
                         Err(e) => eprintln!("Failed to save session key: {e}"),

@@ -1418,7 +1418,7 @@ impl AuthState for DatabaseAuthState {
                 // No valid cache, try to fetch from Last.fm if configured
                 if let Some(client) = &self.lastfm_client {
                     let client = client.clone();
-                    let artist_name = artist.name.clone();
+                    let artist_name = artist.name;
                     let artist_id_copy = artist_id;
                     let cache_repo = self.artist_cache_repo.clone();
                     let _artist_repo = self.artist_repo.clone();
@@ -1427,7 +1427,8 @@ impl AuthState for DatabaseAuthState {
                     tokio::spawn(async move {
                         match client.get_artist_info(&artist_name).await {
                             Ok(Some(lastfm_artist)) => {
-                                let (small, medium, large) = extract_image_urls(&lastfm_artist.image);
+                                let (small, medium, large) =
+                                    extract_image_urls(&lastfm_artist.image);
                                 let bio = extract_biography(&lastfm_artist.bio);
 
                                 // Get similar artist names
@@ -1474,20 +1475,22 @@ impl AuthState for DatabaseAuthState {
         &self,
         artist_id: i32,
     ) -> crate::models::music::ArtistInfoResponse {
-        use crate::models::music::{ArtistResponse, ArtistInfoResponse};
+        use crate::models::music::{ArtistInfoResponse, ArtistResponse};
 
         let info2 = self.get_artist_info_with_cache(artist_id);
-        
-        let similar_artists = info2.similar_artists.into_iter().map(|a| {
-            ArtistResponse {
+
+        let similar_artists = info2
+            .similar_artists
+            .into_iter()
+            .map(|a| ArtistResponse {
                 id: a.id,
                 name: a.name,
                 artist_image_url: a.artist_image_url,
                 starred: a.starred,
                 user_rating: None,
                 average_rating: None,
-            }
-        }).collect();
+            })
+            .collect();
 
         ArtistInfoResponse {
             biography: info2.biography,
