@@ -1424,7 +1424,7 @@ impl AuthState for DatabaseAuthState {
                 // No valid cache, try to fetch from Last.fm if configured
                 if let Some(client) = &self.lastfm_client {
                     let client = client.clone();
-                    let artist_name = artist.name.clone();
+                    let artist_name = artist.name;
                     let artist_id_copy = artist_id;
                     let cache_repo = self.artist_cache_repo.clone();
                     let artist_repo = self.artist_repo.clone();
@@ -1437,14 +1437,13 @@ impl AuthState for DatabaseAuthState {
                                     extract_image_urls(&lastfm_artist.image);
 
                                 // Filter out Last.fm placeholder images (star image)
-                                if let Some(ref url) = large {
-                                    if url.contains("2a96cbd8b46e442fc41c2b86b821562f") {
+                                if let Some(ref url) = large
+                                    && url.contains("2a96cbd8b46e442fc41c2b86b821562f") {
                                         tracing::warn!(artist = %artist_name, "Ignoring Last.fm placeholder image");
                                         small = None;
                                         medium = None;
                                         large = None;
                                     }
-                                }
 
                                 tracing::debug!(artist = %artist_name, small = ?small, medium = ?medium, large = ?large, "Extracted Last.fm image URLs");
                                 let bio = extract_biography(&lastfm_artist.bio);
