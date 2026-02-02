@@ -1065,7 +1065,7 @@ impl AutoScanner {
                 continue;
             }
 
-            tracing::info!(scan_mode = "incremental", "Starting auto-scan");
+            tracing::debug!(scan_mode = "incremental", "Starting auto-scan");
             scan_state.reset_count();
 
             // Run the scan in a blocking task since it uses diesel
