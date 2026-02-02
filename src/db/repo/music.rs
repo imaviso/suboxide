@@ -3,9 +3,9 @@
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 
+use crate::db::DbPool;
 use crate::db::repo::error::{MusicRepoError, MusicRepoErrorKind};
 use crate::db::schema::{albums, artists, music_folders, songs};
-use crate::db::DbPool;
 use crate::models::music::{Album, Artist, MusicFolder, NewMusicFolder, Song};
 
 // ============================================================================

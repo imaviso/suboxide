@@ -144,6 +144,13 @@ enum Commands {
         #[arg(short, long)]
         username: String,
     },
+
+    /// Debug Last.fm artist lookup (prints raw API response)
+    DebugLastfmArtist {
+        /// Artist name to look up
+        #[arg(short, long)]
+        artist: String,
+    },
 }
 
 /// Application state shared across all handlers.
@@ -574,6 +581,41 @@ async fn main() {
                 }
                 Err(e) => {
                     eprintln!("Failed to get session from Last.fm: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        Some(Commands::DebugLastfmArtist { artist }) => {
+            let api_key = std::env::var("LASTFM_API_KEY").unwrap_or_default();
+            let api_secret = std::env::var("LASTFM_API_SECRET").unwrap_or_default();
+
+            let Some(client) = LastFmClient::new(api_key, api_secret) else {
+                eprintln!("Error: Last.fm integration is not configured.");
+                eprintln!("Please set LASTFM_API_KEY and LASTFM_API_SECRET environment variables.");
+                std::process::exit(1);
+            };
+
+            println!("Querying Last.fm for artist: '{}'", artist);
+            match client.get_artist_info(&artist).await {
+                Ok(Some(info)) => {
+                    println!("Found artist: {}", info.name);
+                    println!("URL: {:?}", info.url);
+                    println!("MBID: {:?}", info.musicbrainz_id);
+                    println!("Images:");
+                    for img in &info.image {
+                        println!("  - [{}] {}", img.size, img.url);
+                        if img.url.contains("2a96cbd8b46e442fc41c2b86b821562f") {
+                            println!(
+                                "    ^ WARNING: This hash is known to be a placeholder star image!"
+                            );
+                        }
+                    }
+                }
+                Ok(None) => {
+                    println!("Artist not found on Last.fm");
+                }
+                Err(e) => {
+                    eprintln!("Error querying Last.fm: {e}");
                     std::process::exit(1);
                 }
             }
