@@ -141,18 +141,28 @@ pub struct LyricsParams {
 /// GET/POST /rest/getLyrics[.view]
 ///
 /// Searches for and returns lyrics for a given song.
-/// Note: This is a stub implementation that returns empty lyrics since we don't
-/// have a lyrics database or external service integration.
 pub async fn get_lyrics(
     axum::extract::Query(params): axum::extract::Query<LyricsParams>,
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
-    // Return empty lyrics with the requested artist/title
-    let response = LyricsResponse::new(
-        params.artist.clone(),
-        params.title,
-        None, // No lyrics content
-    );
+    let artist = params.artist.as_deref().unwrap_or_default();
+    let title = params.title.as_deref().unwrap_or_default();
+
+    // Try to find a song with the requested artist and title
+    let mut lyrics_content = None;
+    if !artist.is_empty()
+        && !title.is_empty()
+        && let Some(song) = auth.state.find_song_by_artist_and_title(artist, title)
+    {
+        // Found a song, extract its lyrics
+        let extracted = auth.state.get_song_lyrics(song.id);
+        // Just take the first one and use its text
+        if let Some(lyrics) = extracted.first() {
+            lyrics_content = Some(lyrics.text.clone());
+        }
+    }
+
+    let response = LyricsResponse::new(params.artist.clone(), params.title.clone(), lyrics_content);
 
     ok_lyrics(auth.format, response)
 }

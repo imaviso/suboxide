@@ -4,7 +4,7 @@ use chrono::NaiveDateTime;
 use diesel::prelude::*;
 
 use crate::db::DbPool;
-use crate::db::repo::error::MusicRepoError;
+use crate::db::repo::error::{MusicRepoError, MusicRepoErrorKind};
 use crate::db::repo::music::SongRow;
 use crate::db::repo::user::UserRow;
 use crate::db::schema::{play_queue, play_queue_songs, playlist_songs, playlists, songs, users};
@@ -255,7 +255,7 @@ impl PlaylistRepository {
 
         // Return the created playlist
         self.get_playlist(playlist_id)?
-            .ok_or_else(|| MusicRepoError::NotFound("Playlist not found".to_string()))
+            .ok_or_else(|| MusicRepoError::new(MusicRepoErrorKind::NotFound, "Playlist not found"))
     }
 
     /// Update a playlist (name/comment/songs).

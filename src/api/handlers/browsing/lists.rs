@@ -55,6 +55,7 @@ pub async fn get_album_list2(
     let size = params.size.unwrap_or(10).clamp(1, 500);
     let offset = params.offset.unwrap_or(0).max(0);
 
+    let user_id = auth.user.id;
     let albums = match list_type {
         "random" => auth.state.get_albums_random(size),
         "newest" => auth.state.get_albums_newest(offset, size),
@@ -75,8 +76,8 @@ pub async fn get_album_list2(
             };
             auth.state.get_albums_by_genre(genre, offset, size)
         }
-        "starred" => auth.state.get_albums_starred(auth.user.id, offset, size),
-        "highest" => auth.state.get_albums_highest(auth.user.id, offset, size),
+        "starred" => auth.state.get_albums_starred(user_id, offset, size),
+        "highest" => auth.state.get_albums_highest(user_id, offset, size),
         _ => {
             return error_response(
                 auth.format,
@@ -86,8 +87,19 @@ pub async fn get_album_list2(
         }
     };
 
-    let album_responses: Vec<AlbumID3Response> =
-        albums.iter().map(AlbumID3Response::from).collect();
+    // Batch fetch starred status for all albums
+    let album_ids: Vec<i32> = albums.iter().map(|a| a.id).collect();
+    let starred_map = auth
+        .state
+        .get_starred_at_for_albums_batch(user_id, &album_ids);
+
+    let album_responses: Vec<AlbumID3Response> = albums
+        .iter()
+        .map(|a| {
+            let starred_at = starred_map.get(&a.id);
+            AlbumID3Response::from_album_with_starred(a, starred_at)
+        })
+        .collect();
     let response = AlbumList2Response {
         albums: album_responses,
     };
@@ -111,6 +123,7 @@ pub async fn get_album_list(
     let size = params.size.unwrap_or(10).clamp(1, 500);
     let offset = params.offset.unwrap_or(0).max(0);
 
+    let user_id = auth.user.id;
     let albums = match list_type {
         "random" => auth.state.get_albums_random(size),
         "newest" => auth.state.get_albums_newest(offset, size),
@@ -131,8 +144,8 @@ pub async fn get_album_list(
             };
             auth.state.get_albums_by_genre(genre, offset, size)
         }
-        "starred" => auth.state.get_albums_starred(auth.user.id, offset, size),
-        "highest" => auth.state.get_albums_highest(auth.user.id, offset, size),
+        "starred" => auth.state.get_albums_starred(user_id, offset, size),
+        "highest" => auth.state.get_albums_highest(user_id, offset, size),
         _ => {
             return error_response(
                 auth.format,
@@ -142,10 +155,23 @@ pub async fn get_album_list(
         }
     };
 
+    // Batch fetch starred status for all albums
+    let album_ids: Vec<i32> = albums.iter().map(|a| a.id).collect();
+    let starred_map = auth
+        .state
+        .get_starred_at_for_albums_batch(user_id, &album_ids);
+
     // Convert to Child elements (non-ID3)
     let album_responses: Vec<ChildResponse> = albums
         .iter()
-        .map(ChildResponse::from_album_as_dir)
+        .map(|a| {
+            let starred_at = starred_map.get(&a.id);
+            let mut response = ChildResponse::from_album_as_dir(a);
+            if let Some(dt) = starred_at {
+                response.starred = Some(dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string());
+            }
+            response
+        })
         .collect();
 
     let response = AlbumListResponse {

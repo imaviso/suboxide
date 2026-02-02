@@ -64,6 +64,8 @@ pub trait AuthState: Send + Sync + 'static {
     fn get_artist_album_count(&self, artist_id: i32) -> i64;
     /// Get a song by ID.
     fn get_song(&self, song_id: i32) -> Option<Song>;
+    /// Find a song by artist and title.
+    fn find_song_by_artist_and_title(&self, artist: &str, title: &str) -> Option<Song>;
     /// Get an album by ID.
     fn get_album(&self, album_id: i32) -> Option<Album>;
     /// Get an artist by ID.
@@ -202,7 +204,7 @@ pub trait AuthState: Send + Sync + 'static {
         music_folder_id: Option<i32>,
     ) -> Vec<Song>;
 
-    /// Get similar songs by artist (random songs from the same artist, excluding a specific song).
+    /// Get similar songs by artist.
     fn get_similar_songs_by_artist(
         &self,
         artist_id: i32,
@@ -210,7 +212,7 @@ pub trait AuthState: Send + Sync + 'static {
         limit: i64,
     ) -> Vec<Song>;
 
-    /// Get top songs by artist name (ordered by play count).
+    /// Get top songs by artist name.
     fn get_top_songs_by_artist_name(&self, artist_name: &str, limit: i64) -> Vec<Song>;
 
     // Rating methods
@@ -698,6 +700,13 @@ impl AuthState for DatabaseAuthState {
 
     fn get_song(&self, song_id: i32) -> Option<Song> {
         self.song_repo.find_by_id(song_id).ok().flatten()
+    }
+
+    fn find_song_by_artist_and_title(&self, artist: &str, title: &str) -> Option<Song> {
+        self.song_repo
+            .find_by_artist_and_title(artist, title)
+            .ok()
+            .flatten()
     }
 
     fn get_album(&self, album_id: i32) -> Option<Album> {

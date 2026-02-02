@@ -31,15 +31,18 @@ pub const SERVER_NAME: &str = "subsonic-rs";
 /// Server version from Cargo.toml.
 pub const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Response format requested by the client.
+/// The format of the response returned to the client.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Format {
+    /// XML format (Subsonic default).
     #[default]
     Xml,
+    /// JSON format.
     Json,
 }
 
 impl Format {
+    /// Get the format from the `f` query parameter.
     #[must_use]
     pub fn from_param(f: Option<&str>) -> Self {
         match f {
@@ -61,18 +64,18 @@ pub enum ResponseStatus {
 // Scan Status Types
 // ============================================================================
 
-/// Enhanced scan status data for API responses.
+/// Status of a media library scan.
 #[derive(Debug, Clone, Default)]
 pub struct ScanStatusData {
     /// Whether a scan is currently in progress.
     pub scanning: bool,
     /// Number of items scanned so far.
     pub count: u64,
-    /// Total number of items to scan (0 if unknown).
+    /// Total number of items to scan.
     pub total: u64,
-    /// Current scan phase (idle, discovering, processing, cleaning).
+    /// Current scan phase.
     pub phase: String,
-    /// Current folder being scanned (if any).
+    /// Current folder being scanned.
     pub folder: Option<String>,
 }
 

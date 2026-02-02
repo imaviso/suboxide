@@ -27,6 +27,13 @@ pub async fn get_music_folders(auth: SubsonicAuth) -> impl IntoResponse {
 /// This is used by older clients that use the folder-based browsing model.
 pub async fn get_indexes(auth: SubsonicAuth) -> impl IntoResponse {
     let artists = auth.state.get_artists();
+    let user_id = auth.user.id;
+
+    // Get starred status for all artists in a single batch query
+    let artist_ids: Vec<i32> = artists.iter().map(|a| a.id).collect();
+    let starred_map = auth
+        .state
+        .get_starred_at_for_artists_batch(user_id, &artist_ids);
 
     // Group artists by first letter
     let mut index_map: BTreeMap<String, Vec<ArtistResponse>> = BTreeMap::new();
@@ -49,10 +56,12 @@ pub async fn get_indexes(auth: SubsonicAuth) -> impl IntoResponse {
             "#".to_string()
         };
 
+        let starred_at = starred_map.get(&artist.id);
+
         index_map
             .entry(key)
             .or_default()
-            .push(ArtistResponse::from(artist));
+            .push(ArtistResponse::from_artist_with_starred(artist, starred_at));
     }
 
     // Convert to response format
@@ -82,10 +91,16 @@ pub async fn get_indexes(auth: SubsonicAuth) -> impl IntoResponse {
 /// This is the preferred endpoint for modern clients.
 pub async fn get_artists(auth: SubsonicAuth) -> impl IntoResponse {
     let artists = auth.state.get_artists();
+    let user_id = auth.user.id;
 
     // Get album counts for all artists in a single batch query
     let artist_ids: Vec<i32> = artists.iter().map(|a| a.id).collect();
     let album_counts = auth.state.get_artist_album_counts_batch(&artist_ids);
+
+    // Get starred status for all artists in a single batch query
+    let starred_map = auth
+        .state
+        .get_starred_at_for_artists_batch(user_id, &artist_ids);
 
     // Group artists by first letter
     let mut index_map: BTreeMap<String, Vec<ArtistID3Response>> = BTreeMap::new();
@@ -108,15 +123,17 @@ pub async fn get_artists(auth: SubsonicAuth) -> impl IntoResponse {
             "#".to_string()
         };
 
-        // Get album count from batch result
+        // Get album count and starred status from batch results
         let album_count = album_counts.get(&artist.id).copied().unwrap_or(0);
+        let starred_at = starred_map.get(&artist.id);
 
         index_map
             .entry(key)
             .or_default()
-            .push(ArtistID3Response::from_artist(
+            .push(ArtistID3Response::from_artist_with_starred(
                 artist,
                 Some(i32::try_from(album_count).unwrap_or(0)),
+                starred_at,
             ));
     }
 

@@ -64,14 +64,7 @@ pub struct ArtistResponse {
 
 impl From<&Artist> for ArtistResponse {
     fn from(artist: &Artist) -> Self {
-        Self {
-            id: artist.id.to_string(),
-            name: artist.name.clone(),
-            artist_image_url: artist.artist_image_url.clone(),
-            starred: None, // TODO: implement starring
-            user_rating: None,
-            average_rating: None,
-        }
+        Self::from_artist_with_starred(artist, None)
     }
 }
 

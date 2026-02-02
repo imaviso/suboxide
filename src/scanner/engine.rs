@@ -345,13 +345,12 @@ impl Scanner {
         use crate::db::schema::songs;
         use diesel::prelude::*;
 
-        let mut conn = self.pool.get().map_err(MusicRepoError::Pool)?;
-
+        let mut conn = self.pool.get().map_err(MusicRepoError::from)?;
         let existing: Vec<(i32, String, Option<i64>)> = songs::table
             .filter(songs::music_folder_id.eq(folder_id))
             .select((songs::id, songs::path, songs::file_modified_at))
             .load(&mut conn)
-            .map_err(MusicRepoError::Database)?;
+            .map_err(MusicRepoError::from)?;
 
         Ok(existing
             .into_iter()
@@ -364,11 +363,11 @@ impl Scanner {
         use crate::db::schema::songs;
         use diesel::prelude::*;
 
-        let mut conn = self.pool.get().map_err(MusicRepoError::Pool)?;
+        let mut conn = self.pool.get().map_err(MusicRepoError::from)?;
 
         let deleted = diesel::delete(songs::table.filter(songs::path.eq_any(paths)))
             .execute(&mut conn)
-            .map_err(MusicRepoError::Database)?;
+            .map_err(MusicRepoError::from)?;
 
         Ok(deleted)
     }
@@ -377,21 +376,21 @@ impl Scanner {
     fn cleanup_orphans(&self) -> Result<(), ScanError> {
         use diesel::prelude::*;
 
-        let mut conn = self.pool.get().map_err(MusicRepoError::Pool)?;
+        let mut conn = self.pool.get().map_err(MusicRepoError::from)?;
 
         // Delete albums with no songs
         diesel::sql_query(
             "DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM songs WHERE album_id IS NOT NULL)"
         )
         .execute(&mut conn)
-        .map_err(MusicRepoError::Database)?;
+        .map_err(MusicRepoError::from)?;
 
         // Delete artists with no songs and no albums
         diesel::sql_query(
             "DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM songs WHERE artist_id IS NOT NULL) AND id NOT IN (SELECT DISTINCT artist_id FROM albums WHERE artist_id IS NOT NULL)"
         )
         .execute(&mut conn)
-        .map_err(MusicRepoError::Database)?;
+        .map_err(MusicRepoError::from)?;
 
         Ok(())
     }
@@ -598,13 +597,13 @@ impl Scanner {
         // Ensure cover art directory exists
         self.ensure_cover_art_dir()?;
 
-        let mut conn = self.pool.get().map_err(MusicRepoError::Pool)?;
+        let mut conn = self.pool.get().map_err(MusicRepoError::from)?;
 
         // Pre-load all existing artists into cache (much faster than individual lookups)
         let mut artist_cache: HashMap<String, i32> = artists::table
             .select((artists::name, artists::id))
             .load::<(String, i32)>(&mut conn)
-            .map_err(MusicRepoError::Database)?
+            .map_err(MusicRepoError::from)?
             .into_iter()
             .collect();
 
@@ -612,7 +611,7 @@ impl Scanner {
         let mut album_cache: HashMap<(String, Option<i32>), i32> = albums::table
             .select((albums::name, albums::artist_id, albums::id))
             .load::<(String, Option<i32>, i32)>(&mut conn)
-            .map_err(MusicRepoError::Database)?
+            .map_err(MusicRepoError::from)?
             .into_iter()
             .map(|(name, artist_id, id)| ((name, artist_id), id))
             .collect();
@@ -621,7 +620,7 @@ impl Scanner {
         let mut album_cover_art_cache: HashMap<i32, Option<String>> = albums::table
             .select((albums::id, albums::cover_art))
             .load::<(i32, Option<String>)>(&mut conn)
-            .map_err(MusicRepoError::Database)?
+            .map_err(MusicRepoError::from)?
             .into_iter()
             .collect();
 
@@ -676,14 +675,14 @@ impl Scanner {
                 }
                 Ok(())
             })
-            .map_err(MusicRepoError::Database)?;
+            .map_err(MusicRepoError::from)?;
 
             // Reload artist cache to get new IDs
             let new_artist_ids: Vec<(String, i32)> = artists::table
                 .filter(artists::name.eq_any(&new_artists))
                 .select((artists::name, artists::id))
                 .load(&mut conn)
-                .map_err(MusicRepoError::Database)?;
+                .map_err(MusicRepoError::from)?;
 
             for (name, id) in new_artist_ids {
                 if !artist_cache.contains_key(&name) {
@@ -742,7 +741,7 @@ impl Scanner {
                         ))
                         .on_conflict_do_nothing()
                         .execute(&mut conn)
-                        .map_err(MusicRepoError::Database)?;
+                        .map_err(MusicRepoError::from)?;
 
                     // Get the album ID
                     let mut query = albums::table
@@ -758,7 +757,7 @@ impl Scanner {
                         .select((albums::id, albums::cover_art))
                         .first(&mut conn)
                         .optional()
-                        .map_err(MusicRepoError::Database)?;
+                        .map_err(MusicRepoError::from)?;
 
                     if let Some((id, existing_cover)) = album_row {
                         if !album_cache.contains_key(&cache_key) {
@@ -934,7 +933,7 @@ impl Scanner {
                 }
                 Ok(())
             })
-            .map_err(MusicRepoError::Database)?;
+            .map_err(MusicRepoError::from)?;
 
             // Update counters and progress
             for prepared in batch {
@@ -977,7 +976,7 @@ impl Scanner {
             ",
         )
         .execute(conn)
-        .map_err(MusicRepoError::Database)?;
+        .map_err(MusicRepoError::from)?;
 
         Ok(())
     }

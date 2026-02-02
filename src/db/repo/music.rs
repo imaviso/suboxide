@@ -4,7 +4,7 @@ use chrono::NaiveDateTime;
 use diesel::prelude::*;
 
 use crate::db::DbPool;
-use crate::db::repo::error::MusicRepoError;
+use crate::db::repo::error::{MusicRepoError, MusicRepoErrorKind};
 use crate::db::schema::{albums, artists, music_folders, songs};
 use crate::models::music::{Album, Artist, MusicFolder, NewMusicFolder, Song};
 
@@ -132,7 +132,10 @@ impl MusicFolderRepository {
             .get_result::<i64>(&mut conn)?;
 
         if existing > 0 {
-            return Err(MusicRepoError::AlreadyExists(new_folder.path.clone()));
+            return Err(MusicRepoError::new(
+                MusicRepoErrorKind::AlreadyExists,
+                new_folder.path.clone(),
+            ));
         }
 
         let row: NewMusicFolderRow = new_folder.into();
@@ -218,27 +221,29 @@ impl ArtistRepository {
         Self { pool }
     }
 
-    /// Get all artists ordered by name.
+    /// Get all artists.
     pub fn find_all(&self) -> Result<Vec<Artist>, MusicRepoError> {
-        let mut conn = self.pool.get()?;
+        let mut conn = self.pool.get().map_err(MusicRepoError::from)?;
 
         let results = artists::table
             .select(ArtistRow::as_select())
             .order(artists::name.asc())
-            .load(&mut conn)?;
+            .load(&mut conn)
+            .map_err(MusicRepoError::from)?;
 
         Ok(results.into_iter().map(Artist::from).collect())
     }
 
     /// Find an artist by ID.
     pub fn find_by_id(&self, artist_id: i32) -> Result<Option<Artist>, MusicRepoError> {
-        let mut conn = self.pool.get()?;
+        let mut conn = self.pool.get().map_err(MusicRepoError::from)?;
 
         let result = artists::table
             .filter(artists::id.eq(artist_id))
             .select(ArtistRow::as_select())
             .first(&mut conn)
-            .optional()?;
+            .optional()
+            .map_err(MusicRepoError::from)?;
 
         Ok(result.map(Artist::from))
     }
@@ -932,6 +937,25 @@ impl SongRepository {
         Ok(results.into_iter().map(Song::from).collect())
     }
 
+    /// Find a song by artist name and title.
+    pub fn find_by_artist_and_title(
+        &self,
+        artist: &str,
+        title: &str,
+    ) -> Result<Option<Song>, MusicRepoError> {
+        let mut conn = self.pool.get().map_err(MusicRepoError::from)?;
+
+        let result = songs::table
+            .filter(songs::artist_name.eq(artist))
+            .filter(songs::title.eq(title))
+            .select(SongRow::as_select())
+            .first(&mut conn)
+            .optional()
+            .map_err(MusicRepoError::from)?;
+
+        Ok(result.map(Song::from))
+    }
+
     /// Find top songs by artist name, ordered by play count.
     /// Used for getTopSongs endpoint.
     pub fn find_top_by_artist_name(
@@ -939,14 +963,15 @@ impl SongRepository {
         artist_name: &str,
         limit: i64,
     ) -> Result<Vec<Song>, MusicRepoError> {
-        let mut conn = self.pool.get()?;
+        let mut conn = self.pool.get().map_err(MusicRepoError::from)?;
 
         let results = songs::table
             .filter(songs::artist_name.eq(artist_name))
             .select(SongRow::as_select())
             .order(songs::play_count.desc())
             .limit(limit)
-            .load(&mut conn)?;
+            .load(&mut conn)
+            .map_err(MusicRepoError::from)?;
 
         Ok(results.into_iter().map(Song::from).collect())
     }

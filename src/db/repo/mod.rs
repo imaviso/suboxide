@@ -7,7 +7,7 @@ pub mod playlist;
 pub mod user;
 
 // Re-export error types
-pub use error::{MusicRepoError, UserRepoError};
+pub use error::{MusicRepoError, MusicRepoErrorKind, UserRepoError, UserRepoErrorKind};
 
 // Re-export interaction types
 pub use interaction::{

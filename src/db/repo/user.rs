@@ -2,11 +2,11 @@
 
 use diesel::prelude::*;
 
-use crate::db::repo::error::UserRepoError;
-use crate::db::schema::users;
 use crate::db::DbPool;
-use crate::models::user::UserRoles;
+use crate::db::repo::error::{UserRepoError, UserRepoErrorKind};
+use crate::db::schema::users;
 use crate::models::User;
+use crate::models::user::UserRoles;
 
 /// Database row representation for users.
 #[derive(Debug, Clone, Queryable, Selectable)]
@@ -392,7 +392,10 @@ impl UserRepository {
             .get_result::<i64>(&mut conn)?;
 
         if existing > 0 {
-            return Err(UserRepoError::UsernameExists(new_user.username.to_string()));
+            return Err(UserRepoError::new(
+                UserRepoErrorKind::UsernameExists,
+                new_user.username.to_string(),
+            ));
         }
 
         diesel::insert_into(users::table)
@@ -515,7 +518,9 @@ impl UserRepository {
             .select(UserRow::as_select())
             .first(&mut conn)
             .optional()?
-            .ok_or_else(|| UserRepoError::NotFound(update.username.clone()))?;
+            .ok_or_else(|| {
+                UserRepoError::new(UserRepoErrorKind::NotFound, update.username.clone())
+            })?;
 
         // Build the update - we update all provided fields
         let updated = diesel::update(users::table.filter(users::id.eq(user.id)))
