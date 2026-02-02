@@ -1389,9 +1389,12 @@ impl AuthState for DatabaseAuthState {
         // Start with basic info from the artist record
         let mut response = ArtistInfo2Response::from_artist(&artist);
 
+        tracing::debug!(artist_id = artist_id, artist = %artist.name, "Fetching artist info");
+
         // Try to get cached Last.fm data
         match self.artist_cache_repo.get_valid_cache(artist_id) {
             Ok(Some(cache)) => {
+                tracing::debug!(artist_id = artist_id, "Using cached Last.fm info");
                 // Use cached data
                 response.biography = cache.biography;
                 response.last_fm_url = cache.last_fm_url;
