@@ -156,6 +156,21 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
         let _ = diesel::sql_query("ALTER TABLE users ADD COLUMN api_key TEXT").execute(conn);
     }
 
+    // Migration: Add lastfm_session_key column if it doesn't exist
+    let has_lastfm_session_key: Result<i32, _> = diesel::sql_query(
+        "SELECT COUNT(*) as cnt FROM pragma_table_info('users') WHERE name = 'lastfm_session_key'",
+    )
+    .get_result::<CountResult>(conn)
+    .map(|r| r.cnt);
+
+    if has_lastfm_session_key.unwrap_or(0) == 0 {
+        let _ =
+            diesel::sql_query("ALTER TABLE users ADD COLUMN lastfm_session_key TEXT").execute(conn);
+        let _ = diesel::sql_query(
+            "CREATE INDEX IF NOT EXISTS idx_users_lastfm_session ON users(lastfm_session_key) WHERE lastfm_session_key IS NOT NULL"
+        ).execute(conn);
+    }
+
     // Create music_folders table
     diesel::sql_query(
         r"
@@ -398,6 +413,28 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
 
     diesel::sql_query(
         "CREATE INDEX IF NOT EXISTS idx_scrobbles_played_at ON scrobbles(played_at DESC)",
+    )
+    .execute(conn)?;
+
+    // Create artist_lastfm_info table for cached metadata
+    diesel::sql_query(
+        r"
+        CREATE TABLE IF NOT EXISTS artist_lastfm_info (
+            artist_id INTEGER PRIMARY KEY NOT NULL REFERENCES artists(id) ON DELETE CASCADE,
+            biography TEXT,
+            last_fm_url TEXT,
+            small_image_url TEXT,
+            medium_image_url TEXT,
+            large_image_url TEXT,
+            similar_artists TEXT,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        ",
+    )
+    .execute(conn)?;
+
+    diesel::sql_query(
+        "CREATE INDEX IF NOT EXISTS idx_artist_lastfm_updated ON artist_lastfm_info(updated_at)",
     )
     .execute(conn)?;
 
