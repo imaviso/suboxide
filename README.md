@@ -8,6 +8,7 @@ A lightweight, self-hosted music streaming server implementing some of the [Subs
 
 - **Subsonic API Compatible** - Works with any Subsonic-compatible client (DSub, Symfonium, Submariner, etc.)
 - **OpenSubsonic Extensions** - Supports modern extensions like API key authentication and form POST
+- **Last.fm Integration** - Automatic scrobbling, now playing updates, and artist info/image fetching
 - **Fast & Lightweight** - Built with Rust, Axum, and SQLite for minimal resource usage
 - **Easy Setup** - Single binary with SQLite database, no external dependencies
 - **Music Library Scanning** - Automatically scans and indexes your music collection
@@ -77,9 +78,27 @@ Options:
   -h, --help             Print help
 ```
 
+### Last.fm Integration
+
+To enable Last.fm features (scrobbling and metadata fetching), set your API credentials:
+
+```bash
+export LASTFM_API_KEY="your_api_key"
+export LASTFM_API_SECRET="your_api_secret"
+```
+
+Then, link a user account to Last.fm:
+
+```bash
+# Follow the interactive prompt to authorize
+./subsonic user link-lastfm --username your_username
+```
+
 ### Environment Variables
 
 - `RUST_LOG` - Set log level (e.g., `subsonic=debug,tower_http=debug`)
+- `LASTFM_API_KEY` - Last.fm API Key
+- `LASTFM_API_SECRET` - Last.fm API Secret
 
 ## API Endpoints
 
