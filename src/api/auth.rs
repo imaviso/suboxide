@@ -1374,6 +1374,7 @@ impl AuthState for DatabaseAuthState {
         extract_lyrics(Path::new(&song.path))
     }
 
+    #[allow(clippy::too_many_lines)]
     fn get_artist_info_with_cache(
         &self,
         artist_id: i32,
@@ -1476,9 +1477,9 @@ impl AuthState for DatabaseAuthState {
                                     }
 
                                     // Determine extension
-                                    let ext = if image_url.ends_with(".png") {
+                                    let ext = if image_url.to_lowercase().ends_with(".png") {
                                         "png"
-                                    } else if image_url.ends_with(".gif") {
+                                    } else if image_url.to_lowercase().ends_with(".gif") {
                                         "gif"
                                     } else {
                                         "jpg"
@@ -1496,31 +1497,40 @@ impl AuthState for DatabaseAuthState {
                                                     match resp.bytes().await {
                                                         Ok(bytes) => {
                                                             if let Ok(mut file) =
-                                                                tokio::fs::File::create(&filepath).await
+                                                                tokio::fs::File::create(&filepath)
+                                                                    .await
+                                                                && file
+                                                                    .write_all(&bytes)
+                                                                    .await
+                                                                    .is_ok()
                                                             {
-                                                                if file.write_all(&bytes).await.is_ok() {
-                                                                    tracing::debug!(
-                                                                        artist = %artist_name,
-                                                                        "Downloaded artist image"
-                                                                    );
-                                                                    // Update artist record with cover art ID
-                                                                    if let Err(e) = artist_repo.update_cover_art(
+                                                                tracing::debug!(
+                                                                    artist = %artist_name,
+                                                                    "Downloaded artist image"
+                                                                );
+                                                                // Update artist record with cover art ID
+                                                                if let Err(e) = artist_repo
+                                                                    .update_cover_art(
                                                                         artist_id_copy,
                                                                         Some(&cover_art_id),
-                                                                    ) {
-                                                                        tracing::warn!(
-                                                                            error = %e,
-                                                                            "Failed to update artist cover art"
-                                                                        );
-                                                                    }
+                                                                    )
+                                                                {
+                                                                    tracing::warn!(
+                                                                        error = %e,
+                                                                        "Failed to update artist cover art"
+                                                                    );
                                                                 }
                                                             }
                                                         }
-                                                        Err(e) => tracing::warn!(error = %e, "Failed to get image bytes"),
+                                                        Err(e) => {
+                                                            tracing::warn!(error = %e, "Failed to get image bytes");
+                                                        }
                                                     }
                                                 }
                                             }
-                                            Err(e) => tracing::warn!(error = %e, "Failed to download artist image"),
+                                            Err(e) => {
+                                                tracing::warn!(error = %e, "Failed to download artist image");
+                                            }
                                         }
                                     }
                                 }
