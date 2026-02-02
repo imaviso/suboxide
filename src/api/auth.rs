@@ -1436,13 +1436,10 @@ impl AuthState for DatabaseAuthState {
                                 let (mut small, mut medium, mut large) =
                                     extract_image_urls(&lastfm_artist.image);
 
-                                // If API image is missing or a placeholder, try scraping the artist page
-                                if (large.is_none()
-                                    || large.as_ref().is_some_and(|u| {
-                                        u.contains("2a96cbd8b46e442fc41c2b86b821562f")
-                                    }))
-                                    && let Some(ref page_url) = lastfm_artist.url
-                                {
+                                // Always try to scrape the artist page for the best image (og:image)
+                                // This aligns with other Subsonic servers (Gonic, Navidrome) as Last.fm API
+                                // often returns placeholders or lower quality images compared to the web page.
+                                if let Some(ref page_url) = lastfm_artist.url {
                                     tracing::debug!(
                                         artist = %artist_name,
                                         url = %page_url,
