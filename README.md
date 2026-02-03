@@ -40,10 +40,10 @@ cargo build --release
 
 ```bash
 # 1. Create an admin user
-./subsonic create-user --username admin --password yourpassword --admin
+./subsonic user create --username admin --password yourpassword --admin
 
 # 2. Add your music folder
-./subsonic add-folder --name "Music" --path /path/to/your/music
+./subsonic folder add --name "Music" --path /path/to/your/music
 
 # 3. Scan your library
 ./subsonic scan
@@ -62,15 +62,12 @@ The server will start on `http://localhost:4040` by default.
 Usage: subsonic [OPTIONS] [COMMAND]
 
 Commands:
-  create-user       Create a new user
-  generate-api-key  Generate an API key for a user
-  revoke-api-key    Revoke (delete) an API key for a user
-  show-api-key      Show a user's API key
-  add-folder        Add a music folder
-  list-folders      List all music folders
-  remove-folder     Remove a music folder
-  scan              Scan music folders for audio files
-  serve             Start the server (default)
+  user      Manage users
+  api-key   Manage API keys
+  folder    Manage music folders
+  lastfm    Manage Last.fm integration
+  scan      Scan music folders for audio files
+  serve     Start the server (default)
 
 Options:
   -d, --database <FILE>  Database file path [default: subsonic.db]
@@ -91,7 +88,7 @@ Then, link a user account to Last.fm:
 
 ```bash
 # Follow the interactive prompt to authorize
-./subsonic user link-lastfm --username your_username
+./subsonic lastfm link --username your_username
 ```
 
 ### Environment Variables
