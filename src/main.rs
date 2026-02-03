@@ -552,10 +552,10 @@ async fn main() {
                         Ok(hash) => match repo.update_password(user_id, &hash) {
                             Ok(true) => println!("Updated password for '{username}'"),
                             Ok(false) => {
-                                tracing::error!("Failed to update password (user missing?)")
+                                tracing::error!("Failed to update password (user missing?)");
                             }
                             Err(e) => {
-                                tracing::error!(error = %e, "Failed to update password in DB")
+                                tracing::error!(error = %e, "Failed to update password in DB");
                             }
                         },
                         Err(e) => tracing::error!(error = %e, "Failed to hash password"),
@@ -823,9 +823,7 @@ async fn main() {
                     }
                 };
 
-                let token = if let Some(t) = token {
-                    t
-                } else {
+                let token = token.unwrap_or_else(|| {
                     println!("To link your Last.fm account, please visit:");
                     println!(
                         "http://www.last.fm/api/auth/?api_key={}&cb=http://localhost:8080/callback",
@@ -848,7 +846,7 @@ async fn main() {
                         std::process::exit(1);
                     }
                     trimmed.to_string()
-                };
+                });
 
                 println!("Exchanging token for session...");
                 match client.get_session(&token).await {
