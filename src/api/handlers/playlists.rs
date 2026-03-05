@@ -1,6 +1,4 @@
 //! Playlist-related API handlers (getPlaylists, getPlaylist, createPlaylist, updatePlaylist, deletePlaylist)
-#![allow(clippy::unused_async)]
-
 use axum::extract::RawQuery;
 use axum::response::IntoResponse;
 use serde::Deserialize;
@@ -10,6 +8,7 @@ use crate::api::error::ApiError;
 use crate::api::response::{error_response, ok_empty, ok_playlist, ok_playlists};
 use crate::models::music::{
     ChildResponse, PlaylistResponse, PlaylistWithSongsResponse, PlaylistsResponse,
+    format_subsonic_datetime,
 };
 
 /// Parse repeated query parameters from a query string.
@@ -68,8 +67,8 @@ pub async fn get_playlists(
                 public: p.public,
                 song_count: p.song_count,
                 duration: p.duration,
-                created: p.created_at.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
-                changed: p.updated_at.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
+                created: format_subsonic_datetime(&p.created_at),
+                changed: format_subsonic_datetime(&p.updated_at),
                 cover_art,
             }
         })
@@ -141,14 +140,8 @@ pub async fn get_playlist(
         public: playlist.public,
         song_count: playlist.song_count,
         duration: playlist.duration,
-        created: playlist
-            .created_at
-            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-            .to_string(),
-        changed: playlist
-            .updated_at
-            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-            .to_string(),
+        created: format_subsonic_datetime(&playlist.created_at),
+        changed: format_subsonic_datetime(&playlist.updated_at),
         cover_art,
         entries: song_responses,
     };
@@ -175,7 +168,10 @@ pub struct CreatePlaylistParams {
 /// - `playlistId`: The playlist ID (if updating an existing playlist)
 /// - `name`: The playlist name (required if creating a new playlist)
 /// - `songId`: ID of a song to add (can be repeated)
-#[expect(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "Playlist creation supports create/update flows and repeated query parameters"
+)]
 pub async fn create_playlist(
     RawQuery(query): RawQuery,
     axum::extract::Query(params): axum::extract::Query<CreatePlaylistParams>,
@@ -212,7 +208,13 @@ pub async fn create_playlist(
             &song_ids,
             &[], // no songs to remove
         ) {
-            tracing::warn!(playlist_id = playlist_id, error = %e, "Failed to update playlist");
+            tracing::event!(
+                name: "playlist.update.failed",
+                tracing::Level::WARN,
+                playlist.id = playlist_id,
+                error = %e,
+                "playlist update failed: {{error}}"
+            );
             return error_response(auth.format, &ApiError::Generic(e)).into_response();
         }
 
@@ -245,14 +247,8 @@ pub async fn create_playlist(
                 public: playlist.public,
                 song_count: playlist.song_count,
                 duration: playlist.duration,
-                created: playlist
-                    .created_at
-                    .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                    .to_string(),
-                changed: playlist
-                    .updated_at
-                    .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                    .to_string(),
+                created: format_subsonic_datetime(&playlist.created_at),
+                changed: format_subsonic_datetime(&playlist.updated_at),
                 cover_art,
                 entries: song_responses,
             };
@@ -299,14 +295,8 @@ pub async fn create_playlist(
                 public: playlist.public,
                 song_count: playlist.song_count,
                 duration: playlist.duration,
-                created: playlist
-                    .created_at
-                    .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                    .to_string(),
-                changed: playlist
-                    .updated_at
-                    .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                    .to_string(),
+                created: format_subsonic_datetime(&playlist.created_at),
+                changed: format_subsonic_datetime(&playlist.updated_at),
                 cover_art,
                 entries: song_responses,
             };
@@ -314,7 +304,12 @@ pub async fn create_playlist(
             ok_playlist(auth.format, response).into_response()
         }
         Err(e) => {
-            tracing::warn!(error = %e, "Failed to create playlist");
+            tracing::event!(
+                name: "playlist.create.failed",
+                tracing::Level::WARN,
+                error = %e,
+                "playlist creation failed: {{error}}"
+            );
             error_response(auth.format, &ApiError::Generic(e)).into_response()
         }
     }
@@ -390,7 +385,13 @@ pub async fn update_playlist(
         &songs_to_add,
         &indices_to_remove,
     ) {
-        tracing::warn!(playlist_id = playlist_id, error = %e, "Failed to update playlist");
+        tracing::event!(
+            name: "playlist.update.failed",
+            tracing::Level::WARN,
+            playlist.id = playlist_id,
+            error = %e,
+            "playlist update failed: {{error}}"
+        );
         return error_response(auth.format, &ApiError::Generic(e)).into_response();
     }
 
@@ -430,7 +431,13 @@ pub async fn delete_playlist(
             error_response(auth.format, &ApiError::NotFound("Playlist".into())).into_response()
         }
         Err(e) => {
-            tracing::warn!(playlist_id = playlist_id, error = %e, "Failed to delete playlist");
+            tracing::event!(
+                name: "playlist.delete.failed",
+                tracing::Level::WARN,
+                playlist.id = playlist_id,
+                error = %e,
+                "playlist deletion failed: {{error}}"
+            );
             error_response(auth.format, &ApiError::Generic(e)).into_response()
         }
     }

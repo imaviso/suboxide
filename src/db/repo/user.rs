@@ -12,7 +12,10 @@ use crate::models::user::UserRoles;
 #[derive(Debug, Clone, Queryable, Selectable)]
 #[diesel(table_name = users)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-#[expect(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Database schema stores Subsonic roles as separate boolean columns"
+)]
 pub struct UserRow {
     pub id: i32,
     pub username: String,
@@ -31,9 +34,7 @@ pub struct UserRow {
     pub share_role: bool,
     pub video_conversion_role: bool,
     pub max_bit_rate: i32,
-    #[allow(dead_code)]
     pub created_at: String,
-    #[allow(dead_code)]
     pub updated_at: String,
     pub subsonic_password: Option<String>,
     pub api_key: Option<String>,
@@ -72,7 +73,10 @@ impl From<UserRow> for User {
 /// Data for inserting a new user.
 #[derive(Debug, Clone, Insertable)]
 #[diesel(table_name = users)]
-#[expect(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Insertable row mirrors boolean role columns in users table"
+)]
 pub struct NewUser<'a> {
     pub username: &'a str,
     pub password_hash: &'a str,
@@ -95,7 +99,10 @@ pub struct NewUser<'a> {
 
 /// Builder for `NewUser`.
 #[derive(Debug, Clone)]
-#[expect(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Builder tracks each Subsonic role toggle independently"
+)]
 pub struct NewUserBuilder<'a> {
     username: &'a str,
     password_hash: &'a str,

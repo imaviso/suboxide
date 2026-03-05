@@ -1,7 +1,5 @@
 //! Library scanning API handlers (startScan, getScanStatus)
 
-#![allow(clippy::unused_async)]
-
 use axum::response::IntoResponse;
 
 use crate::api::auth::SubsonicAuth;
@@ -52,18 +50,30 @@ pub async fn start_scan(auth: SubsonicAuth) -> impl IntoResponse {
 
             match result {
                 Ok(Ok(stats)) => {
-                    tracing::info!(
+                    tracing::event!(
+                        name: "scan.manual.completed",
+                        tracing::Level::INFO,
                         tracks.found = stats.tracks_found,
                         tracks.added = stats.tracks_added,
                         tracks.failed = stats.tracks_failed,
-                        "Scan complete"
+                        "manual scan completed"
                     );
                 }
                 Ok(Err(e)) => {
-                    tracing::error!(error = %e, "Scan failed");
+                    tracing::event!(
+                        name: "scan.manual.failed",
+                        tracing::Level::ERROR,
+                        error = %e,
+                        "manual scan failed: {{error}}"
+                    );
                 }
                 Err(e) => {
-                    tracing::error!(error = %e, "Scan task panicked");
+                    tracing::event!(
+                        name: "scan.manual.task_panic",
+                        tracing::Level::ERROR,
+                        error = %e,
+                        "manual scan task panicked: {{error}}"
+                    );
                 }
             }
         });

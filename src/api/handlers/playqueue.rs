@@ -1,12 +1,12 @@
 //! Play queue API handlers (getPlayQueue, savePlayQueue, getPlayQueueByIndex, savePlayQueueByIndex)
-#![allow(clippy::unused_async)]
-
 use axum::extract::RawQuery;
 use axum::response::IntoResponse;
 
 use crate::api::auth::SubsonicAuth;
 use crate::api::response::{ok_empty, ok_play_queue, ok_play_queue_by_index};
-use crate::models::music::{ChildResponse, PlayQueueByIndexResponse, PlayQueueResponse};
+use crate::models::music::{
+    ChildResponse, PlayQueueByIndexResponse, PlayQueueResponse, format_subsonic_datetime,
+};
 
 /// Parse repeated query parameters from a query string.
 /// Handles both single values and repeated parameters like `?id=1&id=2`.
@@ -53,10 +53,7 @@ pub async fn get_play_queue(auth: SubsonicAuth) -> impl IntoResponse {
             current: play_queue.current_song.as_ref().map(|s| s.id.to_string()),
             position: play_queue.position,
             username: play_queue.username.clone(),
-            changed: play_queue
-                .changed_at
-                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                .to_string(),
+            changed: format_subsonic_datetime(&play_queue.changed_at),
             changed_by: play_queue.changed_by.clone(),
             entries: song_responses,
         };
@@ -68,9 +65,7 @@ pub async fn get_play_queue(auth: SubsonicAuth) -> impl IntoResponse {
             current: None,
             position: None,
             username: username.clone(),
-            changed: chrono::Utc::now()
-                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                .to_string(),
+            changed: format_subsonic_datetime(&chrono::Utc::now().naive_utc()),
             changed_by: None,
             entries: vec![],
         };
@@ -118,7 +113,12 @@ pub async fn save_play_queue(RawQuery(query): RawQuery, auth: SubsonicAuth) -> i
         auth.state
             .save_play_queue(user_id, &song_ids, current_song_id, position, changed_by)
     {
-        tracing::warn!(error = %e, "Failed to save play queue");
+        tracing::event!(
+            name: "playqueue.save.failed",
+            tracing::Level::WARN,
+            error = %e,
+            "play queue save failed: {{error}}"
+        );
         // Don't return an error - the API spec says this should succeed silently
     }
 
@@ -162,10 +162,7 @@ pub async fn get_play_queue_by_index(auth: SubsonicAuth) -> impl IntoResponse {
             current_index,
             position: play_queue.position,
             username: play_queue.username.clone(),
-            changed: play_queue
-                .changed_at
-                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                .to_string(),
+            changed: format_subsonic_datetime(&play_queue.changed_at),
             changed_by: play_queue.changed_by.clone(),
             entries: song_responses,
         };
@@ -177,9 +174,7 @@ pub async fn get_play_queue_by_index(auth: SubsonicAuth) -> impl IntoResponse {
             current_index: None,
             position: None,
             username: username.clone(),
-            changed: chrono::Utc::now()
-                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                .to_string(),
+            changed: format_subsonic_datetime(&chrono::Utc::now().naive_utc()),
             changed_by: None,
             entries: vec![],
         };
@@ -234,7 +229,12 @@ pub async fn save_play_queue_by_index(
         auth.state
             .save_play_queue(user_id, &song_ids, current_song_id, position, changed_by)
     {
-        tracing::warn!(error = %e, "Failed to save play queue by index");
+        tracing::event!(
+            name: "playqueue.save_by_index.failed",
+            tracing::Level::WARN,
+            error = %e,
+            "play queue save by index failed: {{error}}"
+        );
         // Don't return an error - the API spec says this should succeed silently
     }
 

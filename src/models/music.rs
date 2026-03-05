@@ -3,6 +3,15 @@
 use chrono::NaiveDateTime;
 use serde::Serialize;
 
+/// Timestamp format used by Subsonic API responses.
+pub const SUBSONIC_DATETIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.3fZ";
+
+/// Format a UTC naive timestamp in Subsonic's wire format.
+#[must_use]
+pub fn format_subsonic_datetime(datetime: &NaiveDateTime) -> String {
+    datetime.format(SUBSONIC_DATETIME_FORMAT).to_string()
+}
+
 /// A music folder (library root directory).
 #[derive(Debug, Clone)]
 pub struct MusicFolder {
@@ -116,7 +125,7 @@ impl ArtistID3Response {
             cover_art: artist.cover_art.clone(),
             artist_image_url: artist.artist_image_url.clone(),
             album_count,
-            starred: starred_at.map(|dt| dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()),
+            starred: starred_at.map(format_subsonic_datetime),
             musicbrainz_id: artist.musicbrainz_id.clone(),
             sort_name: artist.sort_name.clone(),
         }
@@ -182,10 +191,7 @@ impl From<&Album> for AlbumID3Response {
             song_count: album.song_count,
             duration: album.duration,
             play_count: Some(album.play_count),
-            created: album
-                .created_at
-                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                .to_string(),
+            created: format_subsonic_datetime(&album.created_at),
             starred: None,
             year: album.year,
             genre: album.genre.clone(),
@@ -205,11 +211,8 @@ impl AlbumID3Response {
             song_count: album.song_count,
             duration: album.duration,
             play_count: Some(album.play_count),
-            created: album
-                .created_at
-                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                .to_string(),
-            starred: starred_at.map(|dt| dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()),
+            created: format_subsonic_datetime(&album.created_at),
+            starred: starred_at.map(format_subsonic_datetime),
             year: album.year,
             genre: album.genre.clone(),
         }
@@ -329,7 +332,7 @@ impl From<&Song> for ChildResponse {
             path: Some(song.path.clone()),
             play_count: Some(song.play_count),
             disc_number: song.disc_number,
-            created: Some(song.created_at.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()),
+            created: Some(format_subsonic_datetime(&song.created_at)),
             album_id: song.album_id.map(|id| id.to_string()),
             artist_id: song.artist_id.map(|id| id.to_string()),
             media_type: Some("music".to_string()),
@@ -363,11 +366,11 @@ impl ChildResponse {
             path: Some(song.path.clone()),
             play_count: Some(song.play_count),
             disc_number: song.disc_number,
-            created: Some(song.created_at.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()),
+            created: Some(format_subsonic_datetime(&song.created_at)),
             album_id: song.album_id.map(|id| id.to_string()),
             artist_id: song.artist_id.map(|id| id.to_string()),
             media_type: Some("music".to_string()),
-            starred: starred_at.map(|dt| dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()),
+            starred: starred_at.map(format_subsonic_datetime),
         }
     }
 }
@@ -453,10 +456,7 @@ impl AlbumWithSongsID3Response {
             song_count: album.song_count,
             duration: album.duration,
             play_count: Some(album.play_count),
-            created: album
-                .created_at
-                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                .to_string(),
+            created: format_subsonic_datetime(&album.created_at),
             starred: None,
             year: album.year,
             genre: album.genre.clone(),
@@ -479,11 +479,8 @@ impl AlbumWithSongsID3Response {
             song_count: album.song_count,
             duration: album.duration,
             play_count: Some(album.play_count),
-            created: album
-                .created_at
-                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                .to_string(),
-            starred: starred_at.map(|dt| dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()),
+            created: format_subsonic_datetime(&album.created_at),
+            starred: starred_at.map(format_subsonic_datetime),
             year: album.year,
             genre: album.genre.clone(),
             songs,
@@ -542,7 +539,7 @@ impl ArtistWithAlbumsID3Response {
             cover_art: artist.cover_art.clone(),
             artist_image_url: artist.artist_image_url.clone(),
             album_count: Some(i32::try_from(albums.len()).unwrap_or(0)),
-            starred: starred_at.map(|dt| dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()),
+            starred: starred_at.map(format_subsonic_datetime),
             musicbrainz_id: artist.musicbrainz_id.clone(),
             sort_name: artist.sort_name.clone(),
             albums,
@@ -765,11 +762,11 @@ impl StarredChildResponse {
             path: Some(song.path.clone()),
             play_count: Some(song.play_count),
             disc_number: song.disc_number,
-            created: Some(song.created_at.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()),
+            created: Some(format_subsonic_datetime(&song.created_at)),
             album_id: song.album_id.map(|id| id.to_string()),
             artist_id: song.artist_id.map(|id| id.to_string()),
             media_type: Some("music".to_string()),
-            starred: starred_at.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
+            starred: format_subsonic_datetime(starred_at),
         }
     }
 }
@@ -808,7 +805,7 @@ impl StarredArtistID3Response {
             cover_art: artist.cover_art.clone(),
             artist_image_url: artist.artist_image_url.clone(),
             album_count,
-            starred: starred_at.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
+            starred: format_subsonic_datetime(starred_at),
             musicbrainz_id: artist.musicbrainz_id.clone(),
             sort_name: artist.sort_name.clone(),
         }
@@ -856,11 +853,8 @@ impl StarredAlbumID3Response {
             song_count: album.song_count,
             duration: album.duration,
             play_count: Some(album.play_count),
-            created: album
-                .created_at
-                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                .to_string(),
-            starred: starred_at.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
+            created: format_subsonic_datetime(&album.created_at),
+            starred: format_subsonic_datetime(starred_at),
             year: album.year,
             genre: album.genre.clone(),
         }
@@ -1469,12 +1463,7 @@ impl ChildResponse {
             path: None,
             play_count: None,
             disc_number: None,
-            created: Some(
-                artist
-                    .created_at
-                    .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                    .to_string(),
-            ),
+            created: Some(format_subsonic_datetime(&artist.created_at)),
             album_id: None,
             artist_id: Some(artist.id.to_string()),
             media_type: None,
@@ -1507,12 +1496,7 @@ impl ChildResponse {
             path: None,
             play_count: Some(album.play_count),
             disc_number: None,
-            created: Some(
-                album
-                    .created_at
-                    .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                    .to_string(),
-            ),
+            created: Some(format_subsonic_datetime(&album.created_at)),
             album_id: Some(album.id.to_string()),
             artist_id: album.artist_id.map(|id| id.to_string()),
             media_type: None,
@@ -1558,7 +1542,7 @@ impl ArtistResponse {
             id: artist.id.to_string(),
             name: artist.name.clone(),
             artist_image_url: artist.artist_image_url.clone(),
-            starred: starred_at.map(|dt| dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()),
+            starred: starred_at.map(format_subsonic_datetime),
             user_rating: None,
             average_rating: None,
         }
@@ -1642,7 +1626,7 @@ impl From<&Song> for SearchMatch {
             duration: Some(song.duration),
             bit_rate: song.bit_rate,
             path: Some(song.path.clone()),
-            created: Some(song.created_at.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()),
+            created: Some(format_subsonic_datetime(&song.created_at)),
         }
     }
 }
@@ -1706,4 +1690,68 @@ impl ArtistInfoResponse {
 pub struct SimilarSongsResponse {
     #[serde(rename = "song", skip_serializing_if = "Vec::is_empty")]
     pub songs: Vec<ChildResponse>,
+}
+
+// ============================================================================
+// Response types for remote control extension
+// ============================================================================
+
+/// Remote session payload.
+#[derive(Debug, Serialize, Clone)]
+pub struct RemoteSessionResponse {
+    #[serde(rename = "@id")]
+    pub id: String,
+    #[serde(rename = "@pairingCode", skip_serializing_if = "Option::is_none")]
+    pub pairing_code: Option<String>,
+    #[serde(rename = "@expiresAt")]
+    pub expires_at: String,
+    #[serde(rename = "@hostDeviceId")]
+    pub host_device_id: String,
+    #[serde(rename = "@hostDeviceName", skip_serializing_if = "Option::is_none")]
+    pub host_device_name: Option<String>,
+    #[serde(
+        rename = "@controllerDeviceId",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub controller_device_id: Option<String>,
+    #[serde(
+        rename = "@controllerDeviceName",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub controller_device_name: Option<String>,
+    #[serde(rename = "@connected")]
+    pub connected: bool,
+}
+
+/// Remote command payload.
+#[derive(Debug, Serialize, Clone)]
+pub struct RemoteCommandResponse {
+    #[serde(rename = "@id")]
+    pub id: i64,
+    #[serde(rename = "@command")]
+    pub command: String,
+    #[serde(rename = "@payload", skip_serializing_if = "Option::is_none")]
+    pub payload: Option<String>,
+    #[serde(rename = "@sourceDeviceId")]
+    pub source_device_id: String,
+    #[serde(rename = "@created")]
+    pub created: String,
+}
+
+/// Response payload containing queued remote commands.
+#[derive(Debug, Serialize, Clone)]
+pub struct RemoteCommandsResponse {
+    #[serde(rename = "command", skip_serializing_if = "Vec::is_empty")]
+    pub commands: Vec<RemoteCommandResponse>,
+}
+
+/// Latest remote playback state payload.
+#[derive(Debug, Serialize, Clone)]
+pub struct RemoteStateResponse {
+    #[serde(rename = "@stateJson")]
+    pub state_json: String,
+    #[serde(rename = "@updatedByDeviceId")]
+    pub updated_by_device_id: String,
+    #[serde(rename = "@updatedAt")]
+    pub updated_at: String,
 }

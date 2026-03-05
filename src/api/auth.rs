@@ -39,8 +39,8 @@ use crate::db::repo::ArtistInfoCacheRepository;
 use crate::db::{
     AlbumRepository, ArtistRepository, DbPool, MusicFolderRepository, NewUser, NowPlayingEntry,
     NowPlayingRepository, PlayQueue, PlayQueueRepository, Playlist, PlaylistRepository,
-    RatingRepository, ScrobbleRepository, SongRepository, StarredRepository, UserRepository,
-    UserUpdate,
+    RatingRepository, RemoteCommand, RemoteControlRepository, RemoteSession, RemoteState,
+    ScrobbleRepository, SongRepository, StarredRepository, UserRepository, UserUpdate,
 };
 use crate::lastfm::{LastFmClient, models::extract_biography, models::extract_image_urls};
 use crate::models::User;
@@ -277,6 +277,64 @@ pub trait AuthState: Send + Sync + 'static {
         changed_by: Option<&str>,
     ) -> Result<(), String>;
 
+    // Remote control methods
+    /// Create a remote-control session for a host device.
+    fn create_remote_session(
+        &self,
+        user_id: i32,
+        host_device_id: &str,
+        host_device_name: Option<&str>,
+        ttl_seconds: i64,
+    ) -> Result<RemoteSession, String>;
+    /// Join an existing remote-control session using a pairing code.
+    fn join_remote_session(
+        &self,
+        user_id: i32,
+        pairing_code: &str,
+        controller_device_id: &str,
+        controller_device_name: Option<&str>,
+    ) -> Result<Option<RemoteSession>, String>;
+    /// Close a remote-control session.
+    fn close_remote_session(&self, user_id: i32, session_id: &str) -> Result<bool, String>;
+    /// Get an active remote-control session by ID for current user.
+    fn get_remote_session(
+        &self,
+        user_id: i32,
+        session_id: &str,
+    ) -> Result<Option<RemoteSession>, String>;
+    /// Queue a remote command for a session.
+    fn send_remote_command(
+        &self,
+        user_id: i32,
+        session_id: &str,
+        source_device_id: &str,
+        command: &str,
+        payload: Option<&str>,
+    ) -> Result<i64, String>;
+    /// Get queued commands for a session.
+    fn get_remote_commands(
+        &self,
+        user_id: i32,
+        session_id: &str,
+        since_id: i64,
+        limit: i64,
+        exclude_device_id: &str,
+    ) -> Result<Vec<RemoteCommand>, String>;
+    /// Update latest remote playback state for a session.
+    fn update_remote_state(
+        &self,
+        user_id: i32,
+        session_id: &str,
+        updated_by_device_id: &str,
+        state_json: &str,
+    ) -> Result<(), String>;
+    /// Get latest remote playback state for a session.
+    fn get_remote_state(
+        &self,
+        user_id: i32,
+        session_id: &str,
+    ) -> Result<Option<RemoteState>, String>;
+
     // User management methods
     /// Get a user by username.
     fn get_user(&self, username: &str) -> Option<User>;
@@ -295,7 +353,10 @@ pub trait AuthState: Send + Sync + 'static {
         roles: UserRoles,
     ) -> Result<User, String>;
     /// Update an existing user.
-    #[expect(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Subsonic user updates expose many independently optional role fields"
+    )]
     fn update_user(
         &self,
         username: &str,
@@ -489,7 +550,10 @@ where
 {
     type Rejection = AuthError;
 
-    #[expect(clippy::too_many_lines)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Extractor validates multiple auth flows and transports in one place"
+    )]
     async fn from_request(req: Request<Body>, state: &S) -> Result<Self, Self::Rejection> {
         let is_post = req.method() == Method::POST;
 
@@ -513,7 +577,10 @@ where
 
         // Support for clients passing credentials in HTTP headers (e.g. SolidSonic)
         // Checks for X-Subsonic-Username, X-Subsonic-Token, and X-Subsonic-Salt
-        #[expect(clippy::collapsible_if)]
+        #[expect(
+            clippy::collapsible_if,
+            reason = "Nested checks keep header parsing flow explicit"
+        )]
         if params.u.is_empty() {
             if let Some(Ok(u)) = parts.headers.get("X-Subsonic-Username").map(|h| h.to_str()) {
                 params.u = u.to_string();
@@ -630,7 +697,7 @@ where
 /// Database-backed authentication state.
 ///
 /// Uses the user repository to look up users from `SQLite`.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DatabaseAuthState {
     pool: DbPool,
     user_repo: UserRepository,
@@ -644,6 +711,7 @@ pub struct DatabaseAuthState {
     rating_repo: RatingRepository,
     playlist_repo: PlaylistRepository,
     play_queue_repo: PlayQueueRepository,
+    remote_control_repo: RemoteControlRepository,
     artist_cache_repo: ArtistInfoCacheRepository,
     scan_state: ScanStateHandle,
     lastfm_client: Option<LastFmClient>,
@@ -676,6 +744,7 @@ impl DatabaseAuthState {
             rating_repo: RatingRepository::new(pool.clone()),
             playlist_repo: PlaylistRepository::new(pool.clone()),
             play_queue_repo: PlayQueueRepository::new(pool.clone()),
+            remote_control_repo: RemoteControlRepository::new(pool.clone()),
             artist_cache_repo: ArtistInfoCacheRepository::new(pool),
             scan_state,
             lastfm_client,
@@ -1218,6 +1287,119 @@ impl AuthState for DatabaseAuthState {
             .map_err(|e| e.to_string())
     }
 
+    fn create_remote_session(
+        &self,
+        user_id: i32,
+        host_device_id: &str,
+        host_device_name: Option<&str>,
+        ttl_seconds: i64,
+    ) -> Result<RemoteSession, String> {
+        self.remote_control_repo
+            .create_session(user_id, host_device_id, host_device_name, ttl_seconds)
+            .map_err(|e| e.to_string())
+    }
+
+    fn join_remote_session(
+        &self,
+        user_id: i32,
+        pairing_code: &str,
+        controller_device_id: &str,
+        controller_device_name: Option<&str>,
+    ) -> Result<Option<RemoteSession>, String> {
+        self.remote_control_repo
+            .join_session(
+                pairing_code,
+                user_id,
+                controller_device_id,
+                controller_device_name,
+            )
+            .map_err(|e| e.to_string())
+    }
+
+    fn close_remote_session(&self, user_id: i32, session_id: &str) -> Result<bool, String> {
+        self.remote_control_repo
+            .close_session(session_id, user_id)
+            .map_err(|e| e.to_string())
+    }
+
+    fn get_remote_session(
+        &self,
+        user_id: i32,
+        session_id: &str,
+    ) -> Result<Option<RemoteSession>, String> {
+        self.remote_control_repo
+            .get_session_for_user(session_id, user_id)
+            .map_err(|e| e.to_string())
+    }
+
+    fn send_remote_command(
+        &self,
+        user_id: i32,
+        session_id: &str,
+        source_device_id: &str,
+        command: &str,
+        payload: Option<&str>,
+    ) -> Result<i64, String> {
+        self.remote_control_repo
+            .get_session_for_user(session_id, user_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "Remote session not found".to_string())?;
+
+        self.remote_control_repo
+            .enqueue_command(session_id, source_device_id, command, payload)
+            .map_err(|e| e.to_string())
+    }
+
+    fn get_remote_commands(
+        &self,
+        user_id: i32,
+        session_id: &str,
+        since_id: i64,
+        limit: i64,
+        exclude_device_id: &str,
+    ) -> Result<Vec<RemoteCommand>, String> {
+        self.remote_control_repo
+            .get_session_for_user(session_id, user_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "Remote session not found".to_string())?;
+
+        self.remote_control_repo
+            .get_commands(session_id, since_id, limit, exclude_device_id)
+            .map_err(|e| e.to_string())
+    }
+
+    fn update_remote_state(
+        &self,
+        user_id: i32,
+        session_id: &str,
+        updated_by_device_id: &str,
+        state_json: &str,
+    ) -> Result<(), String> {
+        self.remote_control_repo
+            .get_session_for_user(session_id, user_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "Remote session not found".to_string())?;
+
+        self.remote_control_repo
+            .update_state(session_id, updated_by_device_id, state_json)
+            .map_err(|e| e.to_string())
+    }
+
+    fn get_remote_state(
+        &self,
+        user_id: i32,
+        session_id: &str,
+    ) -> Result<Option<RemoteState>, String> {
+        self.remote_control_repo
+            .get_session_for_user(session_id, user_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "Remote session not found".to_string())?;
+
+        self.remote_control_repo
+            .get_state(session_id)
+            .map_err(|e| e.to_string())
+    }
+
     fn get_user(&self, username: &str) -> Option<User> {
         self.user_repo.find_by_username(username).ok().flatten()
     }
@@ -1374,7 +1556,10 @@ impl AuthState for DatabaseAuthState {
         extract_lyrics(Path::new(&song.path))
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "This method coordinates cache read/write and async Last.fm enrichment"
+    )]
     fn get_artist_info_with_cache(
         &self,
         artist_id: i32,

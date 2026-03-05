@@ -215,7 +215,7 @@ enum LastfmCommands {
 }
 
 /// Application state shared across all handlers.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AppState {
     auth: Arc<DatabaseAuthState>,
     scan_state: ScanStateHandle,
@@ -233,10 +233,16 @@ impl AppState {
         let lastfm_client = LastFmClient::new(api_key, api_secret);
 
         if lastfm_client.is_some() {
-            tracing::info!("Last.fm integration enabled");
+            tracing::event!(
+                name: "lastfm.integration.enabled",
+                tracing::Level::INFO,
+                "last.fm integration enabled"
+            );
         } else {
-            tracing::debug!(
-                "Last.fm not configured (set LASTFM_API_KEY and LASTFM_API_SECRET to enable)"
+            tracing::event!(
+                name: "lastfm.integration.disabled",
+                tracing::Level::DEBUG,
+                "last.fm integration disabled because credentials are missing"
             );
         }
 
@@ -328,6 +334,15 @@ fn create_router(state: AppState) -> Router {
         // Play queue by index endpoints (OpenSubsonic extension)
         .subsonic_route("/getPlayQueueByIndex", handlers::get_play_queue_by_index)
         .subsonic_route("/savePlayQueueByIndex", handlers::save_play_queue_by_index)
+        // Remote control endpoints (OpenSubsonic extension)
+        .subsonic_route("/createRemoteSession", handlers::create_remote_session)
+        .subsonic_route("/joinRemoteSession", handlers::join_remote_session)
+        .subsonic_route("/getRemoteSession", handlers::get_remote_session)
+        .subsonic_route("/closeRemoteSession", handlers::close_remote_session)
+        .subsonic_route("/sendRemoteCommand", handlers::send_remote_command)
+        .subsonic_route("/getRemoteCommands", handlers::get_remote_commands)
+        .subsonic_route("/updateRemoteState", handlers::update_remote_state)
+        .subsonic_route("/getRemoteState", handlers::get_remote_state)
         // Media retrieval endpoints
         .subsonic_route("/stream", handlers::stream)
         .subsonic_route("/download", handlers::download)
@@ -425,7 +440,10 @@ fn create_user(
 }
 
 #[tokio::main]
-#[expect(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "CLI command handling is intentionally centralized in one entrypoint"
+)]
 async fn main() {
     let cli = Cli::parse();
 
@@ -442,7 +460,12 @@ async fn main() {
     let pool = match setup_database(&cli.database) {
         Ok(pool) => pool,
         Err(e) => {
-            tracing::error!(error = %e, "Database setup failed");
+            tracing::event!(
+                name: "db.setup.failed",
+                tracing::Level::ERROR,
+                error = %e,
+                "database setup failed: {{error}}"
+            );
             std::process::exit(1);
         }
     };
@@ -931,7 +954,12 @@ async fn main() {
                     println!("  Cover art saved:  {}", stats.cover_art_saved);
                 }
                 Err(e) => {
-                    tracing::error!(error = %e, "Scan failed");
+                    tracing::event!(
+                        name: "scan.command.failed",
+                        tracing::Level::ERROR,
+                        error = %e,
+                        "scan command failed: {{error}}"
+                    );
                     std::process::exit(1);
                 }
             }
@@ -941,14 +969,24 @@ async fn main() {
             auto_scan_interval,
         }) => {
             if let Err(e) = run_server(pool, cli.port, auto_scan, auto_scan_interval).await {
-                tracing::error!(error = %e, "Server failed");
+                tracing::event!(
+                    name: "server.run.failed",
+                    tracing::Level::ERROR,
+                    error = %e,
+                    "server failed: {{error}}"
+                );
                 std::process::exit(1);
             }
         }
         None => {
             // Default: start server without auto-scan
             if let Err(e) = run_server(pool, cli.port, false, 300).await {
-                tracing::error!(error = %e, "Server failed");
+                tracing::event!(
+                    name: "server.run.failed",
+                    tracing::Level::ERROR,
+                    error = %e,
+                    "server failed: {{error}}"
+                );
                 std::process::exit(1);
             }
         }
@@ -996,10 +1034,16 @@ async fn run_server(
         .has_users()
         .map_err(|e| ServerError::UserCheck(Box::new(e)))?;
     if !has_users {
-        tracing::warn!("No users found in database");
-        tracing::warn!(
+        tracing::event!(
+            name: "server.bootstrap.no_users",
+            tracing::Level::WARN,
+            "no users found in database"
+        );
+        tracing::event!(
+            name: "server.bootstrap.user_create_hint",
+            tracing::Level::WARN,
             command = "subsonic user create --username admin --password <password> --admin",
-            "Create a user with"
+            "create initial user with: {{command}}"
         );
     }
 
@@ -1010,9 +1054,11 @@ async fn run_server(
     let _auto_scan_handle = if auto_scan {
         let scan_state = state.scan_state();
         let mut auto_scanner = AutoScanner::with_interval(pool, scan_state, auto_scan_interval);
-        tracing::info!(
-            auto_scan_interval_secs = auto_scan_interval,
-            "Auto-scan enabled"
+        tracing::event!(
+            name: "scan.auto.enabled",
+            tracing::Level::INFO,
+            scan.interval_secs = auto_scan_interval,
+            "auto-scan enabled"
         );
         Some(auto_scanner.start())
     } else {
@@ -1025,7 +1071,12 @@ async fn run_server(
         .map_err(ServerError::Bind)?;
 
     let local_addr = listener.local_addr().map_err(ServerError::LocalAddr)?;
-    tracing::info!(addr = %local_addr, "Subsonic server listening");
+    tracing::event!(
+        name: "server.listen.started",
+        tracing::Level::INFO,
+        server.address = %local_addr,
+        "subsonic server listening on {{server.address}}"
+    );
 
     axum::serve(listener, app)
         .await

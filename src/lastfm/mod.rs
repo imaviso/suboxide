@@ -13,5 +13,7 @@
 pub mod client;
 pub mod models;
 
+#[doc(inline)]
 pub use client::{LastFmClient, LastFmError};
+#[doc(inline)]
 pub use models::{LastFmArtist, LastFmArtistCache, extract_biography, extract_image_urls};

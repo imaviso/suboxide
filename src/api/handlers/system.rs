@@ -1,7 +1,5 @@
 //! System-related API handlers (ping, getLicense, getOpenSubsonicExtensions, tokenInfo, etc.)
 
-#![allow(clippy::unused_async)]
-
 use axum::response::IntoResponse;
 
 use crate::api::auth::SubsonicAuth;

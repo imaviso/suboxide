@@ -1,6 +1,4 @@
 //! Annotation-related API handlers (star, unstar, getStarred2, scrobble, getNowPlaying, setRating, etc.)
-#![allow(clippy::unused_async)]
-
 use axum::extract::RawQuery;
 use axum::response::IntoResponse;
 use serde::Deserialize;
@@ -49,7 +47,13 @@ pub async fn star(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoRes
         if let Ok(artist_id) = artist_id_str.parse::<i32>()
             && let Err(e) = auth.state.star_artist(user_id, artist_id)
         {
-            tracing::warn!(artist_id = artist_id, error = %e, "Failed to star artist");
+            tracing::event!(
+                name: "annotation.star_artist.failed",
+                tracing::Level::WARN,
+                artist.id = artist_id,
+                error = %e,
+                "failed to star artist: {{error}}"
+            );
         }
     }
 
@@ -58,7 +62,13 @@ pub async fn star(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoRes
         if let Ok(album_id) = album_id_str.parse::<i32>()
             && let Err(e) = auth.state.star_album(user_id, album_id)
         {
-            tracing::warn!(album_id = album_id, error = %e, "Failed to star album");
+            tracing::event!(
+                name: "annotation.star_album.failed",
+                tracing::Level::WARN,
+                album.id = album_id,
+                error = %e,
+                "failed to star album: {{error}}"
+            );
         }
     }
 
@@ -67,7 +77,13 @@ pub async fn star(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoRes
         if let Ok(song_id) = song_id_str.parse::<i32>()
             && let Err(e) = auth.state.star_song(user_id, song_id)
         {
-            tracing::warn!(song_id = song_id, error = %e, "Failed to star song");
+            tracing::event!(
+                name: "annotation.star_song.failed",
+                tracing::Level::WARN,
+                song.id = song_id,
+                error = %e,
+                "failed to star song: {{error}}"
+            );
         }
     }
 
@@ -92,7 +108,13 @@ pub async fn unstar(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoR
         if let Ok(artist_id) = artist_id_str.parse::<i32>()
             && let Err(e) = auth.state.unstar_artist(user_id, artist_id)
         {
-            tracing::warn!(artist_id = artist_id, error = %e, "Failed to unstar artist");
+            tracing::event!(
+                name: "annotation.unstar_artist.failed",
+                tracing::Level::WARN,
+                artist.id = artist_id,
+                error = %e,
+                "failed to unstar artist: {{error}}"
+            );
         }
     }
 
@@ -101,7 +123,13 @@ pub async fn unstar(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoR
         if let Ok(album_id) = album_id_str.parse::<i32>()
             && let Err(e) = auth.state.unstar_album(user_id, album_id)
         {
-            tracing::warn!(album_id = album_id, error = %e, "Failed to unstar album");
+            tracing::event!(
+                name: "annotation.unstar_album.failed",
+                tracing::Level::WARN,
+                album.id = album_id,
+                error = %e,
+                "failed to unstar album: {{error}}"
+            );
         }
     }
 
@@ -110,7 +138,13 @@ pub async fn unstar(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoR
         if let Ok(song_id) = song_id_str.parse::<i32>()
             && let Err(e) = auth.state.unstar_song(user_id, song_id)
         {
-            tracing::warn!(song_id = song_id, error = %e, "Failed to unstar song");
+            tracing::event!(
+                name: "annotation.unstar_song.failed",
+                tracing::Level::WARN,
+                song.id = song_id,
+                error = %e,
+                "failed to unstar song: {{error}}"
+            );
         }
     }
 
@@ -205,12 +239,24 @@ pub async fn scrobble(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl Int
 
             // Register the scrobble
             if let Err(e) = auth.state.scrobble(user_id, song_id, time, submission) {
-                tracing::warn!(song_id = song_id, error = %e, "Failed to scrobble song");
+                tracing::event!(
+                    name: "annotation.scrobble.failed",
+                    tracing::Level::WARN,
+                    song.id = song_id,
+                    error = %e,
+                    "failed to scrobble song: {{error}}"
+                );
             }
 
             // If this is a "now playing" notification (submission=false), also update now playing
             if !submission && let Err(e) = auth.state.set_now_playing(user_id, song_id, player_id) {
-                tracing::warn!(song_id = song_id, error = %e, "Failed to set now playing for song");
+                tracing::event!(
+                    name: "annotation.now_playing.failed",
+                    tracing::Level::WARN,
+                    song.id = song_id,
+                    error = %e,
+                    "failed to set now playing: {{error}}"
+                );
             }
         }
     }
@@ -293,7 +339,13 @@ pub async fn set_rating(
 
     // Try to set rating (we default to song rating as that's most common)
     if let Err(e) = auth.state.set_song_rating(user_id, id, rating) {
-        tracing::warn!(item_id = id, error = %e, "Failed to set rating for item");
+        tracing::event!(
+            name: "annotation.rating.failed",
+            tracing::Level::WARN,
+            item.id = id,
+            error = %e,
+            "failed to set rating: {{error}}"
+        );
         // Don't return an error - the API spec says this should succeed silently
     }
 

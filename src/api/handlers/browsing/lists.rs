@@ -13,6 +13,7 @@ use crate::models::music::{
     AlbumID3Response, AlbumList2Response, AlbumListResponse, ArtistResponse, ChildResponse,
     GenreResponse, GenresResponse, RandomSongsResponse, SimilarSongs2Response,
     SimilarSongsResponse, SongsByGenreResponse, StarredResponse, TopSongsResponse,
+    format_subsonic_datetime,
 };
 
 /// Query parameters for getAlbumList2.
@@ -168,7 +169,7 @@ pub async fn get_album_list(
             let starred_at = starred_map.get(&a.id);
             let mut response = ChildResponse::from_album_as_dir(a);
             if let Some(dt) = starred_at {
-                response.starred = Some(dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string());
+                response.starred = Some(format_subsonic_datetime(dt));
             }
             response
         })
@@ -523,7 +524,7 @@ pub async fn get_starred(auth: SubsonicAuth) -> impl IntoResponse {
         .iter()
         .map(|(album, starred_at)| {
             let mut response = ChildResponse::from_album_as_dir(album);
-            response.starred = Some(starred_at.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string());
+            response.starred = Some(format_subsonic_datetime(starred_at));
             response
         })
         .collect();

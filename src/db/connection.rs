@@ -2,7 +2,6 @@
 
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, CustomizeConnection, Pool, PooledConnection};
-use diesel::sqlite::SqliteConnection;
 use std::time::Duration;
 
 /// Type alias for our connection pool.
@@ -92,7 +91,14 @@ impl CustomizeConnection<SqliteConnection, diesel::r2d2::Error> for SqliteConnec
 }
 
 /// Run the SQL migrations to set up the database schema.
-#[expect(clippy::too_many_lines)]
+///
+/// # Errors
+/// Returns an error if any SQL statement fails while setting up schema,
+/// indexes, or compatibility columns.
+#[expect(
+    clippy::too_many_lines,
+    reason = "Bootstrapping schema and compatibility indexes is intentionally centralized"
+)]
 pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result::Error> {
     // Enable WAL mode for better concurrent read/write performance
     // WAL mode allows readers to not block writers and vice versa,
@@ -560,6 +566,71 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
 
     diesel::sql_query(
         "CREATE INDEX IF NOT EXISTS idx_play_queue_songs_queue_id ON play_queue_songs(play_queue_id)"
+    )
+    .execute(conn)?;
+
+    // Create remote control session table
+    diesel::sql_query(
+        r"
+        CREATE TABLE IF NOT EXISTS remote_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+            session_id TEXT NOT NULL UNIQUE,
+            pairing_code TEXT NOT NULL UNIQUE,
+            owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            host_device_id TEXT NOT NULL,
+            host_device_name TEXT,
+            controller_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            controller_device_id TEXT,
+            controller_device_name TEXT,
+            expires_at TIMESTAMP NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            closed_at TIMESTAMP
+        )
+        ",
+    )
+    .execute(conn)?;
+
+    diesel::sql_query(
+        "CREATE INDEX IF NOT EXISTS idx_remote_sessions_owner ON remote_sessions(owner_user_id)",
+    )
+    .execute(conn)?;
+
+    diesel::sql_query(
+        "CREATE INDEX IF NOT EXISTS idx_remote_sessions_expires ON remote_sessions(expires_at)",
+    )
+    .execute(conn)?;
+
+    // Create remote command queue table
+    diesel::sql_query(
+        r"
+        CREATE TABLE IF NOT EXISTS remote_commands (
+            id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+            session_id TEXT NOT NULL REFERENCES remote_sessions(session_id) ON DELETE CASCADE,
+            source_device_id TEXT NOT NULL,
+            command TEXT NOT NULL,
+            payload TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        ",
+    )
+    .execute(conn)?;
+
+    diesel::sql_query(
+        "CREATE INDEX IF NOT EXISTS idx_remote_commands_session_id ON remote_commands(session_id)",
+    )
+    .execute(conn)?;
+
+    // Create latest remote state table
+    diesel::sql_query(
+        r"
+        CREATE TABLE IF NOT EXISTS remote_state (
+            session_id TEXT PRIMARY KEY NOT NULL REFERENCES remote_sessions(session_id) ON DELETE CASCADE,
+            state_json TEXT NOT NULL,
+            updated_by_device_id TEXT NOT NULL,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        ",
     )
     .execute(conn)?;
 

@@ -1,6 +1,4 @@
 //! Media retrieval handlers (stream, download, cover art).
-#![allow(clippy::unused_async)]
-
 use axum::{
     body::Body,
     http::{HeaderMap, StatusCode, header},
@@ -49,10 +47,12 @@ fn validate_song_path(song: &Song, auth: &SubsonicAuth) -> Result<PathBuf, &'sta
     }
 
     // Song path is not within any music folder - potential path traversal
-    tracing::warn!(
+    tracing::event!(
+        name: "media.path_validation.blocked",
+        tracing::Level::WARN,
         song.id = song.id,
         song.path = %song.path,
-        "Path traversal attempt blocked: song path outside music folders"
+        "song path validation failed: {{song.path}} is outside configured folders"
     );
     Err("Audio file not found in music library")
 }

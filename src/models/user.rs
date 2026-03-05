@@ -6,7 +6,10 @@ use crate::crypto::password::verify_password;
 
 /// User roles/permissions.
 #[derive(Debug, Clone, Default, Serialize)]
-#[expect(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Subsonic roles are represented as independent boolean flags in the protocol"
+)]
 pub struct UserRoles {
     pub admin_role: bool,
     pub settings_role: bool,
@@ -87,7 +90,10 @@ impl User {
 
 /// Subsonic API user response format.
 #[derive(Debug, Serialize, Clone)]
-#[expect(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Subsonic response schema exposes each role as a dedicated boolean attribute"
+)]
 pub struct UserResponse {
     #[serde(rename = "@username")]
     pub username: String,

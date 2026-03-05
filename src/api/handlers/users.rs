@@ -1,6 +1,4 @@
 //! User management API handlers (getUser, getUsers, deleteUser, changePassword, createUser, updateUser)
-#![allow(clippy::unused_async)]
-
 use axum::response::IntoResponse;
 use serde::Deserialize;
 

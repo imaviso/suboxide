@@ -21,6 +21,7 @@ use crate::scanner::types::{
 };
 
 /// Music library scanner.
+#[derive(Debug)]
 pub struct Scanner {
     pool: DbPool,
     cover_art_dir: PathBuf,
@@ -452,7 +453,10 @@ impl Scanner {
     }
 
     /// Static version of `read_track_metadata` for use with rayon (no &self needed).
-    #[expect(clippy::too_many_lines)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Metadata extraction maps many optional tag formats into one normalized struct"
+    )]
     fn read_track_metadata_static(
         path: &Path,
         extension: &str,
@@ -581,8 +585,14 @@ impl Scanner {
 
     /// Process scanned tracks and populate the database with options.
     /// Returns (`artists_added`, `albums_added`, `tracks_added`, `tracks_updated`, `tracks_skipped`, `tracks_failed`, `cover_art_saved`)
-    #[expect(clippy::type_complexity)]
-    #[expect(clippy::too_many_lines)]
+    #[expect(
+        clippy::type_complexity,
+        reason = "The tuple return keeps hot-path allocations low during scan ingestion"
+    )]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Track ingest handles dedupe, cover art, and DB upserts in one transaction path"
+    )]
     fn process_tracks_with_options(
         &self,
         folder: &MusicFolder,
@@ -1043,7 +1053,12 @@ impl AutoScanner {
         scan_state: ScanStateHandle,
         mut shutdown_rx: watch::Receiver<bool>,
     ) {
-        tracing::info!(interval = ?interval, "Auto-scanner started");
+        tracing::event!(
+            name: "scan.auto.started",
+            tracing::Level::INFO,
+            scan.interval = ?interval,
+            "auto-scanner started"
+        );
 
         loop {
             // Wait for the interval or shutdown signal
@@ -1053,7 +1068,11 @@ impl AutoScanner {
                 }
                 _ = shutdown_rx.changed() => {
                     if *shutdown_rx.borrow() {
-                        tracing::info!("Auto-scanner received shutdown signal");
+                        tracing::event!(
+                            name: "scan.auto.shutdown_signal",
+                            tracing::Level::INFO,
+                            "auto-scanner received shutdown signal"
+                        );
                         break;
                     }
                 }
@@ -1061,11 +1080,20 @@ impl AutoScanner {
 
             // Try to start a scan (skip if one is already in progress)
             if !scan_state.try_start() {
-                tracing::debug!("Skipping auto-scan: scan already in progress");
+                tracing::event!(
+                    name: "scan.auto.skipped_in_progress",
+                    tracing::Level::DEBUG,
+                    "auto-scan skipped because a scan is already running"
+                );
                 continue;
             }
 
-            tracing::debug!(scan_mode = "incremental", "Starting auto-scan");
+            tracing::event!(
+                name: "scan.auto.started_cycle",
+                tracing::Level::DEBUG,
+                scan.mode = "incremental",
+                "auto-scan cycle started"
+            );
             scan_state.reset_count();
 
             // Run the scan in a blocking task since it uses diesel
@@ -1082,33 +1110,54 @@ impl AutoScanner {
 
             match result {
                 Ok(Ok(stats)) => {
-                    tracing::info!(
+                    tracing::event!(
+                        name: "scan.auto.completed",
+                        tracing::Level::INFO,
                         tracks.found = stats.tracks_found,
                         tracks.added = stats.tracks_added,
                         tracks.updated = stats.tracks_updated,
                         tracks.skipped = stats.tracks_skipped,
                         tracks.removed = stats.tracks_removed,
                         tracks.failed = stats.tracks_failed,
-                        "Auto-scan complete"
+                        "auto-scan completed"
                     );
                 }
                 Ok(Err(ScanError::NoMusicFolders)) => {
-                    tracing::debug!("Auto-scan skipped: no music folders configured");
+                    tracing::event!(
+                        name: "scan.auto.skipped_no_folders",
+                        tracing::Level::DEBUG,
+                        "auto-scan skipped because no music folders are configured"
+                    );
                 }
                 Ok(Err(e)) => {
-                    tracing::error!(error = %e, "Auto-scan failed");
+                    tracing::event!(
+                        name: "scan.auto.failed",
+                        tracing::Level::ERROR,
+                        error = %e,
+                        "auto-scan failed: {{error}}"
+                    );
                 }
                 Err(e) => {
-                    tracing::error!(error = %e, "Auto-scan task panicked");
+                    tracing::event!(
+                        name: "scan.auto.task_panic",
+                        tracing::Level::ERROR,
+                        error = %e,
+                        "auto-scan task panicked: {{error}}"
+                    );
                 }
             }
         }
 
-        tracing::info!("Auto-scanner stopped");
+        tracing::event!(
+            name: "scan.auto.stopped",
+            tracing::Level::INFO,
+            "auto-scanner stopped"
+        );
     }
 }
 
 /// Handle for controlling the auto-scanner.
+#[derive(Debug)]
 pub struct AutoScanHandle {
     shutdown_tx: watch::Sender<bool>,
 }

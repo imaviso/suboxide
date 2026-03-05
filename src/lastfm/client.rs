@@ -47,11 +47,22 @@ impl LastFmClient {
             return None;
         }
 
-        let client = Client::builder()
+        let client = match Client::builder()
             .user_agent("Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0")
             .timeout(std::time::Duration::from_secs(30))
             .build()
-            .expect("Failed to build HTTP client");
+        {
+            Ok(client) => client,
+            Err(error) => {
+                tracing::event!(
+                    name: "lastfm.client.init.failed",
+                    tracing::Level::WARN,
+                    error = %error,
+                    "lastfm client initialization failed: {{error}}"
+                );
+                return None;
+            }
+        };
 
         Some(Self {
             client,
@@ -121,6 +132,10 @@ impl LastFmClient {
     }
 
     /// Get a Last.fm session from a token.
+    ///
+    /// # Errors
+    /// Returns an error when the HTTP request fails, Last.fm returns an API error,
+    /// or the response body cannot be parsed.
     pub async fn get_session(&self, token: &str) -> Result<LastFmSession> {
         // Response struct defined locally
         #[derive(Deserialize)]
@@ -163,6 +178,9 @@ impl LastFmClient {
     }
 
     /// Submit a scrobble to Last.fm.
+    ///
+    /// # Errors
+    /// Returns an error when the HTTP request fails or Last.fm returns an API error response.
     pub async fn scrobble(
         &self,
         session_key: &str,
@@ -193,6 +211,9 @@ impl LastFmClient {
     }
 
     /// Update now playing status on Last.fm.
+    ///
+    /// # Errors
+    /// Returns an error when the HTTP request fails or Last.fm returns an API error response.
     pub async fn update_now_playing(
         &self,
         session_key: &str,
@@ -226,6 +247,10 @@ impl LastFmClient {
     }
 
     /// Get artist information from Last.fm.
+    ///
+    /// # Errors
+    /// Returns an error when the HTTP request fails, Last.fm returns an API error,
+    /// or the response body cannot be parsed.
     pub async fn get_artist_info(&self, artist_name: &str) -> Result<Option<LastFmArtist>> {
         // Response struct defined at the top of function to avoid items_after_statements warning
         #[derive(Deserialize)]
@@ -276,6 +301,9 @@ impl LastFmClient {
     }
 
     /// Fetch the artist image from their Last.fm page by scraping the og:image meta tag.
+    ///
+    /// # Errors
+    /// Returns an error when fetching or parsing the artist page fails.
     pub async fn fetch_artist_image_from_page(&self, url: &str) -> Result<Option<String>> {
         let response = self.client.get(url).send().await?;
         let status = response.status();

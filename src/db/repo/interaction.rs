@@ -459,14 +459,26 @@ impl NowPlayingRepository {
 #[diesel(table_name = now_playing)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 struct NowPlayingRow {
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "Selected by Diesel row mapping for table compatibility"
+    )]
     id: i32,
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "Selected by Diesel row mapping for table compatibility"
+    )]
     user_id: i32,
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "Selected by Diesel row mapping for table compatibility"
+    )]
     song_id: i32,
     player_id: Option<String>,
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "Selected by Diesel row mapping for table compatibility"
+    )]
     started_at: NaiveDateTime,
     minutes_ago: i32,
 }
@@ -490,11 +502,12 @@ impl ScrobbleRepository {
 
     /// Record a scrobble (song play).
     ///
-    /// # Arguments
-    /// * `user_id` - The user ID
-    /// * `song_id` - The song ID
-    /// * `time` - Optional timestamp (Unix milliseconds)
-    /// * `submission` - Whether this is a submission (true) or a "now playing" notification (false)
+    /// Records a play event for `user_id` and `song_id`. If `time` is `None`,
+    /// the current timestamp is used. The `submission` flag distinguishes
+    /// durable scrobbles from transient now-playing notifications.
+    ///
+    /// # Errors
+    /// Returns an error if the database connection fails or the insert query fails.
     pub fn scrobble(
         &self,
         user_id: i32,
@@ -554,14 +567,26 @@ impl ScrobbleRepository {
 #[diesel(table_name = scrobbles)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 struct ScrobbleRow {
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "Selected by Diesel row mapping for table compatibility"
+    )]
     id: i32,
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "Selected by Diesel row mapping for table compatibility"
+    )]
     user_id: i32,
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "Selected by Diesel row mapping for table compatibility"
+    )]
     song_id: i32,
     played_at: NaiveDateTime,
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "Selected by Diesel row mapping for table compatibility"
+    )]
     submission: bool,
 }
 

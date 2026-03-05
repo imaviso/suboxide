@@ -7,7 +7,7 @@ use crate::api::auth::SubsonicAuth;
 use crate::api::response::{ok_search_result, ok_search_result2, ok_search_result3};
 use crate::models::music::{
     AlbumID3Response, ArtistID3Response, ArtistResponse, ChildResponse, SearchMatch,
-    SearchResult2Response, SearchResult3Response, SearchResultResponse,
+    SearchResult2Response, SearchResult3Response, SearchResultResponse, format_subsonic_datetime,
 };
 
 /// Query parameters for search3.
@@ -208,7 +208,7 @@ pub async fn search2(
         .map(|a| {
             let starred_at = starred_albums.get(&a.id);
             let mut response = ChildResponse::from_album_as_dir(a);
-            response.starred = starred_at.map(|dt| dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string());
+            response.starred = starred_at.map(format_subsonic_datetime);
             response
         })
         .collect();
@@ -275,7 +275,10 @@ pub async fn search(
     let songs = auth.state.search_songs(query, offset, count);
 
     let matches: Vec<SearchMatch> = songs.iter().map(SearchMatch::from).collect();
-    #[expect(clippy::cast_possible_wrap)]
+    #[expect(
+        clippy::cast_possible_wrap,
+        reason = "Legacy Subsonic search response requires signed totalHits"
+    )]
     let total_hits = matches.len() as i64;
 
     let response = SearchResultResponse {

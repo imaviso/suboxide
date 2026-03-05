@@ -16,9 +16,9 @@ use crate::models::music::{
     ChildResponse, DirectoryResponse, GenresResponse, IndexesResponse, LyricsListResponse,
     LyricsResponse, MusicFolderResponse, NowPlayingResponse, PlayQueueByIndexResponse,
     PlayQueueResponse, PlaylistWithSongsResponse, PlaylistsResponse, RandomSongsResponse,
-    SearchResult2Response, SearchResult3Response, SearchResultResponse, SimilarSongs2Response,
-    SimilarSongsResponse, SongsByGenreResponse, Starred2Response, StarredResponse,
-    TokenInfoResponse, TopSongsResponse,
+    RemoteCommandsResponse, RemoteSessionResponse, RemoteStateResponse, SearchResult2Response,
+    SearchResult3Response, SearchResultResponse, SimilarSongs2Response, SimilarSongsResponse,
+    SongsByGenreResponse, Starred2Response, StarredResponse, TokenInfoResponse, TopSongsResponse,
 };
 use crate::models::user::{UserResponse, UsersResponse};
 
@@ -108,6 +108,7 @@ pub fn supported_extensions() -> Vec<OpenSubsonicExtension> {
         OpenSubsonicExtension::new("formPost", vec![1]),
         OpenSubsonicExtension::new("apiKeyAuthentication", vec![1]),
         OpenSubsonicExtension::new("songLyrics", vec![1]),
+        OpenSubsonicExtension::new("remoteControl", vec![1]),
     ]
 }
 
@@ -1470,6 +1471,105 @@ mod xml {
             }
         }
     }
+
+    #[derive(Debug, Serialize)]
+    #[serde(rename = "subsonic-response")]
+    pub struct RemoteSessionResponse {
+        #[serde(rename = "@xmlns")]
+        pub xmlns: &'static str,
+        #[serde(rename = "@status")]
+        pub status: ResponseStatus,
+        #[serde(rename = "@version")]
+        pub version: &'static str,
+        #[serde(rename = "@type")]
+        pub server_type: &'static str,
+        #[serde(rename = "@serverVersion")]
+        pub server_version: &'static str,
+        #[serde(rename = "@openSubsonic")]
+        pub open_subsonic: bool,
+        #[serde(rename = "remoteSession")]
+        pub remote_session: super::RemoteSessionResponse,
+    }
+
+    impl RemoteSessionResponse {
+        pub const fn new(remote_session: super::RemoteSessionResponse) -> Self {
+            Self {
+                xmlns: "http://subsonic.org/restapi",
+                status: ResponseStatus::Ok,
+                version: API_VERSION,
+                server_type: SERVER_NAME,
+                server_version: SERVER_VERSION,
+                open_subsonic: true,
+                remote_session,
+            }
+        }
+    }
+
+    #[derive(Debug, Serialize)]
+    #[serde(rename = "subsonic-response")]
+    pub struct RemoteCommandsResponse {
+        #[serde(rename = "@xmlns")]
+        pub xmlns: &'static str,
+        #[serde(rename = "@status")]
+        pub status: ResponseStatus,
+        #[serde(rename = "@version")]
+        pub version: &'static str,
+        #[serde(rename = "@type")]
+        pub server_type: &'static str,
+        #[serde(rename = "@serverVersion")]
+        pub server_version: &'static str,
+        #[serde(rename = "@openSubsonic")]
+        pub open_subsonic: bool,
+        #[serde(rename = "remoteCommands")]
+        pub remote_commands: super::RemoteCommandsResponse,
+    }
+
+    impl RemoteCommandsResponse {
+        pub const fn new(remote_commands: super::RemoteCommandsResponse) -> Self {
+            Self {
+                xmlns: "http://subsonic.org/restapi",
+                status: ResponseStatus::Ok,
+                version: API_VERSION,
+                server_type: SERVER_NAME,
+                server_version: SERVER_VERSION,
+                open_subsonic: true,
+                remote_commands,
+            }
+        }
+    }
+
+    #[derive(Debug, Serialize)]
+    #[serde(rename = "subsonic-response")]
+    pub struct RemoteStateResponse {
+        #[serde(rename = "@xmlns")]
+        pub xmlns: &'static str,
+        #[serde(rename = "@status")]
+        pub status: ResponseStatus,
+        #[serde(rename = "@version")]
+        pub version: &'static str,
+        #[serde(rename = "@type")]
+        pub server_type: &'static str,
+        #[serde(rename = "@serverVersion")]
+        pub server_version: &'static str,
+        #[serde(rename = "@openSubsonic")]
+        pub open_subsonic: bool,
+        #[serde(rename = "remoteState")]
+        pub remote_state: super::RemoteStateResponse,
+    }
+
+    impl RemoteStateResponse {
+        pub const fn new(remote_state: super::RemoteStateResponse) -> Self {
+            Self {
+                xmlns: "http://subsonic.org/restapi",
+                status: ResponseStatus::Ok,
+                version: API_VERSION,
+                server_type: SERVER_NAME,
+                server_version: SERVER_VERSION,
+                open_subsonic: true,
+                remote_state,
+            }
+        }
+    }
 }
 
 // ============================================================================
@@ -1569,6 +1669,12 @@ mod json {
         pub artist_info: Option<super::ArtistInfoResponse>,
         #[serde(skip_serializing_if = "Option::is_none", rename = "similarSongs")]
         pub similar_songs: Option<super::SimilarSongsResponse>,
+        #[serde(skip_serializing_if = "Option::is_none", rename = "remoteSession")]
+        pub remote_session: Option<super::RemoteSessionResponse>,
+        #[serde(skip_serializing_if = "Option::is_none", rename = "remoteCommands")]
+        pub remote_commands: Option<super::RemoteCommandsResponse>,
+        #[serde(skip_serializing_if = "Option::is_none", rename = "remoteState")]
+        pub remote_state: Option<super::RemoteStateResponse>,
     }
 
     #[derive(Debug, Serialize)]
@@ -1678,6 +1784,9 @@ mod json {
                 search_result: None,
                 artist_info: None,
                 similar_songs: None,
+                remote_session: None,
+                remote_commands: None,
+                remote_state: None,
             }
         }
 
@@ -1726,6 +1835,9 @@ mod json {
                 search_result: None,
                 artist_info: None,
                 similar_songs: None,
+                remote_session: None,
+                remote_commands: None,
+                remote_state: None,
             }
         }
 
@@ -1917,6 +2029,24 @@ mod json {
             self
         }
 
+        pub fn with_remote_session(mut self, remote_session: super::RemoteSessionResponse) -> Self {
+            self.remote_session = Some(remote_session);
+            self
+        }
+
+        pub fn with_remote_commands(
+            mut self,
+            remote_commands: super::RemoteCommandsResponse,
+        ) -> Self {
+            self.remote_commands = Some(remote_commands);
+            self
+        }
+
+        pub fn with_remote_state(mut self, remote_state: super::RemoteStateResponse) -> Self {
+            self.remote_state = Some(remote_state);
+            self
+        }
+
         pub const fn wrap(self) -> JsonWrapper {
             JsonWrapper {
                 subsonic_response: self,
@@ -1930,12 +2060,17 @@ mod json {
 // ============================================================================
 
 /// A Subsonic API response that can be serialized to XML or JSON.
+#[derive(Debug)]
 pub struct SubsonicResponse {
     format: Format,
     kind: ResponseKind,
 }
 
-#[expect(clippy::large_enum_variant)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "Enum keeps format-specific payload variants in one allocation-free response type"
+)]
+#[derive(Debug)]
 enum ResponseKind {
     Empty,
     License,
@@ -1977,6 +2112,9 @@ enum ResponseKind {
     SearchResult(SearchResultResponse),
     ArtistInfo(ArtistInfoResponse),
     SimilarSongs(SimilarSongsResponse),
+    RemoteSession(RemoteSessionResponse),
+    RemoteCommands(RemoteCommandsResponse),
+    RemoteState(RemoteStateResponse),
 }
 
 impl SubsonicResponse {
@@ -2300,6 +2438,30 @@ impl SubsonicResponse {
             kind: ResponseKind::SimilarSongs(similar_songs),
         }
     }
+
+    #[must_use]
+    pub const fn remote_session(format: Format, remote_session: RemoteSessionResponse) -> Self {
+        Self {
+            format,
+            kind: ResponseKind::RemoteSession(remote_session),
+        }
+    }
+
+    #[must_use]
+    pub const fn remote_commands(format: Format, remote_commands: RemoteCommandsResponse) -> Self {
+        Self {
+            format,
+            kind: ResponseKind::RemoteCommands(remote_commands),
+        }
+    }
+
+    #[must_use]
+    pub const fn remote_state(format: Format, remote_state: RemoteStateResponse) -> Self {
+        Self {
+            format,
+            kind: ResponseKind::RemoteState(remote_state),
+        }
+    }
 }
 
 impl IntoResponse for SubsonicResponse {
@@ -2312,8 +2474,14 @@ impl IntoResponse for SubsonicResponse {
 }
 
 impl SubsonicResponse {
-    #[expect(clippy::wrong_self_convention)]
-    #[expect(clippy::too_many_lines)]
+    #[expect(
+        clippy::wrong_self_convention,
+        reason = "This method consumes self to avoid cloning large response payloads"
+    )]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Serialization dispatch covers all Subsonic response variants"
+    )]
     fn to_xml_response(self) -> Response {
         let xml_result = match self.kind {
             ResponseKind::Empty => quick_xml::se::to_string(&xml::EmptyResponse::ok()),
@@ -2426,6 +2594,15 @@ impl SubsonicResponse {
             ResponseKind::SimilarSongs(similar_songs) => {
                 quick_xml::se::to_string(&xml::SimilarSongsResponse::new(similar_songs))
             }
+            ResponseKind::RemoteSession(remote_session) => {
+                quick_xml::se::to_string(&xml::RemoteSessionResponse::new(remote_session))
+            }
+            ResponseKind::RemoteCommands(remote_commands) => {
+                quick_xml::se::to_string(&xml::RemoteCommandsResponse::new(remote_commands))
+            }
+            ResponseKind::RemoteState(remote_state) => {
+                quick_xml::se::to_string(&xml::RemoteStateResponse::new(remote_state))
+            }
         };
 
         match xml_result {
@@ -2440,14 +2617,25 @@ impl SubsonicResponse {
                     .into_response()
             }
             Err(e) => {
-                tracing::error!(error = %e, "XML serialization error");
+                tracing::event!(
+                    name: "api.response.serialize_xml.failed",
+                    tracing::Level::ERROR,
+                    error = %e,
+                    "xml serialization failed: {{error}}"
+                );
                 (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
             }
         }
     }
 
-    #[expect(clippy::wrong_self_convention)]
-    #[expect(clippy::too_many_lines)]
+    #[expect(
+        clippy::wrong_self_convention,
+        reason = "This method consumes self to avoid cloning large response payloads"
+    )]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Serialization dispatch covers all Subsonic response variants"
+    )]
     fn to_json_response(self) -> Response {
         let response = match self.kind {
             ResponseKind::Empty => json::SubsonicResponse::ok().wrap(),
@@ -2547,6 +2735,15 @@ impl SubsonicResponse {
             ResponseKind::SimilarSongs(similar_songs) => json::SubsonicResponse::ok()
                 .with_similar_songs(similar_songs)
                 .wrap(),
+            ResponseKind::RemoteSession(remote_session) => json::SubsonicResponse::ok()
+                .with_remote_session(remote_session)
+                .wrap(),
+            ResponseKind::RemoteCommands(remote_commands) => json::SubsonicResponse::ok()
+                .with_remote_commands(remote_commands)
+                .wrap(),
+            ResponseKind::RemoteState(remote_state) => json::SubsonicResponse::ok()
+                .with_remote_state(remote_state)
+                .wrap(),
         };
 
         match serde_json::to_string(&response) {
@@ -2561,7 +2758,12 @@ impl SubsonicResponse {
                     .into_response()
             }
             Err(e) => {
-                tracing::error!(error = %e, "JSON serialization error");
+                tracing::event!(
+                    name: "api.response.serialize_json.failed",
+                    tracing::Level::ERROR,
+                    error = %e,
+                    "json serialization failed: {{error}}"
+                );
                 (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
             }
         }
@@ -2751,6 +2953,33 @@ pub const fn ok_play_queue_by_index(
     play_queue_by_index: PlayQueueByIndexResponse,
 ) -> SubsonicResponse {
     SubsonicResponse::play_queue_by_index(format, play_queue_by_index)
+}
+
+/// Helper function to create a remote session response (`OpenSubsonic`).
+#[must_use]
+pub const fn ok_remote_session(
+    format: Format,
+    remote_session: RemoteSessionResponse,
+) -> SubsonicResponse {
+    SubsonicResponse::remote_session(format, remote_session)
+}
+
+/// Helper function to create a remote commands response (`OpenSubsonic`).
+#[must_use]
+pub const fn ok_remote_commands(
+    format: Format,
+    remote_commands: RemoteCommandsResponse,
+) -> SubsonicResponse {
+    SubsonicResponse::remote_commands(format, remote_commands)
+}
+
+/// Helper function to create a remote state response (`OpenSubsonic`).
+#[must_use]
+pub const fn ok_remote_state(
+    format: Format,
+    remote_state: RemoteStateResponse,
+) -> SubsonicResponse {
+    SubsonicResponse::remote_state(format, remote_state)
 }
 
 /// Helper function to create a token info response (`OpenSubsonic`).
