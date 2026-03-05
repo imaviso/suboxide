@@ -179,6 +179,7 @@ impl RemoteControlRepository {
         }
 
         let new_expiry = now + Duration::seconds(DEFAULT_JOINED_SESSION_TTL_SECONDS);
+        let consumed_pairing_code = format!("joined-{}", session_row.session_id);
 
         let changed = diesel::sql_query(
             "UPDATE remote_sessions
@@ -195,7 +196,7 @@ impl RemoteControlRepository {
         .bind::<Integer, _>(controller_user_id)
         .bind::<Text, _>(controller_device_id)
         .bind::<Nullable<Text>, _>(controller_device_name)
-        .bind::<Text, _>("")
+        .bind::<Text, _>(&consumed_pairing_code)
         .bind::<Timestamp, _>(new_expiry)
         .bind::<Timestamp, _>(now)
         .bind::<Text, _>(&session_row.session_id)
