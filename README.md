@@ -7,11 +7,12 @@ A lightweight, self-hosted music streaming server implementing some of the [Subs
 ## Features
 
 - **Subsonic API Compatible** - Works with any Subsonic-compatible client (DSub, Symfonium, Submariner, etc.)
-- **OpenSubsonic Extensions** - Supports modern extensions like API key authentication and form POST
+- **OpenSubsonic Extensions** - Supports `formPost`, `apiKeyAuthentication`, `songLyrics`, and `remoteControl`
 - **Last.fm Integration** - Automatic scrobbling, now playing updates, and artist info/image fetching
 - **Fast & Lightweight** - Built with Rust, Axum, and SQLite for minimal resource usage
 - **Easy Setup** - Single binary with SQLite database, no external dependencies
 - **Music Library Scanning** - Automatically scans and indexes your music collection
+- **Remote Control Sessions** - Pair devices with a short code, send commands, and sync playback state
 - **User Management** - Multi-user support with role-based permissions
 
 ## Installation
@@ -99,20 +100,35 @@ Then, link a user account to Last.fm:
 
 ## API Endpoints
 
-### Implemented (52 endpoints)
+### Implemented (64 endpoints)
 
 | Category | Endpoints |
 |----------|-----------|
-| **System** | `ping`, `getLicense`, `getOpenSubsonicExtensions` |
+| **System** | `ping`, `getLicense`, `getOpenSubsonicExtensions`, `tokenInfo` |
 | **Browsing** | `getMusicFolders`, `getIndexes`, `getMusicDirectory`, `getArtists`, `getArtist`, `getAlbum`, `getSong`, `getAlbumList`, `getAlbumList2`, `getGenres`, `getArtistInfo`, `getArtistInfo2`, `getAlbumInfo`, `getAlbumInfo2`, `getSimilarSongs`, `getSimilarSongs2`, `getTopSongs`, `getRandomSongs`, `getSongsByGenre` |
 | **Searching** | `search`, `search2`, `search3` |
 | **Playlists** | `getPlaylists`, `getPlaylist`, `createPlaylist`, `updatePlaylist`, `deletePlaylist` |
 | **Media Retrieval** | `stream`, `download`, `getCoverArt`, `getLyrics`, `getLyricsBySongId` |
 | **Annotation** | `star`, `unstar`, `getStarred`, `getStarred2`, `scrobble`, `setRating`, `getNowPlaying` |
 | **Bookmarks** | `getBookmarks` |
-| **Play Queue** | `getPlayQueue`, `savePlayQueue` |
+| **Play Queue** | `getPlayQueue`, `savePlayQueue`, `getPlayQueueByIndex`, `savePlayQueueByIndex` |
+| **Remote Control** | `createRemoteSession`, `joinRemoteSession`, `getRemoteSession`, `closeRemoteSession`, `sendRemoteCommand`, `getRemoteCommands`, `updateRemoteState`, `getRemoteState` |
 | **User Management** | `getUser`, `getUsers`, `createUser`, `updateUser`, `deleteUser`, `changePassword` |
 | **Scanning** | `startScan`, `getScanStatus` |
+
+### OpenSubsonic Extensions
+
+The server advertises the following extensions from `getOpenSubsonicExtensions`:
+
+- `formPost`
+- `apiKeyAuthentication`
+- `songLyrics`
+- `remoteControl`
+
+### API Notes
+
+- `getAlbumList` and `getAlbumList2` can page through the full album catalog. Use `type=all`, `type=alphabeticalByName`, or omit `type` to browse all albums alphabetically.
+- Remote control support is exposed through the OpenSubsonic `remoteControl` extension. It supports host/controller pairing, queued commands, and playback state synchronization.
 
 ### Authentication
 

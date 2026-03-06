@@ -16,11 +16,18 @@ use crate::models::music::{
     format_subsonic_datetime,
 };
 
+fn album_list_type_for_request(list_type: Option<&str>) -> &str {
+    match list_type {
+        None | Some("" | "all") => "alphabeticalByName",
+        Some(list_type) => list_type,
+    }
+}
+
 /// Query parameters for getAlbumList2.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct AlbumList2Params {
-    /// The list type. Required.
+    /// The list type. Defaults to all albums ordered by name.
     #[serde(rename = "type")]
     pub list_type: Option<String>,
     /// The number of albums to return. Default 10, max 500.
@@ -48,11 +55,7 @@ pub async fn get_album_list2(
     axum::extract::Query(params): axum::extract::Query<AlbumList2Params>,
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
-    let Some(list_type) = params.list_type.as_deref() else {
-        return error_response(auth.format, &ApiError::MissingParameter("type".into()))
-            .into_response();
-    };
-
+    let list_type = album_list_type_for_request(params.list_type.as_deref());
     let size = params.size.unwrap_or(10).clamp(1, 500);
     let offset = params.offset.unwrap_or(0).max(0);
 
@@ -116,11 +119,7 @@ pub async fn get_album_list(
     axum::extract::Query(params): axum::extract::Query<AlbumList2Params>,
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
-    let Some(list_type) = params.list_type.as_deref() else {
-        return error_response(auth.format, &ApiError::MissingParameter("type".into()))
-            .into_response();
-    };
-
+    let list_type = album_list_type_for_request(params.list_type.as_deref());
     let size = params.size.unwrap_or(10).clamp(1, 500);
     let offset = params.offset.unwrap_or(0).max(0);
 
@@ -541,4 +540,32 @@ pub async fn get_starred(auth: SubsonicAuth) -> impl IntoResponse {
     };
 
     ok_starred(auth.format, response)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::album_list_type_for_request;
+
+    #[test]
+    fn defaults_missing_album_list_type_to_alphabetical_by_name() {
+        assert_eq!(album_list_type_for_request(None), "alphabeticalByName");
+        assert_eq!(album_list_type_for_request(Some("")), "alphabeticalByName");
+    }
+
+    #[test]
+    fn supports_all_album_list_alias() {
+        assert_eq!(
+            album_list_type_for_request(Some("all")),
+            "alphabeticalByName"
+        );
+    }
+
+    #[test]
+    fn preserves_supported_album_list_types() {
+        assert_eq!(
+            album_list_type_for_request(Some("alphabeticalByArtist")),
+            "alphabeticalByArtist"
+        );
+        assert_eq!(album_list_type_for_request(Some("newest")), "newest");
+    }
 }
