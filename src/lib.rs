@@ -1,4 +1,4 @@
-//! Subsonic API compatible server library.
+//! Suboxide API compatible server library.
 
 pub mod api;
 pub mod crypto;

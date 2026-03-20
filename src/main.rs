@@ -13,22 +13,22 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use subsonic::api::{AuthState, DatabaseAuthState, SubsonicRouterExt, handlers};
-use subsonic::crypto::hash_password;
-use subsonic::db::{
+use suboxide::api::{AuthState, DatabaseAuthState, SubsonicRouterExt, handlers};
+use suboxide::crypto::hash_password;
+use suboxide::db::{
     DbConfig, DbPool, MusicFolderRepository, NewUser, UserRepository, UserUpdate, run_migrations,
 };
-use subsonic::lastfm::LastFmClient;
-use subsonic::models::music::NewMusicFolder;
-use subsonic::scanner::{AutoScanner, ScanMode, ScanState, ScanStateHandle, Scanner};
+use suboxide::lastfm::LastFmClient;
+use suboxide::models::music::NewMusicFolder;
+use suboxide::scanner::{AutoScanner, ScanMode, ScanState, ScanStateHandle, Scanner};
 
 /// Subsonic-compatible music streaming server.
 #[derive(Parser)]
-#[command(name = "subsonic")]
+#[command(name = "suboxide")]
 #[command(about = "A Subsonic API compatible music server written in Rust")]
 struct Cli {
     /// Database file path
-    #[arg(short, long, default_value = "subsonic.db")]
+    #[arg(short, long, default_value = "suboxide.db")]
     database: PathBuf,
 
     /// Server port
@@ -451,7 +451,7 @@ async fn main() {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "subsonic=debug,tower_http=debug".into()),
+                .unwrap_or_else(|_| "suboxide=debug,tower_http=debug".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
@@ -670,7 +670,7 @@ async fn main() {
                             println!("{api_key}");
                         } else {
                             println!("User '{username}' has no API key. Generate one with:");
-                            println!("  subsonic api-key generate --username {username}");
+                            println!("  suboxide api-key generate --username {username}");
                         }
                     }
                     Ok(None) => {
@@ -707,7 +707,7 @@ async fn main() {
                         if folders.is_empty() {
                             println!("No music folders configured. Add one with:");
                             println!(
-                                "  subsonic folder add --name \"Music\" --path /path/to/music"
+                                "  suboxide folder add --name \"Music\" --path /path/to/music"
                             );
                         } else {
                             println!("Music folders:");
@@ -1042,7 +1042,7 @@ async fn run_server(
         tracing::event!(
             name: "server.bootstrap.user_create_hint",
             tracing::Level::WARN,
-            command = "subsonic user create --username admin --password <password> --admin",
+            command = "suboxide user create --username admin --password <password> --admin",
             "create initial user with: {{command}}"
         );
     }
@@ -1075,7 +1075,7 @@ async fn run_server(
         name: "server.listen.started",
         tracing::Level::INFO,
         server.address = %local_addr,
-        "subsonic server listening on {{server.address}}"
+        "suboxide server listening on {{server.address}}"
     );
 
     axum::serve(listener, app)

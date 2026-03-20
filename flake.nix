@@ -1,5 +1,5 @@
 {
-  description = "Subsonic API-compatible music streaming server in Rust";
+  description = "Suboxide API-compatible music streaming server in Rust";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";

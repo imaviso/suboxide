@@ -1,4 +1,4 @@
-# Subsonic
+# Suboxide
 
 A lightweight, self-hosted music streaming server implementing some of the [Subsonic API](http://www.subsonic.org/pages/api.jsp) and [OpenSubsonic](https://opensubsonic.netlify.app/) extensions, written in Rust.
 
@@ -21,13 +21,13 @@ A lightweight, self-hosted music streaming server implementing some of the [Subs
 
 ```bash
 # Clone the repository
-git clone https://github.com/momoyaan/subsonic.git
-cd subsonic
+git clone https://github.com/imaviso/suboxide.git
+cd suboxide
 
 # Build with Cargo
 cargo build --release
 
-# The binary will be at target/release/subsonic
+# The binary will be at target/release/suboxide
 ```
 
 ### With Nix
@@ -41,16 +41,16 @@ cargo build --release
 
 ```bash
 # 1. Create an admin user
-./subsonic user create --username admin --password yourpassword --admin
+./suboxide user create --username admin --password yourpassword --admin
 
 # 2. Add your music folder
-./subsonic folder add --name "Music" --path /path/to/your/music
+./suboxide folder add --name "Music" --path /path/to/your/music
 
 # 3. Scan your library
-./subsonic scan
+./suboxide scan
 
 # 4. Start the server
-./subsonic serve
+./suboxide serve
 ```
 
 The server will start on `http://localhost:4040` by default.
@@ -60,7 +60,7 @@ The server will start on `http://localhost:4040` by default.
 ### Command Line Options
 
 ```
-Usage: subsonic [OPTIONS] [COMMAND]
+Usage: suboxide [OPTIONS] [COMMAND]
 
 Commands:
   user      Manage users
@@ -71,7 +71,7 @@ Commands:
   serve     Start the server (default)
 
 Options:
-  -d, --database <FILE>  Database file path [default: subsonic.db]
+  -d, --database <FILE>  Database file path [default: suboxide.db]
   -p, --port <PORT>      Server port [default: 4040]
   -h, --help             Print help
 ```
@@ -89,12 +89,12 @@ Then, link a user account to Last.fm:
 
 ```bash
 # Follow the interactive prompt to authorize
-./subsonic lastfm link --username your_username
+./suboxide lastfm link --username your_username
 ```
 
 ### Environment Variables
 
-- `RUST_LOG` - Set log level (e.g., `subsonic=debug,tower_http=debug`)
+- `RUST_LOG` - Set log level (e.g., `suboxide=debug,tower_http=debug`)
 - `LASTFM_API_KEY` - Last.fm API Key
 - `LASTFM_API_SECRET` - Last.fm API Secret
 
