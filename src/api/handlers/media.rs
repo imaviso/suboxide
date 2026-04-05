@@ -13,17 +13,7 @@ use crate::api::auth::SubsonicAuth;
 use crate::api::error::ApiError;
 use crate::api::response::error_response;
 use crate::models::music::Song;
-
-/// Default cover art cache directory (same as in scanner).
-const COVER_ART_CACHE_DIR: &str = ".cache/subsonic/covers";
-
-/// Get the cover art cache directory path.
-fn get_cover_art_dir() -> std::path::PathBuf {
-    dirs::home_dir().map_or_else(
-        || std::path::PathBuf::from(COVER_ART_CACHE_DIR),
-        |h| h.join(COVER_ART_CACHE_DIR),
-    )
-}
+use crate::paths::resolve_cover_art_dir;
 
 /// Validate that a song's path is within one of the configured music folders.
 /// This prevents path traversal attacks where a malicious path in the database
@@ -329,10 +319,10 @@ pub async fn get_cover_art(
     }
 
     // Get cover art cache directory
-    let cover_art_dir = get_cover_art_dir();
+    let cover_art_dir = resolve_cover_art_dir();
 
     // Try to find the cover art file with different extensions
-    let extensions = ["jpg", "jpeg", "png", "gif", "bmp", "tiff"];
+    let extensions = ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp"];
     let mut cover_art_path = None;
     let mut content_type = "image/jpeg";
 
@@ -344,6 +334,7 @@ pub async fn get_cover_art(
                 "gif" => "image/gif",
                 "bmp" => "image/bmp",
                 "tiff" => "image/tiff",
+                "webp" => "image/webp",
                 _ => "image/jpeg",
             };
             cover_art_path = Some(path);

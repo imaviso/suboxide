@@ -67,6 +67,9 @@ If you use flakes, import this repo's module and enable `services.suboxide`:
             dataDir = "/var/lib/suboxide";
             databasePath = "/var/lib/suboxide/suboxide.db";
 
+            # If true (default), adds `suboxide` CLI to system PATH
+            addToSystemPackages = true;
+
             # Secrets and runtime environment
             environmentFile = "/run/secrets/suboxide.env";
             environment = {
@@ -86,6 +89,8 @@ Example `/run/secrets/suboxide.env`:
 LASTFM_API_KEY=your_api_key
 LASTFM_API_SECRET=your_api_secret
 ```
+
+Note: cover art is stored under `services.suboxide.dataDir + "/covers"`.
 
 ## Quick Start
 

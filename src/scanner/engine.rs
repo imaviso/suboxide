@@ -13,11 +13,11 @@ use walkdir::WalkDir;
 
 use crate::db::{DbPool, MusicFolderRepository, MusicRepoError};
 use crate::models::music::MusicFolder;
+use crate::paths::resolve_cover_art_dir;
 use crate::scanner::state::{ScanPhase, ScanState, ScanStateHandle};
 use crate::scanner::types::{
-    AUDIO_EXTENSIONS, BATCH_SIZE, COVER_ART_CACHE_DIR, COVER_ART_FILENAMES,
-    DEFAULT_AUTO_SCAN_INTERVAL_SECS, IMAGE_EXTENSIONS, PreparedTrack, ScanError, ScanMode,
-    ScanResult, ScannedTrack,
+    AUDIO_EXTENSIONS, BATCH_SIZE, COVER_ART_FILENAMES, DEFAULT_AUTO_SCAN_INTERVAL_SECS,
+    IMAGE_EXTENSIONS, PreparedTrack, ScanError, ScanMode, ScanResult, ScannedTrack,
 };
 
 /// Music library scanner.
@@ -41,11 +41,7 @@ impl Scanner {
     /// Create a new scanner.
     #[must_use]
     pub fn new(pool: DbPool) -> Self {
-        // Use home directory for cover art cache
-        let cover_art_dir = dirs::home_dir().map_or_else(
-            || PathBuf::from(COVER_ART_CACHE_DIR),
-            |h| h.join(COVER_ART_CACHE_DIR),
-        );
+        let cover_art_dir = resolve_cover_art_dir();
 
         Self {
             pool,
@@ -81,6 +77,7 @@ impl Scanner {
 
         // Determine file extension from MIME type
         let ext = match mime {
+            "image/webp" => "webp",
             "image/png" => "png",
             "image/gif" => "gif",
             "image/bmp" => "bmp",
@@ -996,10 +993,7 @@ impl AutoScanner {
     /// Create a new auto-scanner with default interval (5 minutes).
     #[must_use]
     pub fn new(pool: DbPool, scan_state: ScanStateHandle) -> Self {
-        let cover_art_dir = dirs::home_dir().map_or_else(
-            || PathBuf::from(COVER_ART_CACHE_DIR),
-            |h| h.join(COVER_ART_CACHE_DIR),
-        );
+        let cover_art_dir = resolve_cover_art_dir();
 
         Self {
             pool,
@@ -1013,10 +1007,7 @@ impl AutoScanner {
     /// Create a new auto-scanner with a custom interval.
     #[must_use]
     pub fn with_interval(pool: DbPool, scan_state: ScanStateHandle, interval_secs: u64) -> Self {
-        let cover_art_dir = dirs::home_dir().map_or_else(
-            || PathBuf::from(COVER_ART_CACHE_DIR),
-            |h| h.join(COVER_ART_CACHE_DIR),
-        );
+        let cover_art_dir = resolve_cover_art_dir();
 
         Self {
             pool,

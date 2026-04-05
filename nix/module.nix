@@ -98,6 +98,12 @@ in {
       description = "Optional environment file loaded by systemd (for secrets).";
     };
 
+    addToSystemPackages = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Add the suboxide CLI package to environment.systemPackages.";
+    };
+
     extraArgs = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [];
@@ -129,7 +135,10 @@ in {
 
     systemd.tmpfiles.rules = [
       "d ${toString cfg.dataDir} 0750 ${cfg.user} ${cfg.group} -"
+      "d ${toString cfg.dataDir}/covers 0750 ${cfg.user} ${cfg.group} -"
     ];
+
+    environment.systemPackages = lib.mkIf cfg.addToSystemPackages [cfg.package];
 
     networking.firewall.allowedTCPPorts = lib.mkIf cfg.openFirewall [cfg.port];
 
@@ -139,7 +148,11 @@ in {
       wants = ["network-online.target"];
       wantedBy = ["multi-user.target"];
 
-      environment = cfg.environment;
+      environment =
+        cfg.environment
+        // {
+          SUBOXIDE_DATA_DIR = toString cfg.dataDir;
+        };
 
       serviceConfig =
         {

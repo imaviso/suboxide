@@ -45,9 +45,6 @@ pub const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "gif", "bmp", "web
 /// Batch size for song inserts (`SQLite` has a limit of ~999 variables per query)
 pub const BATCH_SIZE: usize = 100;
 
-/// Default cover art cache directory.
-pub const COVER_ART_CACHE_DIR: &str = ".cache/subsonic/covers";
-
 /// Default auto-scan interval (5 minutes).
 pub const DEFAULT_AUTO_SCAN_INTERVAL_SECS: u64 = 300;
 

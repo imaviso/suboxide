@@ -46,6 +46,7 @@ use crate::lastfm::{LastFmClient, models::extract_biography, models::extract_ima
 use crate::models::User;
 use crate::models::music::{Album, Artist, MusicFolder, Song};
 use crate::models::user::UserRoles;
+use crate::paths::resolve_cover_art_dir;
 use crate::scanner::lyrics::ExtractedLyrics;
 use crate::scanner::{ScanState, ScanStateHandle};
 use chrono::NaiveDateTime;
@@ -1566,7 +1567,6 @@ impl AuthState for DatabaseAuthState {
     ) -> crate::models::music::ArtistInfo2Response {
         use crate::lastfm::models::LastFmArtistCache;
         use crate::models::music::{ArtistID3Response, ArtistInfo2Response};
-        use std::path::PathBuf;
         use tokio::io::AsyncWriteExt;
 
         // Get the artist from the database
@@ -1710,12 +1710,7 @@ impl AuthState for DatabaseAuthState {
                                         return;
                                     }
 
-                                    // Use a simpler approach for cover art dir to avoid circular dependency or complex moves
-                                    // This duplicates logic from media.rs/scanner but is safe
-                                    let cover_art_dir = dirs::home_dir().map_or_else(
-                                        || PathBuf::from(".cache/subsonic/covers"),
-                                        |h| h.join(".cache/subsonic/covers"),
-                                    );
+                                    let cover_art_dir = resolve_cover_art_dir();
 
                                     // Ensure directory exists
                                     if !cover_art_dir.exists() {
