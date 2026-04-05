@@ -37,6 +37,56 @@ nix develop  # Enter development shell
 cargo build --release
 ```
 
+### As a NixOS Service
+
+If you use flakes, import this repo's module and enable `services.suboxide`:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    suboxide.url = "github:imaviso/suboxide";
+  };
+
+  outputs = { nixpkgs, suboxide, ... }: {
+    nixosConfigurations.my-host = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = [
+        suboxide.nixosModules.default
+        ({ ... }: {
+          services.suboxide = {
+            enable = true;
+            openFirewall = true;
+
+            # Optional tuning
+            port = 4040;
+            autoScan = true;
+            autoScanInterval = 300;
+
+            # Runtime data
+            dataDir = "/var/lib/suboxide";
+            databasePath = "/var/lib/suboxide/suboxide.db";
+
+            # Secrets and runtime environment
+            environmentFile = "/run/secrets/suboxide.env";
+            environment = {
+              RUST_LOG = "suboxide=info";
+            };
+          };
+        })
+      ];
+    };
+  };
+}
+```
+
+Example `/run/secrets/suboxide.env`:
+
+```bash
+LASTFM_API_KEY=your_api_key
+LASTFM_API_SECRET=your_api_secret
+```
+
 ## Quick Start
 
 ```bash

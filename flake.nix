@@ -7,10 +7,6 @@
       url = "github:nix-community/fenix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    naersk = {
-      url = "github:nix-community/naersk";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
     flake-utils.url = "github:numtide/flake-utils";
   };
 
@@ -19,20 +15,41 @@
       pkgs = import inputs.nixpkgs {
         inherit system;
         overlays = [
-          inputs.self.overlays.default
+          self.overlays.default
         ];
-      };
-      naersk' = pkgs.callPackage inputs.naersk {
-        cargo = pkgs.rustToolchain;
-        rustc = pkgs.rustToolchain;
       };
     in {
-      packages.default = naersk'.buildPackage {
-        src = ./.;
-        buildInputs = with pkgs; [
-          openssl
-          pkg-config
-        ];
+      packages = {
+        inherit (pkgs) suboxide;
+        default = pkgs.suboxide;
+      };
+
+      checks = {
+        default = self.packages.${system}.default;
+        clippy = pkgs.stdenv.mkDerivation {
+          name = "clippy";
+          src = ./.;
+          nativeBuildInputs = with pkgs; [
+            rustToolchain
+            pkg-config
+          ];
+          buildInputs = with pkgs; [
+            openssl
+          ];
+          buildPhase = ''
+            cargo clippy --all-targets -- -D warnings
+          '';
+          installPhase = "mkdir -p $out; touch $out/done";
+        };
+        fmt = pkgs.stdenv.mkDerivation {
+          name = "fmt";
+          src = ./.;
+          nativeBuildInputs = with pkgs; [rustToolchain];
+          buildPhase = ''
+            cargo fmt -- --check
+          '';
+          installPhase = "mkdir -p $out; touch $out/done";
+        };
       };
 
       devShells.default = pkgs.mkShell {
@@ -51,36 +68,9 @@
           RUST_SRC_PATH = "${pkgs.rustToolchain}/lib/rustlib/src/rust/library";
         };
       };
-
-      checks.default = naersk'.buildPackage {
-        src = ./.;
-        buildInputs = with pkgs; [
-          openssl
-          pkg-config
-        ];
-      };
-
-      checks.clippy = pkgs.stdenv.mkDerivation {
-        name = "clippy";
-        src = ./.;
-        buildInputs = with pkgs; [ rustToolchain ];
-        buildPhase = ''
-          cargo clippy --all-targets -- -D warnings
-        '';
-        installPhase = "mkdir -p $out; touch $out/done";
-      };
-
-      checks.fmt = pkgs.stdenv.mkDerivation {
-        name = "fmt";
-        src = ./.;
-        buildInputs = with pkgs; [ rustToolchain ];
-        buildPhase = ''
-          cargo fmt -- --check
-        '';
-        installPhase = "mkdir -p $out; touch $out/done";
-      };
-    }) // {
-      overlays.default = final: prev: {
+    })
+    // {
+      overlays.default = final: prev: let
         rustToolchain = with inputs.fenix.packages.${prev.stdenv.hostPlatform.system};
           combine (
             with stable; [
@@ -91,7 +81,14 @@
               rust-src
             ]
           );
+      in {
+        inherit rustToolchain;
+        suboxide = final.callPackage ./nix/package.nix {};
+      };
+
+      nixosModules = {
+        default = import ./nix/module.nix;
+        suboxide = self.nixosModules.default;
       };
     };
 }
-
