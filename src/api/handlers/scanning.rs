@@ -29,8 +29,8 @@ pub async fn start_scan(auth: SubsonicAuth) -> impl IntoResponse {
 
     // Try to start a new scan - returns false if one is already running
     if scan_state.try_start() {
-        // Reset the counter for this new scan
-        scan_state.reset_count();
+        // Reset progress state for this new scan.
+        scan_state.reset();
 
         let pool = auth.state.get_db_pool();
         let scan_state_for_scanner = scan_state.clone();

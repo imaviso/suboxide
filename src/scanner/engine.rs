@@ -37,6 +37,13 @@ pub struct AutoScanner {
     shutdown_tx: Option<watch::Sender<bool>>,
 }
 
+#[derive(Debug, Clone)]
+struct DiscoveredFile {
+    path: PathBuf,
+    file_size: u64,
+    file_modified_at: Option<i64>,
+}
+
 impl Scanner {
     /// Create a new scanner.
     #[must_use]
@@ -284,18 +291,43 @@ impl Scanner {
         let existing_songs = self.get_existing_songs(folder.id)?;
 
         // Collect all audio files on disk
-        let (tracks, discovered_paths) = Self::discover_tracks_with_paths(folder_path, folder);
-        result.tracks_found = tracks.len();
+        let (discovered_files, discovered_paths) = Self::discover_files_with_paths(folder_path);
+        result.tracks_found = discovered_files.len();
+
+        let (files_to_process, skipped_unchanged) =
+            Self::split_discovered_files_for_mode(discovered_files, &existing_songs, mode);
 
         // Set total count now that we know how many files to process
         if let Some(s) = state {
             // Add to total (accumulates across folders)
             let current_total = s.get_total();
-            s.set_total(current_total + tracks.len() as u64);
+            s.set_total(current_total + result.tracks_found as u64);
+            if skipped_unchanged > 0 {
+                let current_count = s.get_count();
+                s.set_count(current_count + skipped_unchanged as u64);
+            }
             s.set_phase(ScanPhase::Processing);
         }
 
-        println!("  Found {} audio files on disk", tracks.len());
+        println!("  Found {} audio files on disk", result.tracks_found);
+        if skipped_unchanged > 0 {
+            println!("  Skipping {skipped_unchanged} unchanged files");
+        }
+
+        // Read metadata in parallel for files that need processing.
+        let folder_path_str = folder.path.clone();
+        let tracks: Vec<ScannedTrack> = files_to_process
+            .par_iter()
+            .filter_map(
+                |file| match Self::read_track_metadata_static(file, &folder_path_str) {
+                    Ok(track) => Some(track),
+                    Err(e) => {
+                        eprintln!("  Warning: Failed to read {}: {}", file.path.display(), e);
+                        None
+                    }
+                },
+            )
+            .collect();
 
         // Find deleted files (in database but not on disk)
         let deleted_paths: Vec<_> = existing_songs
@@ -321,7 +353,13 @@ impl Scanner {
             tracks_skipped,
             tracks_failed,
             cover_art_saved,
-        ) = self.process_tracks_with_options(folder, tracks, &existing_songs, state, mode)?;
+        ) = self.process_tracks_with_options(
+            folder,
+            tracks,
+            &existing_songs,
+            state,
+            skipped_unchanged,
+        )?;
 
         result.artists_added = artists_added;
         result.albums_added = albums_added;
@@ -394,11 +432,7 @@ impl Scanner {
     }
 
     /// Discover all audio files in a directory, also returning the set of discovered paths.
-    /// Uses parallel processing for metadata reading.
-    fn discover_tracks_with_paths(
-        folder_path: &Path,
-        folder: &MusicFolder,
-    ) -> (Vec<ScannedTrack>, HashSet<String>) {
+    fn discover_files_with_paths(folder_path: &Path) -> (Vec<DiscoveredFile>, HashSet<String>) {
         // First, collect all audio file paths (fast, sequential walk)
         let audio_files: Vec<PathBuf> = WalkDir::new(folder_path)
             .follow_links(true)
@@ -425,49 +459,79 @@ impl Scanner {
             .map(|p| p.to_string_lossy().to_string())
             .collect();
 
-        // Read metadata in parallel using rayon
-        let folder_path_str = folder.path.clone();
-        let tracks: Vec<ScannedTrack> = audio_files
-            .par_iter()
+        let discovered_files: Vec<DiscoveredFile> = audio_files
+            .into_iter()
             .filter_map(|path| {
-                let extension = path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .map(str::to_lowercase)
-                    .unwrap_or_default();
-
-                match Self::read_track_metadata_static(path, &extension, &folder_path_str) {
-                    Ok(track) => Some(track),
+                let metadata = match fs::metadata(&path) {
+                    Ok(metadata) => metadata,
                     Err(e) => {
-                        eprintln!("  Warning: Failed to read {}: {}", path.display(), e);
-                        None
+                        eprintln!(
+                            "  Warning: Failed to read metadata {}: {}",
+                            path.display(),
+                            e
+                        );
+                        return None;
                     }
-                }
+                };
+
+                let file_modified_at = metadata
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                    .map(|d| i64::try_from(d.as_secs()).unwrap_or(0));
+
+                Some(DiscoveredFile {
+                    path,
+                    file_size: metadata.len(),
+                    file_modified_at,
+                })
             })
             .collect();
 
-        (tracks, paths)
+        (discovered_files, paths)
+    }
+
+    fn split_discovered_files_for_mode(
+        discovered_files: Vec<DiscoveredFile>,
+        existing_songs: &HashMap<String, (i32, Option<i64>)>,
+        mode: ScanMode,
+    ) -> (Vec<DiscoveredFile>, usize) {
+        if mode == ScanMode::Full {
+            return (discovered_files, 0);
+        }
+
+        let mut to_process = Vec::with_capacity(discovered_files.len());
+        let mut skipped_unchanged = 0;
+
+        for file in discovered_files {
+            let path_str = file.path.to_string_lossy();
+            let unchanged = existing_songs
+                .get(path_str.as_ref())
+                .is_some_and(|(_, stored_mtime)| {
+                    matches!((stored_mtime, file.file_modified_at), (Some(stored), Some(current)) if *stored == current)
+                });
+
+            if unchanged {
+                skipped_unchanged += 1;
+            } else {
+                to_process.push(file);
+            }
+        }
+
+        (to_process, skipped_unchanged)
     }
 
     /// Static version of `read_track_metadata` for use with rayon (no &self needed).
-    #[expect(
-        clippy::too_many_lines,
-        reason = "Metadata extraction maps many optional tag formats into one normalized struct"
-    )]
     fn read_track_metadata_static(
-        path: &Path,
-        extension: &str,
+        file: &DiscoveredFile,
         folder_path: &str,
     ) -> Result<ScannedTrack, Box<dyn std::error::Error + Send + Sync>> {
-        let metadata = fs::metadata(path)?;
-        let file_size = metadata.len();
-
-        // Get file modification time
-        let file_modified_at = metadata
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| i64::try_from(d.as_secs()).unwrap_or(0));
+        let path = &file.path;
+        let extension = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_lowercase)
+            .unwrap_or_default();
 
         // Get parent path relative to music folder
         let parent_path = path
@@ -490,32 +554,8 @@ impl Scanner {
             .primary_tag()
             .or_else(|| tagged_file.first_tag());
 
-        let (
-            title,
-            artist,
-            album,
-            album_artist,
-            track_number,
-            disc_number,
-            year,
-            genre,
-            cover_art_data,
-            cover_art_mime,
-        ) = tag.map_or(
-            (None, None, None, None, None, None, None, None, None, None),
-            |tag| {
-                // Extract embedded cover art (first picture)
-                let (art_data, art_mime) = tag.pictures().first().map_or((None, None), |p| {
-                    let mime = match p.mime_type() {
-                        Some(lofty::picture::MimeType::Png) => "image/png",
-                        Some(lofty::picture::MimeType::Gif) => "image/gif",
-                        Some(lofty::picture::MimeType::Bmp) => "image/bmp",
-                        Some(lofty::picture::MimeType::Tiff) => "image/tiff",
-                        _ => "image/jpeg", // Default to JPEG
-                    };
-                    (Some(p.data().to_vec()), Some(mime.to_string()))
-                });
-
+        let (title, artist, album, album_artist, track_number, disc_number, year, genre) = tag
+            .map_or((None, None, None, None, None, None, None, None), |tag| {
                 (
                     tag.title().map(|s| s.to_string()),
                     tag.artist().map(|s| s.to_string()),
@@ -526,11 +566,8 @@ impl Scanner {
                     tag.disk(),
                     tag.year(),
                     tag.genre().map(|s| s.to_string()),
-                    art_data,
-                    art_mime,
                 )
-            },
-        );
+            });
 
         // Use filename as title if no tag
         let title = title.unwrap_or_else(|| {
@@ -540,7 +577,7 @@ impl Scanner {
                 .to_string()
         });
 
-        let content_type = match extension {
+        let content_type = match extension.as_str() {
             "mp3" => "audio/mpeg",
             "flac" => "audio/flac",
             "ogg" => "audio/ogg",
@@ -556,11 +593,11 @@ impl Scanner {
         .to_string();
 
         Ok(ScannedTrack {
-            path: path.to_path_buf(),
+            path: path.clone(),
             parent_path,
-            file_size,
+            file_size: file.file_size,
             content_type,
-            suffix: extension.to_string(),
+            suffix: extension,
             title,
             artist,
             album,
@@ -574,10 +611,26 @@ impl Scanner {
             bit_depth,
             sample_rate,
             channels,
-            cover_art_data,
-            cover_art_mime,
-            file_modified_at,
+            file_modified_at: file.file_modified_at,
         })
+    }
+
+    fn extract_embedded_cover_art(path: &Path) -> Option<(Vec<u8>, String)> {
+        let tagged_file = lofty::read_from_path(path).ok()?;
+        let tag = tagged_file
+            .primary_tag()
+            .or_else(|| tagged_file.first_tag())?;
+        let picture = tag.pictures().first()?;
+
+        let mime = match picture.mime_type() {
+            Some(lofty::picture::MimeType::Png) => "image/png",
+            Some(lofty::picture::MimeType::Gif) => "image/gif",
+            Some(lofty::picture::MimeType::Bmp) => "image/bmp",
+            Some(lofty::picture::MimeType::Tiff) => "image/tiff",
+            _ => "image/jpeg",
+        };
+
+        Some((picture.data().to_vec(), mime.to_string()))
     }
 
     /// Process scanned tracks and populate the database with options.
@@ -596,7 +649,7 @@ impl Scanner {
         tracks: Vec<ScannedTrack>,
         existing_songs: &HashMap<String, (i32, Option<i64>)>,
         state: Option<&ScanState>,
-        mode: ScanMode,
+        initial_tracks_skipped: usize,
     ) -> Result<(usize, usize, usize, usize, usize, usize, usize), ScanError> {
         use crate::db::schema::{albums, artists, songs};
         use diesel::prelude::*;
@@ -638,7 +691,7 @@ impl Scanner {
         let mut albums_added = 0;
         let mut tracks_added = 0;
         let mut tracks_updated = 0;
-        let mut tracks_skipped = 0;
+        let tracks_skipped = initial_tracks_skipped;
         let tracks_failed = 0;
         let mut cover_art_saved = 0;
 
@@ -647,17 +700,6 @@ impl Scanner {
 
         // First pass: collect all unique new artists
         for track in &tracks {
-            let path_str = track.path.to_string_lossy().to_string();
-
-            // Skip unchanged files in incremental mode
-            if mode == ScanMode::Incremental
-                && let Some((_, stored_mtime)) = existing_songs.get(&path_str)
-                && let (Some(stored), Some(current)) = (stored_mtime, track.file_modified_at)
-                && *stored == current
-            {
-                continue;
-            }
-
             let artist_name = track
                 .album_artist
                 .as_ref()
@@ -704,20 +746,6 @@ impl Scanner {
         // Second pass: resolve albums and prepare tracks
         for track in tracks {
             let path_str = track.path.to_string_lossy().to_string();
-
-            // For incremental scan, check if file has changed
-            if mode == ScanMode::Incremental
-                && let Some((_, stored_mtime)) = existing_songs.get(&path_str)
-                && let (Some(stored), Some(current)) = (stored_mtime, track.file_modified_at)
-                && *stored == current
-            {
-                // File hasn't changed, skip processing
-                tracks_skipped += 1;
-                if let Some(state) = state {
-                    state.increment_count();
-                }
-                continue;
-            }
 
             // Get artist ID from cache
             let artist_name = track
@@ -787,10 +815,8 @@ impl Scanner {
 
                 if existing_cover_art.is_none() {
                     let art_source: Option<(Vec<u8>, String)> =
-                        if let (Some(art_data), Some(art_mime)) =
-                            (&track.cover_art_data, &track.cover_art_mime)
-                        {
-                            Some((art_data.clone(), art_mime.clone()))
+                        if let Some(embedded_art) = Self::extract_embedded_cover_art(&track.path) {
+                            Some(embedded_art)
                         } else if let Some(parent_dir) = track.path.parent() {
                             let parent_buf = parent_dir.to_path_buf();
                             dir_cover_art_cache
@@ -1085,7 +1111,7 @@ impl AutoScanner {
                 scan.mode = "incremental",
                 "auto-scan cycle started"
             );
-            scan_state.reset_count();
+            scan_state.reset();
 
             // Run the scan in a blocking task since it uses diesel
             let pool_clone = pool.clone();
@@ -1157,5 +1183,70 @@ impl AutoScanHandle {
     /// Stop the auto-scanner.
     pub fn stop(&self) {
         let _ = self.shutdown_tx.send(true);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    use super::{DiscoveredFile, ScanMode, Scanner};
+
+    fn discovered(path: &str, file_modified_at: Option<i64>) -> DiscoveredFile {
+        DiscoveredFile {
+            path: PathBuf::from(path),
+            file_size: 123,
+            file_modified_at,
+        }
+    }
+
+    #[test]
+    fn split_discovered_files_skips_unchanged_in_incremental_mode() {
+        let discovered_files = vec![
+            discovered("/music/unchanged.mp3", Some(100)),
+            discovered("/music/changed.mp3", Some(200)),
+            discovered("/music/new.mp3", Some(300)),
+        ];
+
+        let existing = HashMap::from([
+            ("/music/unchanged.mp3".to_string(), (1, Some(100))),
+            ("/music/changed.mp3".to_string(), (2, Some(150))),
+        ]);
+
+        let (to_process, skipped) = Scanner::split_discovered_files_for_mode(
+            discovered_files,
+            &existing,
+            ScanMode::Incremental,
+        );
+
+        assert_eq!(skipped, 1);
+        assert_eq!(to_process.len(), 2);
+        assert!(
+            to_process
+                .iter()
+                .any(|f| f.path.to_string_lossy() == "/music/changed.mp3")
+        );
+        assert!(
+            to_process
+                .iter()
+                .any(|f| f.path.to_string_lossy() == "/music/new.mp3")
+        );
+    }
+
+    #[test]
+    fn split_discovered_files_keeps_all_in_full_mode() {
+        let discovered_files = vec![
+            discovered("/music/one.mp3", Some(10)),
+            discovered("/music/two.mp3", Some(20)),
+        ];
+
+        let existing = HashMap::from([("/music/one.mp3".to_string(), (1, Some(10)))]);
+
+        let (to_process, skipped) =
+            Scanner::split_discovered_files_for_mode(discovered_files, &existing, ScanMode::Full);
+
+        assert_eq!(skipped, 0);
+        assert_eq!(to_process.len(), 2);
     }
 }

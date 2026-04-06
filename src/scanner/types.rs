@@ -79,10 +79,6 @@ pub struct ScannedTrack {
     pub bit_depth: Option<u8>,
     pub sample_rate: Option<u32>,
     pub channels: Option<u8>,
-    /// Embedded cover art data (bytes).
-    pub cover_art_data: Option<Vec<u8>>,
-    /// MIME type of the embedded cover art.
-    pub cover_art_mime: Option<String>,
     /// File modification time (Unix timestamp in seconds).
     pub file_modified_at: Option<i64>,
 }
