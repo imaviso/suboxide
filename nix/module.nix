@@ -8,6 +8,10 @@
   cliCommand = lib.getExe cfg.package;
 
   cliPackage = pkgs.writeShellScriptBin "suboxide" ''
+    if [ -z "''${SUBOXIDE_DATA_DIR:-}" ]; then
+      export SUBOXIDE_DATA_DIR="${toString cfg.dataDir}"
+    fi
+
     has_database_flag=0
 
     for arg in "$@"; do

@@ -68,7 +68,8 @@ If you use flakes, import this repo's module and enable `services.suboxide`:
             databasePath = "/var/lib/suboxide/suboxide.db";
 
             # If true (default), adds `suboxide` CLI to system PATH
-            # and auto-uses `databasePath` unless --database is passed
+            # and auto-uses `databasePath` (plus SUBOXIDE_DATA_DIR=dataDir)
+            # unless --database is passed
             addToSystemPackages = true;
 
             # Secrets and runtime environment
