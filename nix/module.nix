@@ -5,10 +5,30 @@
   ...
 }: let
   cfg = config.services.suboxide;
+  cliCommand = lib.getExe cfg.package;
+
+  cliPackage = pkgs.writeShellScriptBin "suboxide" ''
+    has_database_flag=0
+
+    for arg in "$@"; do
+      case "$arg" in
+        -d|--database|--database=*)
+          has_database_flag=1
+          break
+          ;;
+      esac
+    done
+
+    if [ "$has_database_flag" -eq 1 ]; then
+      exec "${cliCommand}" "$@"
+    fi
+
+    exec "${cliCommand}" --database "${toString cfg.databasePath}" "$@"
+  '';
 
   startCommand =
     [
-      (lib.getExe cfg.package)
+      cliCommand
       "--database"
       (toString cfg.databasePath)
       "--port"
@@ -101,7 +121,7 @@ in {
     addToSystemPackages = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "Add the suboxide CLI package to environment.systemPackages.";
+      description = "Add the suboxide CLI wrapper to environment.systemPackages.";
     };
 
     extraArgs = lib.mkOption {
@@ -138,7 +158,7 @@ in {
       "d ${toString cfg.dataDir}/covers 0750 ${cfg.user} ${cfg.group} -"
     ];
 
-    environment.systemPackages = lib.mkIf cfg.addToSystemPackages [cfg.package];
+    environment.systemPackages = lib.mkIf cfg.addToSystemPackages [cliPackage];
 
     networking.firewall.allowedTCPPorts = lib.mkIf cfg.openFirewall [cfg.port];
 
