@@ -52,7 +52,7 @@ pub async fn star(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoRes
                 tracing::Level::WARN,
                 artist.id = artist_id,
                 error = %e,
-                "failed to star artist: {{error}}"
+                "failed to star artist"
             );
         }
     }
@@ -67,7 +67,7 @@ pub async fn star(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoRes
                 tracing::Level::WARN,
                 album.id = album_id,
                 error = %e,
-                "failed to star album: {{error}}"
+                "failed to star album"
             );
         }
     }
@@ -82,7 +82,7 @@ pub async fn star(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoRes
                 tracing::Level::WARN,
                 song.id = song_id,
                 error = %e,
-                "failed to star song: {{error}}"
+                "failed to star song"
             );
         }
     }
@@ -113,7 +113,7 @@ pub async fn unstar(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoR
                 tracing::Level::WARN,
                 artist.id = artist_id,
                 error = %e,
-                "failed to unstar artist: {{error}}"
+                "failed to unstar artist"
             );
         }
     }
@@ -128,7 +128,7 @@ pub async fn unstar(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoR
                 tracing::Level::WARN,
                 album.id = album_id,
                 error = %e,
-                "failed to unstar album: {{error}}"
+                "failed to unstar album"
             );
         }
     }
@@ -143,7 +143,7 @@ pub async fn unstar(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoR
                 tracing::Level::WARN,
                 song.id = song_id,
                 error = %e,
-                "failed to unstar song: {{error}}"
+                "failed to unstar song"
             );
         }
     }
@@ -244,7 +244,7 @@ pub async fn scrobble(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl Int
                     tracing::Level::WARN,
                     song.id = song_id,
                     error = %e,
-                    "failed to scrobble song: {{error}}"
+                    "failed to scrobble song"
                 );
             }
 
@@ -255,7 +255,7 @@ pub async fn scrobble(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl Int
                     tracing::Level::WARN,
                     song.id = song_id,
                     error = %e,
-                    "failed to set now playing: {{error}}"
+                    "failed to set now playing"
                 );
             }
         }
@@ -344,7 +344,7 @@ pub async fn set_rating(
             tracing::Level::WARN,
             item.id = id,
             error = %e,
-            "failed to set rating: {{error}}"
+            "failed to set rating"
         );
         // Don't return an error - the API spec says this should succeed silently
     }

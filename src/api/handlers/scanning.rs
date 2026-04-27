@@ -64,7 +64,7 @@ pub async fn start_scan(auth: SubsonicAuth) -> impl IntoResponse {
                         name: "scan.manual.failed",
                         tracing::Level::ERROR,
                         error = %e,
-                        "manual scan failed: {{error}}"
+                        "manual scan failed"
                     );
                 }
                 Err(e) => {
@@ -72,7 +72,7 @@ pub async fn start_scan(auth: SubsonicAuth) -> impl IntoResponse {
                         name: "scan.manual.task_panic",
                         tracing::Level::ERROR,
                         error = %e,
-                        "manual scan task panicked: {{error}}"
+                        "manual scan task panicked"
                     );
                 }
             }

@@ -266,15 +266,15 @@ impl AppState {
 // Allow extracting Arc<dyn AuthState> from AppState
 impl FromRef<AppState> for Arc<dyn AuthState> {
     fn from_ref(state: &AppState) -> Self {
-        state.auth.clone()
+        Arc::clone(&state.auth) as _
     }
 }
 
 /// Create the main router with all Subsonic API routes.
-/// All endpoints support both GET and POST (formPost extension).
+/// All endpoints support both GET and POST with query-string parameters.
 /// The .view suffix is automatically handled by `SubsonicRouterExt`.
 fn create_router(state: AppState) -> Router {
-    // All endpoints - subsonic_route automatically adds .view suffix and POST method
+    // All endpoints - subsonic_route automatically adds .view suffix and POST method.
     let rest_routes = Router::new()
         // System endpoints
         .subsonic_route("/ping", handlers::ping)
@@ -464,7 +464,7 @@ async fn main() {
                 name: "db.setup.failed",
                 tracing::Level::ERROR,
                 error = %e,
-                "database setup failed: {{error}}"
+                "database setup failed"
             );
             std::process::exit(1);
         }
@@ -958,7 +958,7 @@ async fn main() {
                         name: "scan.command.failed",
                         tracing::Level::ERROR,
                         error = %e,
-                        "scan command failed: {{error}}"
+                        "scan command failed"
                     );
                     std::process::exit(1);
                 }
@@ -973,7 +973,7 @@ async fn main() {
                     name: "server.run.failed",
                     tracing::Level::ERROR,
                     error = %e,
-                    "server failed: {{error}}"
+                    "server failed"
                 );
                 std::process::exit(1);
             }
@@ -985,7 +985,7 @@ async fn main() {
                     name: "server.run.failed",
                     tracing::Level::ERROR,
                     error = %e,
-                    "server failed: {{error}}"
+                    "server failed"
                 );
                 std::process::exit(1);
             }
@@ -1043,7 +1043,7 @@ async fn run_server(
             name: "server.bootstrap.user_create_hint",
             tracing::Level::WARN,
             command = "suboxide user create --username admin --password <password> --admin",
-            "create initial user with: {{command}}"
+            "create initial user with command"
         );
     }
 
@@ -1075,7 +1075,7 @@ async fn run_server(
         name: "server.listen.started",
         tracing::Level::INFO,
         server.address = %local_addr,
-        "suboxide server listening on {{server.address}}"
+        "suboxide server listening"
     );
 
     axum::serve(listener, app)

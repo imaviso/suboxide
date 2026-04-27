@@ -213,7 +213,7 @@ pub async fn create_playlist(
                 tracing::Level::WARN,
                 playlist.id = playlist_id,
                 error = %e,
-                "playlist update failed: {{error}}"
+                "playlist update failed"
             );
             return error_response(auth.format, &ApiError::Generic(e)).into_response();
         }
@@ -308,7 +308,7 @@ pub async fn create_playlist(
                 name: "playlist.create.failed",
                 tracing::Level::WARN,
                 error = %e,
-                "playlist creation failed: {{error}}"
+                "playlist creation failed"
             );
             error_response(auth.format, &ApiError::Generic(e)).into_response()
         }
@@ -390,7 +390,7 @@ pub async fn update_playlist(
             tracing::Level::WARN,
             playlist.id = playlist_id,
             error = %e,
-            "playlist update failed: {{error}}"
+            "playlist update failed"
         );
         return error_response(auth.format, &ApiError::Generic(e)).into_response();
     }
@@ -436,7 +436,7 @@ pub async fn delete_playlist(
                 tracing::Level::WARN,
                 playlist.id = playlist_id,
                 error = %e,
-                "playlist deletion failed: {{error}}"
+                "playlist deletion failed"
             );
             error_response(auth.format, &ApiError::Generic(e)).into_response()
         }

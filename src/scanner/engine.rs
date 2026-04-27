@@ -1151,7 +1151,7 @@ impl AutoScanner {
                         name: "scan.auto.failed",
                         tracing::Level::ERROR,
                         error = %e,
-                        "auto-scan failed: {{error}}"
+                        "auto-scan failed"
                     );
                 }
                 Err(e) => {
@@ -1159,7 +1159,7 @@ impl AutoScanner {
                         name: "scan.auto.task_panic",
                         tracing::Level::ERROR,
                         error = %e,
-                        "auto-scan task panicked: {{error}}"
+                        "auto-scan task panicked"
                     );
                 }
             }

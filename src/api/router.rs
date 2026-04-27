@@ -1,7 +1,8 @@
 //! Router helpers for Subsonic API endpoints.
 //!
 //! Provides utilities for registering endpoints with common patterns like
-//! automatic .view suffix handling and GET+POST method support.
+//! automatic .view suffix handling and GET+POST method support with query
+//! parameters.
 
 use axum::{Router, handler::Handler, routing::get};
 
@@ -12,6 +13,8 @@ where
 {
     /// Register a Subsonic API endpoint with automatic .view suffix.
     /// Both the base path and path.view will be registered with GET and POST methods.
+    /// POST requests still read endpoint parameters from the query string, not
+    /// form bodies.
     ///
     /// # Example
     /// ```ignore

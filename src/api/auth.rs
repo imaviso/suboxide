@@ -498,8 +498,8 @@ impl AuthParams {
 
 /// Authenticated user extractor that also includes the response format.
 ///
-/// Supports both GET (query params) and POST (form data) requests.
-/// When both are present, query params take precedence over form params.
+/// Supports GET and POST authentication parameters.
+/// Endpoint parameters are still read from query strings.
 ///
 /// Use this in your handlers to require authentication:
 ///
@@ -507,17 +507,19 @@ impl AuthParams {
 /// async fn handler(auth: SubsonicAuth) -> impl IntoResponse {
 ///     // auth.user is guaranteed to be authenticated
 ///     // auth.format contains the requested response format
-///     // auth.state provides access to repositories
 ///     ok_empty(auth.format)
 /// }
 /// ```
 #[derive(Clone)]
 pub struct SubsonicAuth {
+    /// The authenticated user.
     pub user: User,
+    /// The requested response format.
     pub format: Format,
+    /// Common Subsonic authentication parameters.
     pub params: AuthParams,
     /// Reference to the auth state for accessing repositories
-    pub state: Arc<dyn AuthState>,
+    pub(crate) state: Arc<dyn AuthState>,
 }
 
 impl std::fmt::Debug for SubsonicAuth {
@@ -1874,6 +1876,44 @@ mod tests {
         assert_eq!(merged.p, Some("pass".into()));
         // Form params fill in missing values
         assert_eq!(merged.f, Some("json".into()));
+    }
+
+    #[test]
+    fn params_merge_preserves_query_auth_fields_and_fills_missing_form_fields() {
+        let query = AuthParams {
+            u: "query-user".into(),
+            t: Some("query-token".into()),
+            v: "1.16.1".into(),
+            c: "query-client".into(),
+            ..Default::default()
+        };
+        let form = AuthParams {
+            u: "form-user".into(),
+            p: Some("form-password".into()),
+            t: Some("form-token".into()),
+            s: Some("form-salt".into()),
+            api_key: Some("form-key".into()),
+            v: "1.15.0".into(),
+            c: "form-client".into(),
+            f: Some("json".into()),
+        };
+
+        let merged = query.merge_with(form);
+
+        assert_eq!(merged.u, "query-user");
+        assert_eq!(merged.t.as_deref(), Some("query-token"));
+        assert_eq!(merged.v, "1.16.1");
+        assert_eq!(merged.c, "query-client");
+        assert_eq!(merged.p.as_deref(), Some("form-password"));
+        assert_eq!(merged.s.as_deref(), Some("form-salt"));
+        assert_eq!(merged.api_key.as_deref(), Some("form-key"));
+        assert_eq!(merged.f.as_deref(), Some("json"));
+    }
+
+    #[test]
+    fn invalid_hex_password_returns_original_input() {
+        assert_eq!(AuthParams::decode_password("enc:not-hex"), "enc:not-hex");
+        assert_eq!(AuthParams::decode_password("enc:ff"), "enc:ff");
     }
 
     #[test]

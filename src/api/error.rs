@@ -114,3 +114,42 @@ impl IntoResponse for ApiError {
         error_response(Format::Xml, &self).into_response()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ApiError;
+
+    #[test]
+    fn api_error_codes_match_subsonic_contract() {
+        let cases = [
+            (ApiError::Generic("boom".into()), 0),
+            (ApiError::MissingParameter("id".into()), 10),
+            (ApiError::ClientTooOld, 20),
+            (ApiError::ServerTooOld, 30),
+            (ApiError::WrongCredentials, 40),
+            (ApiError::TokenAuthNotSupported, 41),
+            (ApiError::AuthMechanismNotSupported, 42),
+            (ApiError::ConflictingAuthMechanisms, 43),
+            (ApiError::InvalidApiKey, 44),
+            (ApiError::NotAuthorized, 50),
+            (ApiError::TrialExpired, 60),
+            (ApiError::NotFound("Song".into()), 70),
+        ];
+
+        for (error, code) in cases {
+            assert_eq!(error.code(), code, "{error:?}");
+        }
+    }
+
+    #[test]
+    fn api_error_messages_include_variant_context() {
+        assert_eq!(
+            ApiError::MissingParameter("id".into()).message(),
+            "Required parameter is missing: id"
+        );
+        assert_eq!(
+            ApiError::NotFound("Album".into()).message(),
+            "Requested data was not found: Album"
+        );
+    }
+}

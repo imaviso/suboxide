@@ -42,7 +42,7 @@ fn validate_song_path(song: &Song, auth: &SubsonicAuth) -> Result<PathBuf, &'sta
         tracing::Level::WARN,
         song.id = song.id,
         song.path = %song.path,
-        "song path validation failed: {{song.path}} is outside configured folders"
+        "song path validation failed"
     );
     Err("Audio file not found in music library")
 }

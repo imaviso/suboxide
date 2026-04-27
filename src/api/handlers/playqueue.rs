@@ -117,7 +117,7 @@ pub async fn save_play_queue(RawQuery(query): RawQuery, auth: SubsonicAuth) -> i
             name: "playqueue.save.failed",
             tracing::Level::WARN,
             error = %e,
-            "play queue save failed: {{error}}"
+            "play queue save failed"
         );
         // Don't return an error - the API spec says this should succeed silently
     }
@@ -233,7 +233,7 @@ pub async fn save_play_queue_by_index(
             name: "playqueue.save_by_index.failed",
             tracing::Level::WARN,
             error = %e,
-            "play queue save by index failed: {{error}}"
+            "play queue save by index failed"
         );
         // Don't return an error - the API spec says this should succeed silently
     }

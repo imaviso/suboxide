@@ -191,3 +191,62 @@ impl ScanState {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = folder;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{ScanPhase, ScanState};
+
+    #[test]
+    fn scan_phase_strings_are_stable_api_values() {
+        assert_eq!(ScanPhase::Idle.as_str(), "idle");
+        assert_eq!(ScanPhase::Discovering.as_str(), "discovering");
+        assert_eq!(ScanPhase::Processing.as_str(), "processing");
+        assert_eq!(ScanPhase::Cleaning.as_str(), "cleaning");
+    }
+
+    #[test]
+    fn scan_state_tracks_progress_then_resets_on_finish() {
+        let state = ScanState::new();
+
+        assert!(state.try_start());
+        assert!(!state.try_start());
+        state.set_total(10);
+        state.set_phase(ScanPhase::Processing);
+        state.set_current_folder(Some("Music/A".into()));
+        assert_eq!(state.increment_count(), 1);
+        assert_eq!(state.increment_count(), 2);
+
+        assert!(state.is_scanning());
+        assert_eq!(state.get_count(), 2);
+        assert_eq!(state.get_total(), 10);
+        assert_eq!(state.get_phase(), ScanPhase::Processing);
+        assert_eq!(state.get_current_folder().as_deref(), Some("Music/A"));
+
+        state.finish();
+
+        assert!(!state.is_scanning());
+        assert_eq!(state.get_count(), 2);
+        assert_eq!(state.get_total(), 10);
+        assert_eq!(state.get_phase(), ScanPhase::Idle);
+        assert_eq!(state.get_current_folder(), None);
+    }
+
+    #[test]
+    fn scan_state_reset_clears_progress_without_starting_scan() {
+        let state = ScanState::new();
+
+        assert!(state.try_start());
+        state.set_total(5);
+        state.set_count(4);
+        state.set_phase(ScanPhase::Cleaning);
+        state.set_current_folder(Some("Music/B".into()));
+
+        state.reset();
+
+        assert!(state.is_scanning());
+        assert_eq!(state.get_count(), 0);
+        assert_eq!(state.get_total(), 0);
+        assert_eq!(state.get_phase(), ScanPhase::Idle);
+        assert_eq!(state.get_current_folder(), None);
+    }
+}

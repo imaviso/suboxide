@@ -105,7 +105,6 @@ impl OpenSubsonicExtension {
 #[must_use]
 pub fn supported_extensions() -> Vec<OpenSubsonicExtension> {
     vec![
-        OpenSubsonicExtension::new("formPost", vec![1]),
         OpenSubsonicExtension::new("apiKeyAuthentication", vec![1]),
         OpenSubsonicExtension::new("songLyrics", vec![1]),
         OpenSubsonicExtension::new("remoteControl", vec![1]),
@@ -2621,7 +2620,7 @@ impl SubsonicResponse {
                     name: "api.response.serialize_xml.failed",
                     tracing::Level::ERROR,
                     error = %e,
-                    "xml serialization failed: {{error}}"
+                    "xml serialization failed"
                 );
                 (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
             }
@@ -2762,7 +2761,7 @@ impl SubsonicResponse {
                     name: "api.response.serialize_json.failed",
                     tracing::Level::ERROR,
                     error = %e,
-                    "json serialization failed: {{error}}"
+                    "json serialization failed"
                 );
                 (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
             }
@@ -3103,4 +3102,64 @@ pub const fn ok_similar_songs(
     similar_songs: SimilarSongsResponse,
 ) -> SubsonicResponse {
     SubsonicResponse::similar_songs(format, similar_songs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Format, supported_extensions};
+
+    #[test]
+    fn format_from_param_accepts_only_json_like_formats() {
+        assert_eq!(Format::from_param(Some("json")), Format::Json);
+        assert_eq!(Format::from_param(Some("jsonp")), Format::Json);
+        assert_eq!(Format::from_param(Some("xml")), Format::Xml);
+        assert_eq!(Format::from_param(Some("JSON")), Format::Xml);
+        assert_eq!(Format::from_param(None), Format::Xml);
+    }
+
+    #[test]
+    fn supported_extensions_are_stable_and_sorted_by_contract() {
+        let extensions = supported_extensions();
+        let names: Vec<_> = extensions
+            .iter()
+            .map(|extension| extension.name.as_str())
+            .collect();
+
+        assert_eq!(
+            names,
+            ["apiKeyAuthentication", "songLyrics", "remoteControl"]
+        );
+        assert!(extensions.iter().all(|extension| extension.versions == [1]));
+    }
+
+    #[test]
+    fn supported_extensions_do_not_advertise_form_post() {
+        let extensions = supported_extensions();
+
+        assert!(
+            !extensions
+                .iter()
+                .any(|extension| extension.name == "formPost"),
+            "formPost requires reading endpoint parameters from request bodies"
+        );
+    }
+
+    #[test]
+    fn transform_json_keys_recurses_through_objects_and_arrays() {
+        let json = r#"{"@id":"root","child":[{"@name":"genre","$text":"Jazz"}]}"#;
+
+        let transformed = super::transform_json_keys(json);
+
+        assert_eq!(
+            transformed,
+            r#"{"child":[{"name":"genre","value":"Jazz"}],"id":"root"}"#
+        );
+    }
+
+    #[test]
+    fn transform_json_keys_leaves_invalid_json_unchanged() {
+        let invalid = "not json";
+
+        assert_eq!(super::transform_json_keys(invalid), invalid);
+    }
 }

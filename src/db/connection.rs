@@ -3,12 +3,44 @@
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, CustomizeConnection, Pool, PooledConnection};
 use std::time::Duration;
+use thiserror::Error;
 
 /// Type alias for our connection pool.
 pub type DbPool = Pool<ConnectionManager<SqliteConnection>>;
 
 /// Type alias for a pooled connection.
 pub type DbConn = PooledConnection<ConnectionManager<SqliteConnection>>;
+
+/// Error returned when building a database pool fails.
+#[derive(Debug, Error)]
+#[error("failed to build database pool: {message}")]
+pub struct DbPoolError {
+    message: String,
+    #[source]
+    source: Option<diesel::r2d2::PoolError>,
+}
+
+impl DbPoolError {
+    /// Returns the underlying pool error.
+    #[must_use]
+    pub const fn source_error(&self) -> Option<&diesel::r2d2::PoolError> {
+        self.source.as_ref()
+    }
+
+    fn config(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            source: None,
+        }
+    }
+
+    fn pool(source: diesel::r2d2::PoolError) -> Self {
+        Self {
+            message: source.to_string(),
+            source: Some(source),
+        }
+    }
+}
 
 /// Database configuration.
 #[derive(Debug, Clone)]
@@ -41,7 +73,11 @@ impl DbConfig {
     }
 
     /// Build a connection pool from this configuration.
-    pub fn build_pool(&self) -> Result<DbPool, Box<dyn std::error::Error>> {
+    pub fn build_pool(&self) -> Result<DbPool, DbPoolError> {
+        if self.max_connections == 0 {
+            return Err(DbPoolError::config("max_connections must be positive"));
+        }
+
         let manager = ConnectionManager::<SqliteConnection>::new(&self.database_url);
 
         Pool::builder()
@@ -49,7 +85,7 @@ impl DbConfig {
             .connection_timeout(Duration::from_secs(self.connection_timeout))
             .connection_customizer(Box::new(SqliteConnectionCustomizer))
             .build(manager)
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+            .map_err(DbPoolError::pool)
     }
 }
 
@@ -660,5 +696,26 @@ mod tests {
         let config = DbConfig::new(":memory:");
         let pool = config.build_pool();
         assert!(pool.is_ok());
+    }
+
+    #[test]
+    fn invalid_pool_configuration_returns_typed_error() {
+        let config = DbConfig {
+            database_url: ":memory:".to_string(),
+            max_connections: 0,
+            connection_timeout: 30,
+        };
+
+        let error = config
+            .build_pool()
+            .expect_err("zero-sized pools are invalid");
+
+        assert!(error.to_string().contains("failed to build database pool"));
+        assert!(
+            error
+                .to_string()
+                .contains("max_connections must be positive")
+        );
+        assert!(error.source_error().is_none());
     }
 }

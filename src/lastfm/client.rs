@@ -58,7 +58,7 @@ impl LastFmClient {
                     name: "lastfm.client.init.failed",
                     tracing::Level::WARN,
                     error = %error,
-                    "lastfm client initialization failed: {{error}}"
+                    "lastfm client initialization failed"
                 );
                 return None;
             }

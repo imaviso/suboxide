@@ -31,10 +31,10 @@ impl fmt::Display for UserRepoErrorKind {
 #[derive(Debug, Error)]
 #[error("{kind}: {message}")]
 pub struct UserRepoError {
-    pub kind: UserRepoErrorKind,
-    pub message: String,
+    kind: UserRepoErrorKind,
+    message: String,
     #[source]
-    pub source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
 }
 
 impl UserRepoError {
@@ -58,6 +58,18 @@ impl UserRepoError {
             message: message.into(),
             source: Some(source.into()),
         }
+    }
+
+    /// Returns the error kind.
+    #[must_use]
+    pub const fn kind(&self) -> UserRepoErrorKind {
+        self.kind
+    }
+
+    /// Returns the error message.
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.message
     }
 }
 
@@ -101,10 +113,10 @@ impl fmt::Display for MusicRepoErrorKind {
 #[derive(Debug, Error)]
 #[error("{kind}: {message}")]
 pub struct MusicRepoError {
-    pub kind: MusicRepoErrorKind,
-    pub message: String,
+    kind: MusicRepoErrorKind,
+    message: String,
     #[source]
-    pub source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
 }
 
 impl MusicRepoError {
@@ -129,6 +141,18 @@ impl MusicRepoError {
             source: Some(source.into()),
         }
     }
+
+    /// Returns the error kind.
+    #[must_use]
+    pub const fn kind(&self) -> MusicRepoErrorKind {
+        self.kind
+    }
+
+    /// Returns the error message.
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.message
+    }
 }
 
 impl From<diesel::result::Error> for MusicRepoError {
@@ -140,5 +164,40 @@ impl From<diesel::result::Error> for MusicRepoError {
 impl From<diesel::r2d2::PoolError> for MusicRepoError {
     fn from(err: diesel::r2d2::PoolError) -> Self {
         Self::with_source(MusicRepoErrorKind::Pool, err.to_string(), err)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+    use std::io;
+
+    use super::{MusicRepoError, MusicRepoErrorKind, UserRepoError, UserRepoErrorKind};
+
+    #[test]
+    fn user_repo_error_preserves_kind_message_and_source() {
+        let error = UserRepoError::with_source(
+            UserRepoErrorKind::UsernameExists,
+            "duplicate username",
+            io::Error::new(io::ErrorKind::AlreadyExists, "user exists"),
+        );
+
+        assert_eq!(error.kind(), UserRepoErrorKind::UsernameExists);
+        assert_eq!(error.message(), "duplicate username");
+        assert_eq!(
+            error.to_string(),
+            "username already exists: duplicate username"
+        );
+        assert!(error.source().is_some());
+    }
+
+    #[test]
+    fn music_repo_error_without_source_is_deterministic() {
+        let error = MusicRepoError::new(MusicRepoErrorKind::NotFound, "album missing");
+
+        assert_eq!(error.kind(), MusicRepoErrorKind::NotFound);
+        assert_eq!(error.message(), "album missing");
+        assert_eq!(error.to_string(), "not found: album missing");
+        assert!(error.source().is_none());
     }
 }

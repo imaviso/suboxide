@@ -312,9 +312,9 @@ impl PlaylistRepository {
                 .select(diesel::dsl::max(playlist_songs::position))
                 .first(&mut conn)?;
 
-            let mut next_pos = max_pos.unwrap_or(-1) + 1;
+            let start_pos = max_pos.unwrap_or(-1) + 1;
 
-            for song_id in song_ids_to_add {
+            for (next_pos, song_id) in (start_pos..).zip(song_ids_to_add.iter()) {
                 let new_song = NewPlaylistSong {
                     playlist_id,
                     song_id: *song_id,
@@ -324,8 +324,6 @@ impl PlaylistRepository {
                 diesel::insert_into(playlist_songs::table)
                     .values(&new_song)
                     .execute(&mut conn)?;
-
-                next_pos += 1;
             }
         }
 
