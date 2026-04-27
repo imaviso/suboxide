@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use axum::response::IntoResponse;
 
 use crate::api::auth::SubsonicAuth;
-use crate::api::response::{ok_artists, ok_indexes, ok_music_folders};
+use crate::api::response::SubsonicResponse;
 use crate::models::music::{
     ArtistID3Response, ArtistResponse, ArtistsID3Response, IndexID3Response, IndexResponse,
     IndexesResponse, MusicFolderResponse,
@@ -18,7 +18,7 @@ pub async fn get_music_folders(auth: SubsonicAuth) -> impl IntoResponse {
     let folders = auth.state.get_music_folders();
     let responses: Vec<MusicFolderResponse> =
         folders.iter().map(MusicFolderResponse::from).collect();
-    ok_music_folders(auth.format, responses)
+    SubsonicResponse::music_folders(auth.format, responses)
 }
 
 /// GET/POST /rest/getIndexes[.view]
@@ -82,7 +82,7 @@ pub async fn get_indexes(auth: SubsonicAuth) -> impl IntoResponse {
         indexes,
     };
 
-    ok_indexes(auth.format, response)
+    SubsonicResponse::indexes(auth.format, response)
 }
 
 /// GET/POST /rest/getArtists[.view]
@@ -148,5 +148,5 @@ pub async fn get_artists(auth: SubsonicAuth) -> impl IntoResponse {
         indexes,
     };
 
-    ok_artists(auth.format, response)
+    SubsonicResponse::artists(auth.format, response)
 }

@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 use crate::api::auth::SubsonicAuth;
 use crate::api::error::ApiError;
-use crate::api::response::{error_response, ok_empty, ok_playlist, ok_playlists};
+use crate::api::response::{SubsonicResponse, error_response};
 use crate::models::music::{
     ChildResponse, PlaylistResponse, PlaylistWithSongsResponse, PlaylistsResponse,
     format_subsonic_datetime,
@@ -78,7 +78,7 @@ pub async fn get_playlists(
         playlists: playlist_responses,
     };
 
-    ok_playlists(auth.format, response)
+    SubsonicResponse::playlists(auth.format, response)
 }
 
 /// Query parameters for getPlaylist.
@@ -146,7 +146,7 @@ pub async fn get_playlist(
         entries: song_responses,
     };
 
-    ok_playlist(auth.format, response).into_response()
+    SubsonicResponse::playlist(auth.format, response).into_response()
 }
 
 /// Query parameters for createPlaylist.
@@ -253,7 +253,7 @@ pub async fn create_playlist(
                 entries: song_responses,
             };
 
-            return ok_playlist(auth.format, response).into_response();
+            return SubsonicResponse::playlist(auth.format, response).into_response();
         }
     }
 
@@ -301,7 +301,7 @@ pub async fn create_playlist(
                 entries: song_responses,
             };
 
-            ok_playlist(auth.format, response).into_response()
+            SubsonicResponse::playlist(auth.format, response).into_response()
         }
         Err(e) => {
             tracing::event!(
@@ -395,7 +395,7 @@ pub async fn update_playlist(
         return error_response(auth.format, &ApiError::Generic(e)).into_response();
     }
 
-    ok_empty(auth.format).into_response()
+    SubsonicResponse::empty(auth.format).into_response()
 }
 
 /// Query parameters for deletePlaylist.
@@ -426,7 +426,7 @@ pub async fn delete_playlist(
     }
 
     match auth.state.delete_playlist(playlist_id) {
-        Ok(true) => ok_empty(auth.format).into_response(),
+        Ok(true) => SubsonicResponse::empty(auth.format).into_response(),
         Ok(false) => {
             error_response(auth.format, &ApiError::NotFound("Playlist".into())).into_response()
         }

@@ -5,9 +5,7 @@ use serde::Deserialize;
 
 use crate::api::auth::SubsonicAuth;
 use crate::api::error::ApiError;
-use crate::api::response::{
-    error_response, ok_empty, ok_remote_commands, ok_remote_session, ok_remote_state,
-};
+use crate::api::response::{SubsonicResponse, error_response};
 use crate::db::{RemoteCommand, RemoteSession, RemoteState};
 use crate::models::music::{
     RemoteCommandResponse, RemoteCommandsResponse, RemoteSessionResponse, RemoteStateResponse,
@@ -55,7 +53,8 @@ pub async fn create_remote_session(
         params.device_name.as_deref(),
         ttl_seconds,
     ) {
-        Ok(session) => ok_remote_session(auth.format, map_session(&session, true)).into_response(),
+        Ok(session) => SubsonicResponse::remote_session(auth.format, map_session(&session, true))
+            .into_response(),
         Err(error) => error_response(auth.format, &ApiError::Generic(error)).into_response(),
     }
 }
@@ -94,7 +93,8 @@ pub async fn join_remote_session(
         params.device_name.as_deref(),
     ) {
         Ok(Some(session)) => {
-            ok_remote_session(auth.format, map_session(&session, false)).into_response()
+            SubsonicResponse::remote_session(auth.format, map_session(&session, false))
+                .into_response()
         }
         Ok(None) => error_response(auth.format, &ApiError::NotFound("Remote session".into()))
             .into_response(),
@@ -134,7 +134,8 @@ pub async fn get_remote_session(
 
     match auth.state.get_remote_session(auth.user.id, session_id) {
         Ok(Some(session)) => {
-            ok_remote_session(auth.format, map_session(&session, true)).into_response()
+            SubsonicResponse::remote_session(auth.format, map_session(&session, true))
+                .into_response()
         }
         Ok(None) => error_response(auth.format, &ApiError::NotFound("Remote session".into()))
             .into_response(),
@@ -159,7 +160,7 @@ pub async fn close_remote_session(
     };
 
     match auth.state.close_remote_session(auth.user.id, session_id) {
-        Ok(true) => ok_empty(auth.format).into_response(),
+        Ok(true) => SubsonicResponse::empty(auth.format).into_response(),
         Ok(false) => error_response(auth.format, &ApiError::NotFound("Remote session".into()))
             .into_response(),
         Err(error) => error_response(auth.format, &ApiError::Generic(error)).into_response(),
@@ -208,7 +209,7 @@ pub async fn send_remote_command(
         command,
         params.payload.as_deref(),
     ) {
-        Ok(_) => ok_empty(auth.format).into_response(),
+        Ok(_) => SubsonicResponse::empty(auth.format).into_response(),
         Err(error) => error_response(auth.format, &ApiError::Generic(error)).into_response(),
     }
 }
@@ -256,7 +257,7 @@ pub async fn get_remote_commands(
             let response = RemoteCommandsResponse {
                 commands: commands.iter().map(map_command).collect(),
             };
-            ok_remote_commands(auth.format, response).into_response()
+            SubsonicResponse::remote_commands(auth.format, response).into_response()
         }
         Err(error) => error_response(auth.format, &ApiError::Generic(error)).into_response(),
     }
@@ -305,7 +306,7 @@ pub async fn update_remote_state(
         .state
         .update_remote_state(auth.user.id, session_id, device_id, state_json)
     {
-        Ok(()) => ok_empty(auth.format).into_response(),
+        Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
         Err(error) => error_response(auth.format, &ApiError::Generic(error)).into_response(),
     }
 }
@@ -336,7 +337,7 @@ pub async fn get_remote_state(
     match auth.state.get_remote_state(auth.user.id, session_id) {
         Ok(Some(state)) => {
             let response = map_state(&state);
-            ok_remote_state(auth.format, response).into_response()
+            SubsonicResponse::remote_state(auth.format, response).into_response()
         }
         Ok(None) => {
             error_response(auth.format, &ApiError::NotFound("Remote state".into())).into_response()

@@ -104,6 +104,16 @@ impl Scanner {
         Ok(hash)
     }
 
+    fn image_mime_from_ext(ext: &str) -> &'static str {
+        match ext {
+            "png" => "image/png",
+            "gif" => "image/gif",
+            "bmp" => "image/bmp",
+            "webp" => "image/webp",
+            _ => "image/jpeg",
+        }
+    }
+
     /// Get the cover art cache directory path.
     #[must_use]
     pub fn cover_art_dir(&self) -> &Path {
@@ -122,14 +132,7 @@ impl Scanner {
                     && path.is_file()
                     && let Ok(data) = fs::read(&path)
                 {
-                    let mime = match *ext {
-                        "png" => "image/png",
-                        "gif" => "image/gif",
-                        "bmp" => "image/bmp",
-                        "webp" => "image/webp",
-                        _ => "image/jpeg",
-                    };
-                    return Some((data, mime.to_string()));
+                    return Some((data, Self::image_mime_from_ext(ext).to_string()));
                 }
             }
         }
@@ -157,14 +160,7 @@ impl Scanner {
                     && IMAGE_EXTENSIONS.contains(&extension.as_str())
                     && let Ok(data) = fs::read(&path)
                 {
-                    let mime = match extension.as_str() {
-                        "png" => "image/png",
-                        "gif" => "image/gif",
-                        "bmp" => "image/bmp",
-                        "webp" => "image/webp",
-                        _ => "image/jpeg",
-                    };
-                    return Some((data, mime.to_string()));
+                    return Some((data, Self::image_mime_from_ext(&extension).to_string()));
                 }
             }
         }
@@ -525,7 +521,7 @@ impl Scanner {
     fn read_track_metadata_static(
         file: &DiscoveredFile,
         folder_path: &str,
-    ) -> Result<ScannedTrack, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<ScannedTrack, ScanError> {
         let path = &file.path;
         let extension = path
             .extension()
@@ -540,7 +536,10 @@ impl Scanner {
             .unwrap_or_default();
 
         // Read audio tags
-        let tagged_file = lofty::read_from_path(path)?;
+        let tagged_file = lofty::read_from_path(path).map_err(|error| ScanError::Metadata {
+            path: path.clone(),
+            message: error.to_string(),
+        })?;
 
         let properties = tagged_file.properties();
         let duration_secs = u32::try_from(properties.duration().as_secs()).unwrap_or(0);

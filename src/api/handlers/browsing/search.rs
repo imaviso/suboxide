@@ -4,7 +4,7 @@ use axum::response::IntoResponse;
 use serde::Deserialize;
 
 use crate::api::auth::SubsonicAuth;
-use crate::api::response::{ok_search_result, ok_search_result2, ok_search_result3};
+use crate::api::response::SubsonicResponse;
 use crate::models::music::{
     AlbumID3Response, ArtistID3Response, ArtistResponse, ChildResponse, SearchMatch,
     SearchResult2Response, SearchResult3Response, SearchResultResponse, format_subsonic_datetime,
@@ -121,7 +121,7 @@ pub async fn search3(
         songs: song_responses,
     };
 
-    ok_search_result3(auth.format, response).into_response()
+    SubsonicResponse::search_result3(auth.format, response).into_response()
 }
 
 /// Query parameters for search2.
@@ -227,7 +227,7 @@ pub async fn search2(
         songs: song_responses,
     };
 
-    ok_search_result2(auth.format, response).into_response()
+    SubsonicResponse::search_result2(auth.format, response).into_response()
 }
 
 /// Query parameters for legacy search.
@@ -287,5 +287,5 @@ pub async fn search(
         matches,
     };
 
-    ok_search_result(auth.format, response).into_response()
+    SubsonicResponse::search_result(auth.format, response).into_response()
 }

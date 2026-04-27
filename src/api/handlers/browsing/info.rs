@@ -6,9 +6,7 @@ use serde::Deserialize;
 use crate::api::auth::SubsonicAuth;
 use crate::api::error::ApiError;
 use crate::api::handlers::browsing::IdParams;
-use crate::api::response::{
-    error_response, ok_album_info, ok_artist_info, ok_artist_info2, ok_lyrics, ok_lyrics_list,
-};
+use crate::api::response::{SubsonicResponse, error_response};
 use crate::models::music::{
     AlbumInfoResponse, LyricLine, LyricsListResponse, LyricsResponse, StructuredLyrics,
 };
@@ -18,7 +16,7 @@ use crate::models::music::{
 #[serde(default)]
 pub struct ArtistInfo2Params {
     /// The artist ID.
-    pub id: Option<String>,
+    pub id: Option<i32>,
     /// Max number of similar artists to return.
     pub count: Option<i32>,
     /// Whether to include artists that are not present in the media library.
@@ -35,14 +33,14 @@ pub async fn get_artist_info2(
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
-    let Some(artist_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+    let Some(artist_id) = params.id else {
         return error_response(auth.format, &ApiError::MissingParameter("id".into()))
             .into_response();
     };
 
     // Get the artist
     let response = auth.state.get_artist_info_with_cache(artist_id);
-    ok_artist_info2(auth.format, response).into_response()
+    SubsonicResponse::artist_info2(auth.format, response).into_response()
 }
 
 /// Query parameters for getAlbumInfo2.
@@ -50,7 +48,7 @@ pub async fn get_artist_info2(
 #[serde(default)]
 pub struct AlbumInfo2Params {
     /// The album ID.
-    pub id: Option<String>,
+    pub id: Option<i32>,
 }
 
 /// GET/POST /rest/getAlbumInfo2[.view]
@@ -62,7 +60,7 @@ pub async fn get_album_info2(
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
-    let Some(album_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+    let Some(album_id) = params.id else {
         return error_response(auth.format, &ApiError::MissingParameter("id".into()))
             .into_response();
     };
@@ -74,7 +72,7 @@ pub async fn get_album_info2(
 
     // Create response with available data from the album
     let response = AlbumInfoResponse::from_album(&album);
-    ok_album_info(auth.format, response).into_response()
+    SubsonicResponse::album_info(auth.format, response).into_response()
 }
 
 /// GET/POST /rest/getArtistInfo[.view]
@@ -85,14 +83,14 @@ pub async fn get_artist_info(
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
-    let Some(artist_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+    let Some(artist_id) = params.id else {
         return error_response(auth.format, &ApiError::MissingParameter("id".into()))
             .into_response();
     };
 
     // Get the artist info with cache
     let response = auth.state.get_artist_info_non_id3_with_cache(artist_id);
-    ok_artist_info(auth.format, response).into_response()
+    SubsonicResponse::artist_info(auth.format, response).into_response()
 }
 
 /// GET/POST /rest/getAlbumInfo[.view]
@@ -103,7 +101,7 @@ pub async fn get_album_info(
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
-    let Some(album_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+    let Some(album_id) = params.id else {
         return error_response(auth.format, &ApiError::MissingParameter("id".into()))
             .into_response();
     };
@@ -115,7 +113,7 @@ pub async fn get_album_info(
 
     // Use AlbumInfoResponse which is the same for ID3 and non-ID3
     let response = AlbumInfoResponse::from_album(&album);
-    ok_album_info(auth.format, response).into_response()
+    SubsonicResponse::album_info(auth.format, response).into_response()
 }
 
 /// Query parameters for getLyrics.
@@ -154,7 +152,7 @@ pub async fn get_lyrics(
 
     let response = LyricsResponse::new(params.artist.clone(), params.title.clone(), lyrics_content);
 
-    ok_lyrics(auth.format, response)
+    SubsonicResponse::lyrics(auth.format, response)
 }
 
 /// GET/POST /rest/getLyricsBySongId[.view]
@@ -169,7 +167,7 @@ pub async fn get_lyrics_by_song_id(
     use crate::scanner::lyrics::{parse_lrc, parse_unsynced};
 
     // Get the required 'id' parameter
-    let Some(song_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+    let Some(song_id) = params.id else {
         return error_response(auth.format, &ApiError::MissingParameter("id".into()))
             .into_response();
     };
@@ -224,5 +222,5 @@ pub async fn get_lyrics_by_song_id(
 
     let response = LyricsListResponse::new(structured_lyrics);
 
-    ok_lyrics_list(auth.format, response).into_response()
+    SubsonicResponse::lyrics_list(auth.format, response).into_response()
 }

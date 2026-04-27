@@ -3,9 +3,7 @@
 use axum::response::IntoResponse;
 
 use crate::api::auth::SubsonicAuth;
-use crate::api::response::{
-    ok_bookmarks, ok_empty, ok_license, ok_open_subsonic_extensions, ok_token_info,
-};
+use crate::api::response::{SubsonicResponse, supported_extensions};
 use crate::models::music::TokenInfoResponse;
 
 /// GET/POST /rest/ping[.view]
@@ -13,7 +11,7 @@ use crate::models::music::TokenInfoResponse;
 /// Used to test connectivity with the server.
 /// Returns an empty successful response.
 pub async fn ping(auth: SubsonicAuth) -> impl IntoResponse {
-    ok_empty(auth.format)
+    SubsonicResponse::empty(auth.format)
 }
 
 /// GET/POST /rest/getLicense[.view]
@@ -21,7 +19,7 @@ pub async fn ping(auth: SubsonicAuth) -> impl IntoResponse {
 /// Get details about the software license.
 /// Since this is an open-source implementation, we always return valid.
 pub async fn get_license(auth: SubsonicAuth) -> impl IntoResponse {
-    ok_license(auth.format)
+    SubsonicResponse::license(auth.format)
 }
 
 /// GET/POST /rest/getOpenSubsonicExtensions[.view]
@@ -29,7 +27,7 @@ pub async fn get_license(auth: SubsonicAuth) -> impl IntoResponse {
 /// List the `OpenSubsonic` extensions supported by this server.
 /// This endpoint is part of the `OpenSubsonic` specification.
 pub async fn get_open_subsonic_extensions(auth: SubsonicAuth) -> impl IntoResponse {
-    ok_open_subsonic_extensions(auth.format)
+    SubsonicResponse::open_subsonic_extensions(auth.format, supported_extensions())
 }
 
 /// GET/POST /rest/getBookmarks[.view]
@@ -38,7 +36,7 @@ pub async fn get_open_subsonic_extensions(auth: SubsonicAuth) -> impl IntoRespon
 /// A bookmark is a position within a certain media file.
 /// Currently returns an empty list (bookmarks not yet implemented).
 pub async fn get_bookmarks(auth: SubsonicAuth) -> impl IntoResponse {
-    ok_bookmarks(auth.format)
+    SubsonicResponse::bookmarks(auth.format)
 }
 
 /// GET/POST /rest/tokenInfo[.view]
@@ -51,5 +49,5 @@ pub async fn token_info(auth: SubsonicAuth) -> impl IntoResponse {
     let response = TokenInfoResponse {
         username: auth.user.username.clone(),
     };
-    ok_token_info(auth.format, response)
+    SubsonicResponse::token_info(auth.format, response)
 }

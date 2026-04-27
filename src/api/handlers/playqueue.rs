@@ -3,7 +3,7 @@ use axum::extract::RawQuery;
 use axum::response::IntoResponse;
 
 use crate::api::auth::SubsonicAuth;
-use crate::api::response::{ok_empty, ok_play_queue, ok_play_queue_by_index};
+use crate::api::response::SubsonicResponse;
 use crate::models::music::{
     ChildResponse, PlayQueueByIndexResponse, PlayQueueResponse, format_subsonic_datetime,
 };
@@ -58,7 +58,7 @@ pub async fn get_play_queue(auth: SubsonicAuth) -> impl IntoResponse {
             entries: song_responses,
         };
 
-        ok_play_queue(auth.format, response)
+        SubsonicResponse::play_queue(auth.format, response)
     } else {
         // Return empty play queue
         let response = PlayQueueResponse {
@@ -70,7 +70,7 @@ pub async fn get_play_queue(auth: SubsonicAuth) -> impl IntoResponse {
             entries: vec![],
         };
 
-        ok_play_queue(auth.format, response)
+        SubsonicResponse::play_queue(auth.format, response)
     }
 }
 
@@ -122,7 +122,7 @@ pub async fn save_play_queue(RawQuery(query): RawQuery, auth: SubsonicAuth) -> i
         // Don't return an error - the API spec says this should succeed silently
     }
 
-    ok_empty(auth.format)
+    SubsonicResponse::empty(auth.format)
 }
 
 /// GET/POST /rest/getPlayQueueByIndex[.view]
@@ -167,7 +167,7 @@ pub async fn get_play_queue_by_index(auth: SubsonicAuth) -> impl IntoResponse {
             entries: song_responses,
         };
 
-        ok_play_queue_by_index(auth.format, response)
+        SubsonicResponse::play_queue_by_index(auth.format, response)
     } else {
         // Return empty play queue
         let response = PlayQueueByIndexResponse {
@@ -179,7 +179,7 @@ pub async fn get_play_queue_by_index(auth: SubsonicAuth) -> impl IntoResponse {
             entries: vec![],
         };
 
-        ok_play_queue_by_index(auth.format, response)
+        SubsonicResponse::play_queue_by_index(auth.format, response)
     }
 }
 
@@ -238,5 +238,5 @@ pub async fn save_play_queue_by_index(
         // Don't return an error - the API spec says this should succeed silently
     }
 
-    ok_empty(auth.format)
+    SubsonicResponse::empty(auth.format)
 }

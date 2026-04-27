@@ -5,7 +5,7 @@ use axum::response::IntoResponse;
 use crate::api::auth::SubsonicAuth;
 use crate::api::error::ApiError;
 use crate::api::handlers::browsing::IdParams;
-use crate::api::response::{error_response, ok_album, ok_artist, ok_song};
+use crate::api::response::{SubsonicResponse, error_response};
 use crate::models::music::{
     AlbumID3Response, AlbumWithSongsID3Response, ArtistWithAlbumsID3Response, ChildResponse,
 };
@@ -18,7 +18,7 @@ pub async fn get_album(
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
-    let Some(album_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+    let Some(album_id) = params.id else {
         return error_response(auth.format, &ApiError::MissingParameter("id".into()))
             .into_response();
     };
@@ -53,7 +53,7 @@ pub async fn get_album(
         song_responses,
         album_starred_at.as_ref(),
     );
-    ok_album(auth.format, response).into_response()
+    SubsonicResponse::album(auth.format, response).into_response()
 }
 
 /// GET/POST /rest/getArtist[.view]
@@ -64,7 +64,7 @@ pub async fn get_artist(
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
-    let Some(artist_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+    let Some(artist_id) = params.id else {
         return error_response(auth.format, &ApiError::MissingParameter("id".into()))
             .into_response();
     };
@@ -99,7 +99,7 @@ pub async fn get_artist(
         album_responses,
         artist_starred_at.as_ref(),
     );
-    ok_artist(auth.format, response).into_response()
+    SubsonicResponse::artist(auth.format, response).into_response()
 }
 
 /// GET/POST /rest/getSong[.view]
@@ -110,7 +110,7 @@ pub async fn get_song(
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
-    let Some(song_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+    let Some(song_id) = params.id else {
         return error_response(auth.format, &ApiError::MissingParameter("id".into()))
             .into_response();
     };
@@ -123,5 +123,5 @@ pub async fn get_song(
     // Get the song's starred status
     let starred_at = auth.state.get_starred_at_for_song(auth.user.id, song_id);
     let response = ChildResponse::from_song_with_starred(&song, starred_at.as_ref());
-    ok_song(auth.format, response).into_response()
+    SubsonicResponse::song(auth.format, response).into_response()
 }

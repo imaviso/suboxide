@@ -21,12 +21,13 @@ use crate::models::music::{
     SongsByGenreResponse, Starred2Response, StarredResponse, TokenInfoResponse, TopSongsResponse,
 };
 use crate::models::user::{UserResponse, UsersResponse};
+use crate::scanner::ScanPhase;
 
 /// The current Subsonic API version we're compatible with.
 pub const API_VERSION: &str = "1.16.1";
 
 /// Server name reported in responses.
-pub const SERVER_NAME: &str = "subsonic-rs";
+pub const SERVER_NAME: &str = "suboxide";
 
 /// Server version from Cargo.toml.
 pub const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -74,7 +75,7 @@ pub struct ScanStatusData {
     /// Total number of items to scan.
     pub total: u64,
     /// Current scan phase.
-    pub phase: String,
+    pub phase: ScanPhase,
     /// Current folder being scanned.
     pub folder: Option<String>,
 }
@@ -961,7 +962,7 @@ mod xml {
                     None
                 },
                 phase: if data.scanning {
-                    Some(data.phase.clone())
+                    Some(data.phase.as_str().to_string())
                 } else {
                     None
                 },
@@ -1699,7 +1700,7 @@ mod json {
                     None
                 },
                 phase: if data.scanning {
-                    Some(data.phase.clone())
+                    Some(data.phase.as_str().to_string())
                 } else {
                     None
                 },
@@ -2778,7 +2779,7 @@ fn transform_json_keys(json: &str) -> String {
         |_| json.to_string(),
         |value| {
             let transformed = transform_value(value);
-            serde_json::to_string(&transformed).unwrap_or_else(|_| json.to_string())
+            serde_json::to_string(&transformed).expect("transformed JSON value must serialize")
         },
     )
 }
@@ -2809,299 +2810,10 @@ fn transform_value(value: serde_json::Value) -> serde_json::Value {
     }
 }
 
-// ============================================================================
-// Helper functions
-// ============================================================================
-
-/// Helper function to create an empty successful response.
-#[must_use]
-pub const fn ok_empty(format: Format) -> SubsonicResponse {
-    SubsonicResponse::empty(format)
-}
-
-/// Helper function to create a license response.
-#[must_use]
-pub const fn ok_license(format: Format) -> SubsonicResponse {
-    SubsonicResponse::license(format)
-}
-
-/// Helper function to create an error response.
+/// Create an error response.
 #[must_use]
 pub fn error_response(format: Format, error: &ApiError) -> SubsonicResponse {
     SubsonicResponse::error(format, error)
-}
-
-/// Helper function to create an `OpenSubsonic` extensions response.
-#[must_use]
-pub fn ok_open_subsonic_extensions(format: Format) -> SubsonicResponse {
-    SubsonicResponse::open_subsonic_extensions(format, supported_extensions())
-}
-
-/// Helper function to create a music folders response.
-#[must_use]
-pub const fn ok_music_folders(
-    format: Format,
-    folders: Vec<MusicFolderResponse>,
-) -> SubsonicResponse {
-    SubsonicResponse::music_folders(format, folders)
-}
-
-/// Helper function to create an indexes response.
-#[must_use]
-pub const fn ok_indexes(format: Format, indexes: IndexesResponse) -> SubsonicResponse {
-    SubsonicResponse::indexes(format, indexes)
-}
-
-/// Helper function to create an artists response.
-#[must_use]
-pub const fn ok_artists(format: Format, artists: ArtistsID3Response) -> SubsonicResponse {
-    SubsonicResponse::artists(format, artists)
-}
-
-/// Helper function to create an album response.
-#[must_use]
-pub const fn ok_album(format: Format, album: AlbumWithSongsID3Response) -> SubsonicResponse {
-    SubsonicResponse::album(format, album)
-}
-
-/// Helper function to create an artist response.
-#[must_use]
-pub const fn ok_artist(format: Format, artist: ArtistWithAlbumsID3Response) -> SubsonicResponse {
-    SubsonicResponse::artist(format, artist)
-}
-
-/// Helper function to create a song response.
-#[must_use]
-pub const fn ok_song(format: Format, song: ChildResponse) -> SubsonicResponse {
-    SubsonicResponse::song(format, song)
-}
-
-/// Helper function to create an album list2 response.
-#[must_use]
-pub const fn ok_album_list2(format: Format, album_list2: AlbumList2Response) -> SubsonicResponse {
-    SubsonicResponse::album_list2(format, album_list2)
-}
-
-/// Helper function to create a genres response.
-#[must_use]
-pub const fn ok_genres(format: Format, genres: GenresResponse) -> SubsonicResponse {
-    SubsonicResponse::genres(format, genres)
-}
-
-/// Helper function to create a search result3 response.
-#[must_use]
-pub const fn ok_search_result3(
-    format: Format,
-    search_result3: SearchResult3Response,
-) -> SubsonicResponse {
-    SubsonicResponse::search_result3(format, search_result3)
-}
-
-/// Helper function to create a starred2 response.
-#[must_use]
-pub const fn ok_starred2(format: Format, starred2: Starred2Response) -> SubsonicResponse {
-    SubsonicResponse::starred2(format, starred2)
-}
-
-/// Helper function to create a now playing response.
-#[must_use]
-pub const fn ok_now_playing(format: Format, now_playing: NowPlayingResponse) -> SubsonicResponse {
-    SubsonicResponse::now_playing(format, now_playing)
-}
-
-/// Helper function to create a random songs response.
-#[must_use]
-pub const fn ok_random_songs(
-    format: Format,
-    random_songs: RandomSongsResponse,
-) -> SubsonicResponse {
-    SubsonicResponse::random_songs(format, random_songs)
-}
-
-/// Helper function to create a songs by genre response.
-#[must_use]
-pub const fn ok_songs_by_genre(
-    format: Format,
-    songs_by_genre: SongsByGenreResponse,
-) -> SubsonicResponse {
-    SubsonicResponse::songs_by_genre(format, songs_by_genre)
-}
-
-/// Helper function to create a playlists response.
-#[must_use]
-pub const fn ok_playlists(format: Format, playlists: PlaylistsResponse) -> SubsonicResponse {
-    SubsonicResponse::playlists(format, playlists)
-}
-
-/// Helper function to create a playlist with songs response.
-#[must_use]
-pub const fn ok_playlist(format: Format, playlist: PlaylistWithSongsResponse) -> SubsonicResponse {
-    SubsonicResponse::playlist(format, playlist)
-}
-
-/// Helper function to create a play queue response.
-#[must_use]
-pub const fn ok_play_queue(format: Format, play_queue: PlayQueueResponse) -> SubsonicResponse {
-    SubsonicResponse::play_queue(format, play_queue)
-}
-
-/// Helper function to create a play queue by index response (`OpenSubsonic`).
-#[must_use]
-pub const fn ok_play_queue_by_index(
-    format: Format,
-    play_queue_by_index: PlayQueueByIndexResponse,
-) -> SubsonicResponse {
-    SubsonicResponse::play_queue_by_index(format, play_queue_by_index)
-}
-
-/// Helper function to create a remote session response (`OpenSubsonic`).
-#[must_use]
-pub const fn ok_remote_session(
-    format: Format,
-    remote_session: RemoteSessionResponse,
-) -> SubsonicResponse {
-    SubsonicResponse::remote_session(format, remote_session)
-}
-
-/// Helper function to create a remote commands response (`OpenSubsonic`).
-#[must_use]
-pub const fn ok_remote_commands(
-    format: Format,
-    remote_commands: RemoteCommandsResponse,
-) -> SubsonicResponse {
-    SubsonicResponse::remote_commands(format, remote_commands)
-}
-
-/// Helper function to create a remote state response (`OpenSubsonic`).
-#[must_use]
-pub const fn ok_remote_state(
-    format: Format,
-    remote_state: RemoteStateResponse,
-) -> SubsonicResponse {
-    SubsonicResponse::remote_state(format, remote_state)
-}
-
-/// Helper function to create a token info response (`OpenSubsonic`).
-#[must_use]
-pub const fn ok_token_info(format: Format, token_info: TokenInfoResponse) -> SubsonicResponse {
-    SubsonicResponse::token_info(format, token_info)
-}
-
-/// Helper function to create a user response.
-#[must_use]
-pub const fn ok_user(format: Format, user: UserResponse) -> SubsonicResponse {
-    SubsonicResponse::user(format, user)
-}
-
-/// Helper function to create a users response.
-#[must_use]
-pub const fn ok_users(format: Format, users: UsersResponse) -> SubsonicResponse {
-    SubsonicResponse::users(format, users)
-}
-
-/// Helper function to create a scan status response.
-#[must_use]
-pub const fn ok_scan_status(format: Format, data: ScanStatusData) -> SubsonicResponse {
-    SubsonicResponse::scan_status(format, data)
-}
-
-/// Helper function to create an empty bookmarks response.
-#[must_use]
-pub const fn ok_bookmarks(format: Format) -> SubsonicResponse {
-    SubsonicResponse::bookmarks(format)
-}
-
-/// Helper function to create an artist info2 response.
-#[must_use]
-pub const fn ok_artist_info2(
-    format: Format,
-    artist_info2: ArtistInfo2Response,
-) -> SubsonicResponse {
-    SubsonicResponse::artist_info2(format, artist_info2)
-}
-
-/// Helper function to create an album info response.
-#[must_use]
-pub const fn ok_album_info(format: Format, album_info: AlbumInfoResponse) -> SubsonicResponse {
-    SubsonicResponse::album_info(format, album_info)
-}
-
-/// Helper function to create a similar songs2 response.
-#[must_use]
-pub const fn ok_similar_songs2(
-    format: Format,
-    similar_songs2: SimilarSongs2Response,
-) -> SubsonicResponse {
-    SubsonicResponse::similar_songs2(format, similar_songs2)
-}
-
-/// Helper function to create a top songs response.
-#[must_use]
-pub const fn ok_top_songs(format: Format, top_songs: TopSongsResponse) -> SubsonicResponse {
-    SubsonicResponse::top_songs(format, top_songs)
-}
-
-/// Helper function to create a lyrics response.
-#[must_use]
-pub const fn ok_lyrics(format: Format, lyrics: LyricsResponse) -> SubsonicResponse {
-    SubsonicResponse::lyrics(format, lyrics)
-}
-
-/// Helper function to create a lyrics list response (getLyricsBySongId - `OpenSubsonic`).
-#[must_use]
-pub const fn ok_lyrics_list(format: Format, lyrics_list: LyricsListResponse) -> SubsonicResponse {
-    SubsonicResponse::lyrics_list(format, lyrics_list)
-}
-
-/// Helper function to create a directory response (getMusicDirectory).
-#[must_use]
-pub const fn ok_directory(format: Format, directory: DirectoryResponse) -> SubsonicResponse {
-    SubsonicResponse::directory(format, directory)
-}
-
-/// Helper function to create an album list response (getAlbumList).
-#[must_use]
-pub const fn ok_album_list(format: Format, album_list: AlbumListResponse) -> SubsonicResponse {
-    SubsonicResponse::album_list(format, album_list)
-}
-
-/// Helper function to create a starred response (getStarred).
-#[must_use]
-pub const fn ok_starred(format: Format, starred: StarredResponse) -> SubsonicResponse {
-    SubsonicResponse::starred(format, starred)
-}
-
-/// Helper function to create a search result2 response (search2).
-#[must_use]
-pub const fn ok_search_result2(
-    format: Format,
-    search_result2: SearchResult2Response,
-) -> SubsonicResponse {
-    SubsonicResponse::search_result2(format, search_result2)
-}
-
-/// Helper function to create a search result response (search).
-#[must_use]
-pub const fn ok_search_result(
-    format: Format,
-    search_result: SearchResultResponse,
-) -> SubsonicResponse {
-    SubsonicResponse::search_result(format, search_result)
-}
-
-/// Helper function to create an artist info response (getArtistInfo).
-#[must_use]
-pub const fn ok_artist_info(format: Format, artist_info: ArtistInfoResponse) -> SubsonicResponse {
-    SubsonicResponse::artist_info(format, artist_info)
-}
-
-/// Helper function to create a similar songs response (getSimilarSongs).
-#[must_use]
-pub const fn ok_similar_songs(
-    format: Format,
-    similar_songs: SimilarSongsResponse,
-) -> SubsonicResponse {
-    SubsonicResponse::similar_songs(format, similar_songs)
 }
 
 #[cfg(test)]

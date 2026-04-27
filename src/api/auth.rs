@@ -401,6 +401,33 @@ pub trait AuthState: Send + Sync + 'static {
     ) -> crate::models::music::ArtistInfoResponse;
 }
 
+/// Shared authentication state handle.
+#[derive(Clone)]
+pub struct AuthStateHandle(Arc<dyn AuthState>);
+
+impl AuthStateHandle {
+    /// Create a shared state handle.
+    pub fn new(state: Arc<dyn AuthState>) -> Self {
+        Self(state)
+    }
+}
+
+impl std::fmt::Debug for AuthStateHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("AuthStateHandle")
+            .field(&"<dyn AuthState>")
+            .finish()
+    }
+}
+
+impl std::ops::Deref for AuthStateHandle {
+    type Target = dyn AuthState;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_ref()
+    }
+}
+
 /// Common query parameters for all Subsonic API requests.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
@@ -440,14 +467,13 @@ impl AuthParams {
 
     /// Decode password if it's hex-encoded (prefixed with "enc:").
     #[must_use]
-    pub fn decode_password(password: &str) -> String {
+    pub fn decode_password(password: &str) -> Option<String> {
         password.strip_prefix("enc:").map_or_else(
-            || password.to_string(),
+            || Some(password.to_string()),
             |hex_encoded| {
                 hex::decode(hex_encoded)
                     .ok()
                     .and_then(|bytes| String::from_utf8(bytes).ok())
-                    .unwrap_or_else(|| password.to_string())
             },
         )
     }
@@ -519,7 +545,7 @@ pub struct SubsonicAuth {
     /// Common Subsonic authentication parameters.
     pub params: AuthParams,
     /// Reference to the auth state for accessing repositories
-    pub(crate) state: Arc<dyn AuthState>,
+    pub(crate) state: AuthStateHandle,
 }
 
 impl std::fmt::Debug for SubsonicAuth {
@@ -549,7 +575,7 @@ impl IntoResponse for AuthError {
 impl<S> FromRequest<S> for SubsonicAuth
 where
     S: Send + Sync,
-    Arc<dyn AuthState>: FromRef<S>,
+    AuthStateHandle: FromRef<S>,
 {
     type Rejection = AuthError;
 
@@ -572,7 +598,13 @@ where
             let req = Request::from_parts(parts.clone(), body);
             match Form::<AuthParams>::from_request(req, state).await {
                 Ok(Form(form_params)) => query_params.merge_with(form_params),
-                Err(_) => query_params, // If form parsing fails, just use query params
+                Err(e) => {
+                    tracing::warn!(error = %e, "form auth parameter parsing failed");
+                    return Err(AuthError {
+                        error: ApiError::MissingParameter("valid form body".into()),
+                        format: query_params.format(),
+                    });
+                }
             }
         } else {
             query_params
@@ -615,7 +647,7 @@ where
         }
 
         // Get auth state
-        let auth_state = Arc::<dyn AuthState>::from_ref(state);
+        let auth_state = AuthStateHandle::from_ref(state);
 
         // Check for conflicting auth mechanisms
         if params.uses_api_key() && params.uses_user_auth() {
@@ -668,8 +700,8 @@ where
                 user.verify_token(token, salt)
             } else if let Some(password) = &params.p {
                 // Legacy password authentication - use Argon2
-                let decoded = AuthParams::decode_password(password);
-                user.verify_password(&decoded)
+                AuthParams::decode_password(password)
+                    .is_some_and(|decoded| user.verify_password(&decoded))
             } else {
                 return Err(AuthError {
                     error: ApiError::MissingParameter(
@@ -1835,11 +1867,14 @@ mod tests {
         // "password" in hex is "70617373776f7264"
         let encoded = "enc:70617373776f7264";
         let decoded = AuthParams::decode_password(encoded);
-        assert_eq!(decoded, "password");
+        assert_eq!(decoded.as_deref(), Some("password"));
 
         // Plain password should be returned as-is
         let plain = "password";
-        assert_eq!(AuthParams::decode_password(plain), "password");
+        assert_eq!(
+            AuthParams::decode_password(plain).as_deref(),
+            Some("password")
+        );
     }
 
     #[test]
@@ -1911,9 +1946,9 @@ mod tests {
     }
 
     #[test]
-    fn invalid_hex_password_returns_original_input() {
-        assert_eq!(AuthParams::decode_password("enc:not-hex"), "enc:not-hex");
-        assert_eq!(AuthParams::decode_password("enc:ff"), "enc:ff");
+    fn invalid_hex_password_returns_none() {
+        assert_eq!(AuthParams::decode_password("enc:not-hex"), None);
+        assert_eq!(AuthParams::decode_password("enc:ff"), None);
     }
 
     #[test]

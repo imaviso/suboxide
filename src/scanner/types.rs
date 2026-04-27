@@ -19,6 +19,9 @@ pub enum ScanError {
 
     #[error("Music folder not found: {0}")]
     FolderNotFound(String),
+
+    #[error("Failed to read metadata for {path}: {message}")]
+    Metadata { path: PathBuf, message: String },
 }
 
 /// Supported audio file extensions.

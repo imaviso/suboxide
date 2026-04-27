@@ -28,15 +28,15 @@ pub struct MusicFolder {
 pub struct MusicFolderResponse {
     #[serde(rename = "@id")]
     pub id: i32,
-    #[serde(rename = "@name", skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
+    #[serde(rename = "@name")]
+    pub name: String,
 }
 
 impl From<&MusicFolder> for MusicFolderResponse {
     fn from(folder: &MusicFolder) -> Self {
         Self {
             id: folder.id,
-            name: Some(folder.name.clone()),
+            name: folder.name.clone(),
         }
     }
 }

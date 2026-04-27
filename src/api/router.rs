@@ -48,7 +48,8 @@ where
         T: 'static,
     {
         let view_path = format!("{path}.view");
-        self.route(path, get(handler.clone()).post(handler.clone()))
+        let base_handler = handler.clone();
+        self.route(path, get(base_handler.clone()).post(base_handler))
             .route(&view_path, get(handler.clone()).post(handler))
     }
 }

@@ -13,10 +13,12 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use suboxide::api::{AuthState, DatabaseAuthState, SubsonicRouterExt, handlers};
-use suboxide::crypto::hash_password;
+use suboxide::api::auth::AuthStateHandle;
+use suboxide::api::{DatabaseAuthState, SubsonicRouterExt, handlers};
+use suboxide::crypto::{PasswordError, hash_password};
 use suboxide::db::{
-    DbConfig, DbPool, MusicFolderRepository, NewUser, UserRepository, UserUpdate, run_migrations,
+    DbConfig, DbPool, MusicFolderRepository, NewUser, UserRepoError, UserRepository, UserUpdate,
+    run_migrations,
 };
 use suboxide::lastfm::LastFmClient;
 use suboxide::models::music::NewMusicFolder;
@@ -263,10 +265,10 @@ impl AppState {
     }
 }
 
-// Allow extracting Arc<dyn AuthState> from AppState
-impl FromRef<AppState> for Arc<dyn AuthState> {
+// Allow extracting auth state from AppState.
+impl FromRef<AppState> for AuthStateHandle {
     fn from_ref(state: &AppState) -> Self {
-        Arc::clone(&state.auth) as _
+        Self::new(Arc::clone(&state.auth) as _)
     }
 }
 
@@ -409,12 +411,20 @@ fn setup_database(database_path: impl AsRef<std::path::Path>) -> Result<DbPool, 
     Ok(pool)
 }
 
+#[derive(Debug, thiserror::Error)]
+enum CreateUserError {
+    #[error(transparent)]
+    Password(#[from] PasswordError),
+    #[error(transparent)]
+    Repository(#[from] UserRepoError),
+}
+
 fn create_user(
     pool: &DbPool,
     username: &str,
     password: &str,
     admin: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), CreateUserError> {
     let password_hash = hash_password(password)?;
     let repo = UserRepository::new(pool.clone());
 
@@ -432,10 +442,7 @@ fn create_user(
             );
             Ok(())
         }
-        Err(e) => {
-            eprintln!("Failed to create user: {e}");
-            Err(Box::new(e))
-        }
+        Err(e) => Err(e.into()),
     }
 }
 
@@ -477,7 +484,8 @@ async fn main() {
                 password,
                 admin,
             } => {
-                if create_user(&pool, &username, &password, admin).is_err() {
+                if let Err(e) = create_user(&pool, &username, &password, admin) {
+                    tracing::error!(error = %e, username = %username, "failed to create user");
                     std::process::exit(1);
                 }
             }
@@ -996,7 +1004,7 @@ async fn main() {
 /// Errors that can occur during server startup.
 #[derive(Debug)]
 enum ServerError {
-    UserCheck(Box<dyn std::error::Error + Send + Sync + 'static>),
+    UserCheck(UserRepoError),
     Bind(std::io::Error),
     LocalAddr(std::io::Error),
     Serve(std::io::Error),
@@ -1016,7 +1024,7 @@ impl std::fmt::Display for ServerError {
 impl std::error::Error for ServerError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::UserCheck(e) => Some(e.as_ref()),
+            Self::UserCheck(e) => Some(e),
             Self::Bind(e) | Self::LocalAddr(e) | Self::Serve(e) => Some(e),
         }
     }
@@ -1030,9 +1038,7 @@ async fn run_server(
 ) -> Result<(), ServerError> {
     // Check if there are any users
     let repo = UserRepository::new(pool.clone());
-    let has_users = repo
-        .has_users()
-        .map_err(|e| ServerError::UserCheck(Box::new(e)))?;
+    let has_users = repo.has_users().map_err(ServerError::UserCheck)?;
     if !has_users {
         tracing::event!(
             name: "server.bootstrap.no_users",

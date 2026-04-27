@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use crate::api::auth::{AuthParams, SubsonicAuth};
 use crate::api::error::ApiError;
-use crate::api::response::{error_response, ok_empty, ok_user, ok_users};
+use crate::api::response::{SubsonicResponse, error_response};
 use crate::models::user::{UserResponse, UserRoles, UsersResponse};
 
 /// Query parameters for getUser.
@@ -38,7 +38,7 @@ pub async fn get_user(
     match auth.state.get_user(username) {
         Some(user) => {
             let response = UserResponse::from(&user);
-            ok_user(auth.format, response)
+            SubsonicResponse::user(auth.format, response)
         }
         None => error_response(auth.format, &ApiError::NotFound("User not found".into())),
     }
@@ -60,7 +60,7 @@ pub async fn get_users(auth: SubsonicAuth) -> impl IntoResponse {
         users: user_responses,
     };
 
-    ok_users(auth.format, response)
+    SubsonicResponse::users(auth.format, response)
 }
 
 /// Query parameters for deleteUser.
@@ -99,7 +99,7 @@ pub async fn delete_user(
     }
 
     match auth.state.delete_user(username) {
-        Ok(true) => ok_empty(auth.format),
+        Ok(true) => SubsonicResponse::empty(auth.format),
         Ok(false) => error_response(auth.format, &ApiError::NotFound("User not found".into())),
         Err(e) => error_response(auth.format, &ApiError::Generic(e)),
     }
@@ -144,10 +144,12 @@ pub async fn change_password(
     }
 
     // Decode password if hex-encoded
-    let decoded_password = AuthParams::decode_password(password);
+    let Some(decoded_password) = AuthParams::decode_password(password) else {
+        return error_response(auth.format, &ApiError::WrongCredentials);
+    };
 
     match auth.state.change_password(username, &decoded_password) {
-        Ok(()) => ok_empty(auth.format),
+        Ok(()) => SubsonicResponse::empty(auth.format),
         Err(e) => error_response(auth.format, &ApiError::Generic(e)),
     }
 }
@@ -222,7 +224,9 @@ pub async fn create_user(
     };
 
     // Decode password if hex-encoded
-    let decoded_password = AuthParams::decode_password(password);
+    let Some(decoded_password) = AuthParams::decode_password(password) else {
+        return error_response(auth.format, &ApiError::WrongCredentials);
+    };
 
     // Apply default values per the Subsonic API spec
     let roles = UserRoles {
@@ -244,7 +248,7 @@ pub async fn create_user(
         .state
         .create_user(username, &decoded_password, email, roles)
     {
-        Ok(_) => ok_empty(auth.format),
+        Ok(_) => SubsonicResponse::empty(auth.format),
         Err(e) => error_response(auth.format, &ApiError::Generic(e)),
     }
 }
@@ -307,10 +311,11 @@ pub async fn update_user(
     };
 
     // Decode password if provided and hex-encoded
-    let decoded_password = params
-        .password
-        .as_ref()
-        .map(|p| AuthParams::decode_password(p));
+    let decoded_password = match params.password.as_deref().map(AuthParams::decode_password) {
+        Some(Some(password)) => Some(password),
+        Some(None) => return error_response(auth.format, &ApiError::WrongCredentials),
+        None => None,
+    };
 
     match auth.state.update_user(
         username,
@@ -330,7 +335,7 @@ pub async fn update_user(
         params.video_conversion_role,
         params.max_bit_rate,
     ) {
-        Ok(()) => ok_empty(auth.format),
+        Ok(()) => SubsonicResponse::empty(auth.format),
         Err(e) => error_response(auth.format, &ApiError::Generic(e)),
     }
 }

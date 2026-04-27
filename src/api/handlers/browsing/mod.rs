@@ -34,5 +34,5 @@ pub use search::{search, search2, search3};
 #[serde(default)]
 pub struct IdParams {
     /// The ID of the item to retrieve.
-    pub id: Option<String>,
+    pub id: Option<i32>,
 }

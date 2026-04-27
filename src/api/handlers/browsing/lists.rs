@@ -5,10 +5,7 @@ use serde::Deserialize;
 
 use crate::api::auth::SubsonicAuth;
 use crate::api::error::ApiError;
-use crate::api::response::{
-    error_response, ok_album_list, ok_album_list2, ok_genres, ok_random_songs, ok_similar_songs,
-    ok_similar_songs2, ok_songs_by_genre, ok_starred, ok_top_songs,
-};
+use crate::api::response::{SubsonicResponse, error_response};
 use crate::models::music::{
     AlbumID3Response, AlbumList2Response, AlbumListResponse, ArtistResponse, ChildResponse,
     GenreResponse, GenresResponse, RandomSongsResponse, SimilarSongs2Response,
@@ -108,7 +105,7 @@ pub async fn get_album_list2(
         albums: album_responses,
     };
 
-    ok_album_list2(auth.format, response).into_response()
+    SubsonicResponse::album_list2(auth.format, response).into_response()
 }
 
 /// GET/POST /rest/getAlbumList[.view]
@@ -178,7 +175,7 @@ pub async fn get_album_list(
         albums: album_responses,
     };
 
-    ok_album_list(auth.format, response).into_response()
+    SubsonicResponse::album_list(auth.format, response).into_response()
 }
 
 /// GET/POST /rest/getGenres[.view]
@@ -199,7 +196,7 @@ pub async fn get_genres(auth: SubsonicAuth) -> impl IntoResponse {
         genres: genre_responses,
     };
 
-    ok_genres(auth.format, response)
+    SubsonicResponse::genres(auth.format, response)
 }
 
 /// Query parameters for getRandomSongs.
@@ -257,7 +254,7 @@ pub async fn get_random_songs(
         songs: song_responses,
     };
 
-    ok_random_songs(auth.format, response)
+    SubsonicResponse::random_songs(auth.format, response)
 }
 
 /// Query parameters for getSongsByGenre.
@@ -313,7 +310,7 @@ pub async fn get_songs_by_genre(
         songs: song_responses,
     };
 
-    ok_songs_by_genre(auth.format, response).into_response()
+    SubsonicResponse::songs_by_genre(auth.format, response).into_response()
 }
 
 /// Query parameters for getTopSongs.
@@ -366,7 +363,7 @@ pub async fn get_top_songs(
         songs: song_responses,
     };
 
-    ok_top_songs(auth.format, response).into_response()
+    SubsonicResponse::top_songs(auth.format, response).into_response()
 }
 
 /// Query parameters for getSimilarSongs2.
@@ -374,7 +371,7 @@ pub async fn get_top_songs(
 #[serde(default)]
 pub struct SimilarSongs2Params {
     /// The song/album/artist ID.
-    pub id: Option<String>,
+    pub id: Option<i32>,
     /// Max number of similar songs to return. Default 50.
     pub count: Option<i64>,
 }
@@ -388,7 +385,7 @@ pub async fn get_similar_songs2(
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
-    let Some(id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+    let Some(id) = params.id else {
         return error_response(auth.format, &ApiError::MissingParameter("id".into()))
             .into_response();
     };
@@ -439,7 +436,7 @@ pub async fn get_similar_songs2(
         songs: song_responses,
     };
 
-    ok_similar_songs2(auth.format, response).into_response()
+    SubsonicResponse::similar_songs2(auth.format, response).into_response()
 }
 
 /// GET/POST /rest/getSimilarSongs[.view]
@@ -450,7 +447,7 @@ pub async fn get_similar_songs(
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
-    let Some(id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+    let Some(id) = params.id else {
         return error_response(auth.format, &ApiError::MissingParameter("id".into()))
             .into_response();
     };
@@ -497,7 +494,7 @@ pub async fn get_similar_songs(
         songs: song_responses,
     };
 
-    ok_similar_songs(auth.format, response).into_response()
+    SubsonicResponse::similar_songs(auth.format, response).into_response()
 }
 
 /// GET/POST /rest/getStarred[.view]
@@ -539,7 +536,7 @@ pub async fn get_starred(auth: SubsonicAuth) -> impl IntoResponse {
         songs: song_responses,
     };
 
-    ok_starred(auth.format, response)
+    SubsonicResponse::starred(auth.format, response)
 }
 
 #[cfg(test)]

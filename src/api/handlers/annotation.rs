@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 use crate::api::auth::SubsonicAuth;
 use crate::api::error::ApiError;
-use crate::api::response::{error_response, ok_empty, ok_now_playing, ok_starred2};
+use crate::api::response::{SubsonicResponse, error_response};
 use crate::models::music::{
     NowPlayingEntryResponse, NowPlayingResponse, Starred2Response, StarredAlbumID3Response,
     StarredArtistID3Response, StarredChildResponse,
@@ -87,7 +87,7 @@ pub async fn star(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoRes
         }
     }
 
-    ok_empty(auth.format)
+    SubsonicResponse::empty(auth.format)
 }
 
 /// GET/POST /rest/unstar[.view]
@@ -148,7 +148,7 @@ pub async fn unstar(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoR
         }
     }
 
-    ok_empty(auth.format)
+    SubsonicResponse::empty(auth.format)
 }
 
 /// GET/POST /rest/getStarred2[.view]
@@ -199,7 +199,7 @@ pub async fn get_starred2(auth: SubsonicAuth) -> impl IntoResponse {
         songs,
     };
 
-    ok_starred2(auth.format, response)
+    SubsonicResponse::starred2(auth.format, response)
 }
 
 /// GET/POST /rest/scrobble[.view]
@@ -261,7 +261,7 @@ pub async fn scrobble(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl Int
         }
     }
 
-    ok_empty(auth.format)
+    SubsonicResponse::empty(auth.format)
 }
 
 /// GET/POST /rest/getNowPlaying[.view]
@@ -286,7 +286,7 @@ pub async fn get_now_playing(auth: SubsonicAuth) -> impl IntoResponse {
         entries: entry_responses,
     };
 
-    ok_now_playing(auth.format, response)
+    SubsonicResponse::now_playing(auth.format, response)
 }
 
 // ============================================================================
@@ -349,5 +349,5 @@ pub async fn set_rating(
         // Don't return an error - the API spec says this should succeed silently
     }
 
-    ok_empty(auth.format).into_response()
+    SubsonicResponse::empty(auth.format).into_response()
 }

@@ -187,30 +187,28 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
 
     // Migration: Add api_key column if it doesn't exist (for existing databases)
     // SQLite doesn't have a simple "ADD COLUMN IF NOT EXISTS" so we check first
-    let has_api_key: Result<i32, _> = diesel::sql_query(
+    let has_api_key = diesel::sql_query(
         "SELECT COUNT(*) as cnt FROM pragma_table_info('users') WHERE name = 'api_key'",
     )
     .get_result::<CountResult>(conn)
-    .map(|r| r.cnt);
+    .map(|r| r.cnt)?;
 
-    if has_api_key.unwrap_or(0) == 0 {
-        // Column doesn't exist, try to add it
-        let _ = diesel::sql_query("ALTER TABLE users ADD COLUMN api_key TEXT").execute(conn);
+    if has_api_key == 0 {
+        diesel::sql_query("ALTER TABLE users ADD COLUMN api_key TEXT").execute(conn)?;
     }
 
     // Migration: Add lastfm_session_key column if it doesn't exist
-    let has_lastfm_session_key: Result<i32, _> = diesel::sql_query(
+    let has_lastfm_session_key = diesel::sql_query(
         "SELECT COUNT(*) as cnt FROM pragma_table_info('users') WHERE name = 'lastfm_session_key'",
     )
     .get_result::<CountResult>(conn)
-    .map(|r| r.cnt);
+    .map(|r| r.cnt)?;
 
-    if has_lastfm_session_key.unwrap_or(0) == 0 {
-        let _ =
-            diesel::sql_query("ALTER TABLE users ADD COLUMN lastfm_session_key TEXT").execute(conn);
-        let _ = diesel::sql_query(
+    if has_lastfm_session_key == 0 {
+        diesel::sql_query("ALTER TABLE users ADD COLUMN lastfm_session_key TEXT").execute(conn)?;
+        diesel::sql_query(
             "CREATE INDEX IF NOT EXISTS idx_users_lastfm_session ON users(lastfm_session_key) WHERE lastfm_session_key IS NOT NULL"
-        ).execute(conn);
+        ).execute(conn)?;
     }
 
     // Create music_folders table
@@ -315,15 +313,14 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
     .execute(conn)?;
 
     // Migration: Add file_modified_at column if it doesn't exist (for existing databases)
-    let has_file_modified_at: Result<i32, _> = diesel::sql_query(
+    let has_file_modified_at = diesel::sql_query(
         "SELECT COUNT(*) as cnt FROM pragma_table_info('songs') WHERE name = 'file_modified_at'",
     )
     .get_result::<CountResult>(conn)
-    .map(|r| r.cnt);
+    .map(|r| r.cnt)?;
 
-    if has_file_modified_at.unwrap_or(0) == 0 {
-        let _ =
-            diesel::sql_query("ALTER TABLE songs ADD COLUMN file_modified_at BIGINT").execute(conn);
+    if has_file_modified_at == 0 {
+        diesel::sql_query("ALTER TABLE songs ADD COLUMN file_modified_at BIGINT").execute(conn)?;
     }
 
     diesel::sql_query("CREATE INDEX IF NOT EXISTS idx_songs_title ON songs(title)")

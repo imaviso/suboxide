@@ -7,10 +7,10 @@ pub mod response;
 pub mod router;
 
 #[doc(inline)]
-pub use auth::{AuthState, DatabaseAuthState, SubsonicAuth};
+pub use auth::{AuthState, AuthStateHandle, DatabaseAuthState, SubsonicAuth};
 #[doc(inline)]
 pub use error::ApiError;
 #[doc(inline)]
-pub use response::{Format, ok_empty, ok_license};
+pub use response::{Format, SubsonicResponse};
 #[doc(inline)]
 pub use router::SubsonicRouterExt;

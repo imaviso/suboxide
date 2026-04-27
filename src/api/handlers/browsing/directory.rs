@@ -5,7 +5,7 @@ use axum::response::IntoResponse;
 use crate::api::auth::SubsonicAuth;
 use crate::api::error::ApiError;
 use crate::api::handlers::browsing::IdParams;
-use crate::api::response::{error_response, ok_directory};
+use crate::api::response::{SubsonicResponse, error_response};
 use crate::models::music::{ChildResponse, DirectoryResponse};
 
 /// GET/POST /rest/getMusicDirectory[.view]
@@ -18,7 +18,7 @@ pub async fn get_music_directory(
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
-    let Some(id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+    let Some(id) = params.id else {
         return error_response(auth.format, &ApiError::MissingParameter("id".into()))
             .into_response();
     };
@@ -29,7 +29,7 @@ pub async fn get_music_directory(
         let songs = auth.state.get_songs_by_album(id);
         let children: Vec<ChildResponse> = songs.iter().map(ChildResponse::from).collect();
         let response = DirectoryResponse::from_album(&album, children);
-        return ok_directory(auth.format, response).into_response();
+        return SubsonicResponse::directory(auth.format, response).into_response();
     }
 
     // Check if it's an artist
@@ -40,7 +40,7 @@ pub async fn get_music_directory(
             .map(ChildResponse::from_album_as_dir)
             .collect();
         let response = DirectoryResponse::from_artist(&artist, children);
-        return ok_directory(auth.format, response).into_response();
+        return SubsonicResponse::directory(auth.format, response).into_response();
     }
 
     // Check if it's a music folder
@@ -53,7 +53,7 @@ pub async fn get_music_directory(
             .map(ChildResponse::from_artist_as_dir)
             .collect();
         let response = DirectoryResponse::from_music_folder(folder, children);
-        return ok_directory(auth.format, response).into_response();
+        return SubsonicResponse::directory(auth.format, response).into_response();
     }
 
     error_response(auth.format, &ApiError::NotFound("Directory".into())).into_response()
