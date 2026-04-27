@@ -268,7 +268,7 @@ impl AppState {
 // Allow extracting auth state from AppState.
 impl FromRef<AppState> for AuthStateHandle {
     fn from_ref(state: &AppState) -> Self {
-        Self::new(Arc::clone(&state.auth) as _)
+        Self::new(Arc::clone(&state.auth))
     }
 }
 

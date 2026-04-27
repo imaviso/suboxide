@@ -246,7 +246,7 @@ pub async fn create_user(
 
     match auth
         .state
-        .create_user(username, &decoded_password, email, roles)
+        .create_user(username, &decoded_password, email, &roles)
     {
         Ok(_) => SubsonicResponse::empty(auth.format),
         Err(e) => error_response(auth.format, &ApiError::Generic(e)),
