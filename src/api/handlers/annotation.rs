@@ -1,11 +1,12 @@
 //! Annotation-related API handlers (star, unstar, getStarred2, scrobble, getNowPlaying, setRating, etc.)
 use axum::extract::RawQuery;
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 
-use crate::api::auth::SubsonicAuth;
+use crate::api::auth::{SubsonicAuth, saturating_i64_to_i32};
 use crate::api::error::ApiError;
-use crate::api::response::{SubsonicResponse, error_response};
+use crate::api::handlers::{repo_error_response, repo_result_or_response};
+use crate::api::response::{Format, SubsonicResponse, error_response};
 use crate::models::music::{
     NowPlayingEntryResponse, NowPlayingResponse, Starred2Response, StarredAlbumID3Response,
     StarredArtistID3Response, StarredChildResponse,
@@ -29,6 +30,27 @@ fn parse_repeated_param(query: &str, param_name: &str) -> Vec<String> {
     values
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "Err variant is axum Response used for immediate early-return"
+)]
+fn parse_i32_list(format: Format, values: &[String], param: &str) -> Result<Vec<i32>, Response> {
+    let mut ids = Vec::with_capacity(values.len());
+    for value in values {
+        match value.parse::<i32>() {
+            Ok(id) => ids.push(id),
+            Err(_) => {
+                return Err(error_response(
+                    format,
+                    &ApiError::Generic(format!("Invalid {param}: {value}")),
+                )
+                .into_response());
+            }
+        }
+    }
+    Ok(ids)
+}
+
 /// GET/POST /rest/star[.view]
 ///
 /// Stars one or more artists, albums, or songs.
@@ -37,57 +59,40 @@ pub async fn star(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoRes
     let query = query.unwrap_or_default();
     let user_id = auth.user.id;
 
-    // Parse repeated parameters
-    let song_ids = parse_repeated_param(&query, "id");
-    let album_ids = parse_repeated_param(&query, "albumId");
-    let artist_ids = parse_repeated_param(&query, "artistId");
+    let artist_id_strs = parse_repeated_param(&query, "artistId");
+    let album_id_strs = parse_repeated_param(&query, "albumId");
+    let song_id_strs = parse_repeated_param(&query, "id");
 
-    // Star artists
-    for artist_id_str in &artist_ids {
-        if let Ok(artist_id) = artist_id_str.parse::<i32>()
-            && let Err(e) = auth.state.star_artist(user_id, artist_id)
-        {
-            tracing::event!(
-                name: "annotation.star_artist.failed",
-                tracing::Level::WARN,
-                artist.id = artist_id,
-                error = %e,
-                "failed to star artist"
-            );
+    let artist_ids = match parse_i32_list(auth.format, &artist_id_strs, "artistId") {
+        Ok(ids) => ids,
+        Err(response) => return response,
+    };
+    let album_ids = match parse_i32_list(auth.format, &album_id_strs, "albumId") {
+        Ok(ids) => ids,
+        Err(response) => return response,
+    };
+    let song_ids = match parse_i32_list(auth.format, &song_id_strs, "id") {
+        Ok(ids) => ids,
+        Err(response) => return response,
+    };
+
+    for artist_id in &artist_ids {
+        if let Err(error) = auth.state().star_artist(user_id, *artist_id) {
+            return repo_error_response(auth.format, error);
+        }
+    }
+    for album_id in &album_ids {
+        if let Err(error) = auth.state().star_album(user_id, *album_id) {
+            return repo_error_response(auth.format, error);
+        }
+    }
+    for song_id in &song_ids {
+        if let Err(error) = auth.state().star_song(user_id, *song_id) {
+            return repo_error_response(auth.format, error);
         }
     }
 
-    // Star albums
-    for album_id_str in &album_ids {
-        if let Ok(album_id) = album_id_str.parse::<i32>()
-            && let Err(e) = auth.state.star_album(user_id, album_id)
-        {
-            tracing::event!(
-                name: "annotation.star_album.failed",
-                tracing::Level::WARN,
-                album.id = album_id,
-                error = %e,
-                "failed to star album"
-            );
-        }
-    }
-
-    // Star songs (id parameter)
-    for song_id_str in &song_ids {
-        if let Ok(song_id) = song_id_str.parse::<i32>()
-            && let Err(e) = auth.state.star_song(user_id, song_id)
-        {
-            tracing::event!(
-                name: "annotation.star_song.failed",
-                tracing::Level::WARN,
-                song.id = song_id,
-                error = %e,
-                "failed to star song"
-            );
-        }
-    }
-
-    SubsonicResponse::empty(auth.format)
+    SubsonicResponse::empty(auth.format).into_response()
 }
 
 /// GET/POST /rest/unstar[.view]
@@ -98,57 +103,40 @@ pub async fn unstar(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoR
     let query = query.unwrap_or_default();
     let user_id = auth.user.id;
 
-    // Parse repeated parameters
-    let song_ids = parse_repeated_param(&query, "id");
-    let album_ids = parse_repeated_param(&query, "albumId");
-    let artist_ids = parse_repeated_param(&query, "artistId");
+    let artist_id_strs = parse_repeated_param(&query, "artistId");
+    let album_id_strs = parse_repeated_param(&query, "albumId");
+    let song_id_strs = parse_repeated_param(&query, "id");
 
-    // Unstar artists
-    for artist_id_str in &artist_ids {
-        if let Ok(artist_id) = artist_id_str.parse::<i32>()
-            && let Err(e) = auth.state.unstar_artist(user_id, artist_id)
-        {
-            tracing::event!(
-                name: "annotation.unstar_artist.failed",
-                tracing::Level::WARN,
-                artist.id = artist_id,
-                error = %e,
-                "failed to unstar artist"
-            );
+    let artist_ids = match parse_i32_list(auth.format, &artist_id_strs, "artistId") {
+        Ok(ids) => ids,
+        Err(response) => return response,
+    };
+    let album_ids = match parse_i32_list(auth.format, &album_id_strs, "albumId") {
+        Ok(ids) => ids,
+        Err(response) => return response,
+    };
+    let song_ids = match parse_i32_list(auth.format, &song_id_strs, "id") {
+        Ok(ids) => ids,
+        Err(response) => return response,
+    };
+
+    for artist_id in &artist_ids {
+        if let Err(error) = auth.state().unstar_artist(user_id, *artist_id) {
+            return repo_error_response(auth.format, error);
+        }
+    }
+    for album_id in &album_ids {
+        if let Err(error) = auth.state().unstar_album(user_id, *album_id) {
+            return repo_error_response(auth.format, error);
+        }
+    }
+    for song_id in &song_ids {
+        if let Err(error) = auth.state().unstar_song(user_id, *song_id) {
+            return repo_error_response(auth.format, error);
         }
     }
 
-    // Unstar albums
-    for album_id_str in &album_ids {
-        if let Ok(album_id) = album_id_str.parse::<i32>()
-            && let Err(e) = auth.state.unstar_album(user_id, album_id)
-        {
-            tracing::event!(
-                name: "annotation.unstar_album.failed",
-                tracing::Level::WARN,
-                album.id = album_id,
-                error = %e,
-                "failed to unstar album"
-            );
-        }
-    }
-
-    // Unstar songs (id parameter)
-    for song_id_str in &song_ids {
-        if let Ok(song_id) = song_id_str.parse::<i32>()
-            && let Err(e) = auth.state.unstar_song(user_id, song_id)
-        {
-            tracing::event!(
-                name: "annotation.unstar_song.failed",
-                tracing::Level::WARN,
-                song.id = song_id,
-                error = %e,
-                "failed to unstar song"
-            );
-        }
-    }
-
-    SubsonicResponse::empty(auth.format)
+    SubsonicResponse::empty(auth.format).into_response()
 }
 
 /// GET/POST /rest/getStarred2[.view]
@@ -158,12 +146,19 @@ pub async fn unstar(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoR
 pub async fn get_starred2(auth: SubsonicAuth) -> impl IntoResponse {
     let user_id = auth.user.id;
 
-    // Get starred artists
-    let starred_artists = auth.state.get_starred_artists(user_id);
-
-    // Get album counts for all starred artists in a single batch query
+    let starred_artists =
+        match repo_result_or_response(auth.format, auth.state().get_starred_artists(user_id)) {
+            Ok(v) => v,
+            Err(response) => return response,
+        };
     let artist_ids: Vec<i32> = starred_artists.iter().map(|(a, _)| a.id).collect();
-    let album_counts = auth.state.get_artist_album_counts_batch(&artist_ids);
+    let album_counts = match repo_result_or_response(
+        auth.format,
+        auth.state().get_artist_album_counts_batch(&artist_ids),
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
 
     let artists: Vec<StarredArtistID3Response> = starred_artists
         .iter()
@@ -171,14 +166,17 @@ pub async fn get_starred2(auth: SubsonicAuth) -> impl IntoResponse {
             let album_count = album_counts.get(&artist.id).copied().unwrap_or(0);
             StarredArtistID3Response::from_artist_and_starred(
                 artist,
-                Some(i32::try_from(album_count).unwrap_or(0)),
+                Some(saturating_i64_to_i32(album_count)),
                 starred_at,
             )
         })
         .collect();
 
-    // Get starred albums
-    let starred_albums = auth.state.get_starred_albums(user_id);
+    let starred_albums =
+        match repo_result_or_response(auth.format, auth.state().get_starred_albums(user_id)) {
+            Ok(v) => v,
+            Err(response) => return response,
+        };
     let albums: Vec<StarredAlbumID3Response> = starred_albums
         .iter()
         .map(|(album, starred_at)| {
@@ -186,8 +184,11 @@ pub async fn get_starred2(auth: SubsonicAuth) -> impl IntoResponse {
         })
         .collect();
 
-    // Get starred songs
-    let starred_songs = auth.state.get_starred_songs(user_id);
+    let starred_songs =
+        match repo_result_or_response(auth.format, auth.state().get_starred_songs(user_id)) {
+            Ok(v) => v,
+            Err(response) => return response,
+        };
     let songs: Vec<StarredChildResponse> = starred_songs
         .iter()
         .map(|(song, starred_at)| StarredChildResponse::from_song_and_starred(song, starred_at))
@@ -198,8 +199,7 @@ pub async fn get_starred2(auth: SubsonicAuth) -> impl IntoResponse {
         albums,
         songs,
     };
-
-    SubsonicResponse::starred2(auth.format, response)
+    SubsonicResponse::starred2(auth.format, response).into_response()
 }
 
 /// GET/POST /rest/scrobble[.view]
@@ -215,60 +215,49 @@ pub async fn scrobble(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl Int
     let query = query.unwrap_or_default();
     let user_id = auth.user.id;
 
-    // Parse parameters
-    let song_ids = parse_repeated_param(&query, "id");
+    let song_id_strs = parse_repeated_param(&query, "id");
     let times = parse_repeated_param(&query, "time");
 
-    // Parse submission parameter (default is true)
+    let song_ids = match parse_i32_list(auth.format, &song_id_strs, "id") {
+        Ok(ids) => ids,
+        Err(response) => return response,
+    };
+
     let submission = parse_repeated_param(&query, "submission")
         .first()
         .is_none_or(|s| s != "false" && s != "0");
 
-    // Get player_id from the client identifier
     let player_id = if auth.params.c.is_empty() {
         None
     } else {
         Some(auth.params.c.as_str())
     };
 
-    // Process each song ID
-    for (i, song_id_str) in song_ids.iter().enumerate() {
-        if let Ok(song_id) = song_id_str.parse::<i32>() {
-            // Get the corresponding time if provided
-            let time = times.get(i).and_then(|t| t.parse::<i64>().ok());
+    for (i, song_id) in song_ids.iter().enumerate() {
+        let time = times.get(i).and_then(|t| t.parse::<i64>().ok());
 
-            // Register the scrobble
-            if let Err(e) = auth.state.scrobble(user_id, song_id, time, submission) {
-                tracing::event!(
-                    name: "annotation.scrobble.failed",
-                    tracing::Level::WARN,
-                    song.id = song_id,
-                    error = %e,
-                    "failed to scrobble song"
-                );
-            }
+        if let Err(error) = auth.state().scrobble(user_id, *song_id, time, submission) {
+            return repo_error_response(auth.format, error);
+        }
 
-            // If this is a "now playing" notification (submission=false), also update now playing
-            if !submission && let Err(e) = auth.state.set_now_playing(user_id, song_id, player_id) {
-                tracing::event!(
-                    name: "annotation.now_playing.failed",
-                    tracing::Level::WARN,
-                    song.id = song_id,
-                    error = %e,
-                    "failed to set now playing"
-                );
-            }
+        if !submission
+            && let Err(error) = auth.state().set_now_playing(user_id, *song_id, player_id)
+        {
+            return repo_error_response(auth.format, error);
         }
     }
 
-    SubsonicResponse::empty(auth.format)
+    SubsonicResponse::empty(auth.format).into_response()
 }
 
 /// GET/POST /rest/getNowPlaying[.view]
 ///
 /// Returns what is currently being played by all users.
 pub async fn get_now_playing(auth: SubsonicAuth) -> impl IntoResponse {
-    let entries = auth.state.get_now_playing();
+    let entries = match repo_result_or_response(auth.format, auth.state().get_now_playing()) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
 
     let entry_responses: Vec<NowPlayingEntryResponse> = entries
         .iter()
@@ -286,7 +275,7 @@ pub async fn get_now_playing(auth: SubsonicAuth) -> impl IntoResponse {
         entries: entry_responses,
     };
 
-    SubsonicResponse::now_playing(auth.format, response)
+    SubsonicResponse::now_playing(auth.format, response).into_response()
 }
 
 // ============================================================================
@@ -314,10 +303,16 @@ pub async fn set_rating(
     axum::extract::Query(params): axum::extract::Query<SetRatingParams>,
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
-    // Validate required parameters
-    let Some(id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+    let Some(id_str) = params.id.as_ref() else {
         return error_response(auth.format, &ApiError::MissingParameter("id".into()))
             .into_response();
+    };
+    let Ok(id) = id_str.parse::<i32>() else {
+        return error_response(
+            auth.format,
+            &ApiError::Generic(format!("Invalid id: {id_str}")),
+        )
+        .into_response();
     };
 
     let rating = match params.rating {
@@ -337,17 +332,8 @@ pub async fn set_rating(
 
     let user_id = auth.user.id;
 
-    // Try to set rating (we default to song rating as that's most common)
-    if let Err(e) = auth.state.set_song_rating(user_id, id, rating) {
-        tracing::event!(
-            name: "annotation.rating.failed",
-            tracing::Level::WARN,
-            item.id = id,
-            error = %e,
-            "failed to set rating"
-        );
-        // Don't return an error - the API spec says this should succeed silently
+    match auth.state().set_song_rating(user_id, id, rating) {
+        Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
+        Err(error) => repo_error_response(auth.format, error),
     }
-
-    SubsonicResponse::empty(auth.format).into_response()
 }

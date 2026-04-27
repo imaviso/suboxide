@@ -11,6 +11,7 @@ use tokio_util::io::ReaderStream;
 
 use crate::api::auth::SubsonicAuth;
 use crate::api::error::ApiError;
+use crate::api::handlers::repo_result_or_response;
 use crate::api::response::error_response;
 use crate::models::music::Song;
 use crate::paths::resolve_cover_art_dir;
@@ -27,7 +28,10 @@ fn validate_song_path(song: &Song, auth: &SubsonicAuth) -> Result<PathBuf, &'sta
     };
 
     // Get all music folders and verify the song is within one of them
-    let music_folders = auth.state.get_music_folders();
+    let music_folders = auth
+        .state()
+        .get_music_folders()
+        .map_err(|_e| "Music folder lookup failed")?;
     for folder in &music_folders {
         if let Ok(folder_canonical) = Path::new(&folder.path).canonicalize()
             && canonical_path.starts_with(&folder_canonical)
@@ -37,9 +41,8 @@ fn validate_song_path(song: &Song, auth: &SubsonicAuth) -> Result<PathBuf, &'sta
     }
 
     // Song path is not within any music folder - potential path traversal
-    tracing::event!(
-        name: "media.path_validation.blocked",
-        tracing::Level::WARN,
+    tracing::warn!(
+        name = "media.path_validation.blocked",
         song.id = song.id,
         song.path = %song.path,
         "song path validation failed"
@@ -91,9 +94,13 @@ pub async fn stream(
     };
 
     // Look up song in database
-    let Some(song) = auth.state.get_song(song_id) else {
-        return error_response(auth.format, &ApiError::NotFound("Song not found".into()))
-            .into_response();
+    let song = match repo_result_or_response(auth.format, auth.state().get_song(song_id)) {
+        Ok(Some(song)) => song,
+        Ok(None) => {
+            return error_response(auth.format, &ApiError::NotFound("Song not found".into()))
+                .into_response();
+        }
+        Err(response) => return response,
     };
 
     // Check that user has stream permission
@@ -220,9 +227,13 @@ pub async fn download(
     };
 
     // Look up song in database
-    let Some(song) = auth.state.get_song(song_id) else {
-        return error_response(auth.format, &ApiError::NotFound("Song not found".into()))
-            .into_response();
+    let song = match repo_result_or_response(auth.format, auth.state().get_song(song_id)) {
+        Ok(Some(song)) => song,
+        Ok(None) => {
+            return error_response(auth.format, &ApiError::NotFound("Song not found".into()))
+                .into_response();
+        }
+        Err(response) => return response,
     };
 
     // Check that user has download permission

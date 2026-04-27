@@ -5,20 +5,38 @@ use std::collections::BTreeMap;
 use axum::response::IntoResponse;
 
 use crate::api::auth::SubsonicAuth;
+use crate::api::handlers::repo_result_or_response;
 use crate::api::response::SubsonicResponse;
 use crate::models::music::{
     ArtistID3Response, ArtistResponse, ArtistsID3Response, IndexID3Response, IndexResponse,
     IndexesResponse, MusicFolderResponse,
 };
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "Subsonic album counts are bounded to signed 32-bit fields"
+)]
+fn saturating_i64_to_i32(value: i64) -> i32 {
+    if value > i64::from(i32::MAX) {
+        i32::MAX
+    } else if value < i64::from(i32::MIN) {
+        i32::MIN
+    } else {
+        value as i32
+    }
+}
+
 /// GET/POST /rest/getMusicFolders[.view]
 ///
 /// Returns all configured top-level music folders.
 pub async fn get_music_folders(auth: SubsonicAuth) -> impl IntoResponse {
-    let folders = auth.state.get_music_folders();
+    let folders = match repo_result_or_response(auth.format, auth.state().get_music_folders()) {
+        Ok(folders) => folders,
+        Err(response) => return response,
+    };
     let responses: Vec<MusicFolderResponse> =
         folders.iter().map(MusicFolderResponse::from).collect();
-    SubsonicResponse::music_folders(auth.format, responses)
+    SubsonicResponse::music_folders(auth.format, responses).into_response()
 }
 
 /// GET/POST /rest/getIndexes[.view]
@@ -26,14 +44,22 @@ pub async fn get_music_folders(auth: SubsonicAuth) -> impl IntoResponse {
 /// Returns an indexed structure of all artists.
 /// This is used by older clients that use the folder-based browsing model.
 pub async fn get_indexes(auth: SubsonicAuth) -> impl IntoResponse {
-    let artists = auth.state.get_artists();
+    let artists = match repo_result_or_response(auth.format, auth.state().get_artists()) {
+        Ok(artists) => artists,
+        Err(response) => return response,
+    };
     let user_id = auth.user.id;
 
     // Get starred status for all artists in a single batch query
     let artist_ids: Vec<i32> = artists.iter().map(|a| a.id).collect();
-    let starred_map = auth
-        .state
-        .get_starred_at_for_artists_batch(user_id, &artist_ids);
+    let starred_map = match repo_result_or_response(
+        auth.format,
+        auth.state()
+            .get_starred_at_for_artists_batch(user_id, &artist_ids),
+    ) {
+        Ok(starred_map) => starred_map,
+        Err(response) => return response,
+    };
 
     // Group artists by first letter
     let mut index_map: BTreeMap<String, Vec<ArtistResponse>> = BTreeMap::new();
@@ -71,10 +97,11 @@ pub async fn get_indexes(auth: SubsonicAuth) -> impl IntoResponse {
         .collect();
 
     // Get last modified time (using current timestamp for now)
-    let last_modified = auth
-        .state
-        .get_artists_last_modified()
-        .map_or(0, |dt| dt.and_utc().timestamp_millis());
+    let last_modified =
+        match repo_result_or_response(auth.format, auth.state().get_artists_last_modified()) {
+            Ok(value) => value.map_or(0, |dt| dt.and_utc().timestamp_millis()),
+            Err(response) => return response,
+        };
 
     let response = IndexesResponse {
         ignored_articles: "The El La Los Las Le Les".to_string(),
@@ -82,7 +109,7 @@ pub async fn get_indexes(auth: SubsonicAuth) -> impl IntoResponse {
         indexes,
     };
 
-    SubsonicResponse::indexes(auth.format, response)
+    SubsonicResponse::indexes(auth.format, response).into_response()
 }
 
 /// GET/POST /rest/getArtists[.view]
@@ -90,17 +117,31 @@ pub async fn get_indexes(auth: SubsonicAuth) -> impl IntoResponse {
 /// Similar to getIndexes, but returns artists using ID3 tags.
 /// This is the preferred endpoint for modern clients.
 pub async fn get_artists(auth: SubsonicAuth) -> impl IntoResponse {
-    let artists = auth.state.get_artists();
+    let artists = match repo_result_or_response(auth.format, auth.state().get_artists()) {
+        Ok(artists) => artists,
+        Err(response) => return response,
+    };
     let user_id = auth.user.id;
 
     // Get album counts for all artists in a single batch query
     let artist_ids: Vec<i32> = artists.iter().map(|a| a.id).collect();
-    let album_counts = auth.state.get_artist_album_counts_batch(&artist_ids);
+    let album_counts = match repo_result_or_response(
+        auth.format,
+        auth.state().get_artist_album_counts_batch(&artist_ids),
+    ) {
+        Ok(album_counts) => album_counts,
+        Err(response) => return response,
+    };
 
     // Get starred status for all artists in a single batch query
-    let starred_map = auth
-        .state
-        .get_starred_at_for_artists_batch(user_id, &artist_ids);
+    let starred_map = match repo_result_or_response(
+        auth.format,
+        auth.state()
+            .get_starred_at_for_artists_batch(user_id, &artist_ids),
+    ) {
+        Ok(starred_map) => starred_map,
+        Err(response) => return response,
+    };
 
     // Group artists by first letter
     let mut index_map: BTreeMap<String, Vec<ArtistID3Response>> = BTreeMap::new();
@@ -132,7 +173,7 @@ pub async fn get_artists(auth: SubsonicAuth) -> impl IntoResponse {
             .or_default()
             .push(ArtistID3Response::from_artist_with_starred(
                 artist,
-                Some(i32::try_from(album_count).unwrap_or(0)),
+                Some(saturating_i64_to_i32(album_count)),
                 starred_at,
             ));
     }
@@ -148,5 +189,5 @@ pub async fn get_artists(auth: SubsonicAuth) -> impl IntoResponse {
         indexes,
     };
 
-    SubsonicResponse::artists(auth.format, response)
+    SubsonicResponse::artists(auth.format, response).into_response()
 }

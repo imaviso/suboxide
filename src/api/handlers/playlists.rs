@@ -5,6 +5,7 @@ use serde::Deserialize;
 
 use crate::api::auth::SubsonicAuth;
 use crate::api::error::ApiError;
+use crate::api::handlers::repo_result_or_response;
 use crate::api::response::{SubsonicResponse, error_response};
 use crate::models::music::{
     ChildResponse, PlaylistResponse, PlaylistWithSongsResponse, PlaylistsResponse,
@@ -48,12 +49,20 @@ pub async fn get_playlists(
     let user_id = auth.user.id;
     let username = &auth.user.username;
 
-    // Get playlists for the user (including public playlists from others)
-    let playlists = auth.state.get_playlists(user_id, username);
+    let playlists =
+        match repo_result_or_response(auth.format, auth.state().get_playlists(user_id, username)) {
+            Ok(v) => v,
+            Err(response) => return response,
+        };
 
-    // Batch fetch cover art for all playlists
     let playlist_ids: Vec<i32> = playlists.iter().map(|p| p.id).collect();
-    let cover_arts = auth.state.get_playlist_cover_arts_batch(&playlist_ids);
+    let cover_arts = match repo_result_or_response(
+        auth.format,
+        auth.state().get_playlist_cover_arts_batch(&playlist_ids),
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
 
     let playlist_responses: Vec<PlaylistResponse> = playlists
         .iter()
@@ -78,7 +87,7 @@ pub async fn get_playlists(
         playlists: playlist_responses,
     };
 
-    SubsonicResponse::playlists(auth.format, response)
+    SubsonicResponse::playlists(auth.format, response).into_response()
 }
 
 /// Query parameters for getPlaylist.
@@ -96,30 +105,48 @@ pub async fn get_playlist(
     axum::extract::Query(params): axum::extract::Query<GetPlaylistParams>,
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
-    let Some(playlist_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+    let Some(id_str) = params.id.as_ref() else {
         return error_response(auth.format, &ApiError::MissingParameter("id".into()))
             .into_response();
     };
-
-    // Get the playlist
-    let Some(playlist) = auth.state.get_playlist(playlist_id) else {
-        return error_response(auth.format, &ApiError::NotFound("Playlist".into())).into_response();
+    let Ok(playlist_id) = id_str.parse::<i32>() else {
+        return error_response(
+            auth.format,
+            &ApiError::Generic(format!("Invalid id: {id_str}")),
+        )
+        .into_response();
     };
 
-    // Check access: user must own the playlist or it must be public
+    let playlist =
+        match repo_result_or_response(auth.format, auth.state().get_playlist(playlist_id)) {
+            Ok(Some(p)) => p,
+            Ok(None) => {
+                return error_response(auth.format, &ApiError::NotFound("Playlist".into()))
+                    .into_response();
+            }
+            Err(response) => return response,
+        };
+
     if playlist.owner != auth.user.username && !playlist.public {
         return error_response(auth.format, &ApiError::NotAuthorized).into_response();
     }
 
-    // Get the songs in the playlist
-    let songs = auth.state.get_playlist_songs(playlist_id);
+    let songs =
+        match repo_result_or_response(auth.format, auth.state().get_playlist_songs(playlist_id)) {
+            Ok(v) => v,
+            Err(response) => return response,
+        };
     let user_id = auth.user.id;
 
-    // Batch fetch starred status for all songs
     let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
-    let starred_map = auth
-        .state
-        .get_starred_at_for_songs_batch(user_id, &song_ids);
+    let starred_map = match repo_result_or_response(
+        auth.format,
+        auth.state()
+            .get_starred_at_for_songs_batch(user_id, &song_ids),
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
 
     let song_responses: Vec<ChildResponse> = songs
         .iter()
@@ -129,7 +156,6 @@ pub async fn get_playlist(
         })
         .collect();
 
-    // Derive cover art from first song
     let cover_art = songs.first().and_then(|s| s.cover_art.clone());
 
     let response = PlaylistWithSongsResponse {
@@ -180,84 +206,98 @@ pub async fn create_playlist(
     let query = query.unwrap_or_default();
     let user_id = auth.user.id;
 
-    // Parse song IDs from repeated parameters
-    let song_ids: Vec<i32> = parse_repeated_param(&query, "songId")
-        .iter()
-        .filter_map(|id| id.parse::<i32>().ok())
-        .collect();
+    let song_id_strs = parse_repeated_param(&query, "songId");
+    let song_ids = match crate::api::handlers::parse_i32_list(auth.format, &song_id_strs, "songId")
+    {
+        Ok(ids) => ids,
+        Err(response) => return response,
+    };
 
-    // Check if we're updating an existing playlist or creating a new one
     if let Some(playlist_id_str) = params.playlist_id.as_ref() {
-        // Update existing playlist
         let Ok(playlist_id) = playlist_id_str.parse::<i32>() else {
             return error_response(auth.format, &ApiError::Generic("Invalid playlistId".into()))
                 .into_response();
         };
 
-        // Check ownership
-        if !auth.state.is_playlist_owner(user_id, playlist_id) {
-            return error_response(auth.format, &ApiError::NotAuthorized).into_response();
-        }
-
-        // Update: add songs to existing playlist
-        if let Err(e) = auth.state.update_playlist(
-            playlist_id,
-            params.name.as_deref(),
-            None, // comment
-            None, // public
-            &song_ids,
-            &[], // no songs to remove
+        match repo_result_or_response(
+            auth.format,
+            auth.state().is_playlist_owner(user_id, playlist_id),
         ) {
-            tracing::event!(
-                name: "playlist.update.failed",
-                tracing::Level::WARN,
-                playlist.id = playlist_id,
-                error = %e,
-                "playlist update failed"
-            );
-            return error_response(auth.format, &ApiError::Generic(e)).into_response();
+            Ok(true) => {}
+            Ok(false) => {
+                return error_response(auth.format, &ApiError::NotAuthorized).into_response();
+            }
+            Err(response) => return response,
         }
 
-        // Return the updated playlist
-        if let Some(playlist) = auth.state.get_playlist(playlist_id) {
-            let songs = auth.state.get_playlist_songs(playlist_id);
+        if let Err(response) = repo_result_or_response(
+            auth.format,
+            auth.state().update_playlist(
+                playlist_id,
+                params.name.as_deref(),
+                None,
+                None,
+                &song_ids,
+                &[],
+            ),
+        ) {
+            return response;
+        }
 
-            // Batch fetch starred status for all songs
-            let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
-            let starred_map = auth
-                .state
-                .get_starred_at_for_songs_batch(user_id, &song_ids);
-
-            let song_responses: Vec<ChildResponse> = songs
-                .iter()
-                .map(|s| {
-                    let starred_at = starred_map.get(&s.id);
-                    ChildResponse::from_song_with_starred(s, starred_at)
-                })
-                .collect();
-
-            // Derive cover art from first song
-            let cover_art = songs.first().and_then(|s| s.cover_art.clone());
-
-            let response = PlaylistWithSongsResponse {
-                id: playlist.id.to_string(),
-                name: playlist.name.clone(),
-                comment: playlist.comment.clone(),
-                owner: playlist.owner.clone(),
-                public: playlist.public,
-                song_count: playlist.song_count,
-                duration: playlist.duration,
-                created: format_subsonic_datetime(&playlist.created_at),
-                changed: format_subsonic_datetime(&playlist.updated_at),
-                cover_art,
-                entries: song_responses,
+        let playlist =
+            match repo_result_or_response(auth.format, auth.state().get_playlist(playlist_id)) {
+                Ok(Some(p)) => p,
+                Ok(None) => {
+                    return error_response(auth.format, &ApiError::NotFound("Playlist".into()))
+                        .into_response();
+                }
+                Err(response) => return response,
             };
+        let songs = match repo_result_or_response(
+            auth.format,
+            auth.state().get_playlist_songs(playlist_id),
+        ) {
+            Ok(v) => v,
+            Err(response) => return response,
+        };
 
-            return SubsonicResponse::playlist(auth.format, response).into_response();
-        }
+        let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
+        let starred_map = match repo_result_or_response(
+            auth.format,
+            auth.state()
+                .get_starred_at_for_songs_batch(user_id, &song_ids),
+        ) {
+            Ok(v) => v,
+            Err(response) => return response,
+        };
+
+        let song_responses: Vec<ChildResponse> = songs
+            .iter()
+            .map(|s| {
+                let starred_at = starred_map.get(&s.id);
+                ChildResponse::from_song_with_starred(s, starred_at)
+            })
+            .collect();
+
+        let cover_art = songs.first().and_then(|s| s.cover_art.clone());
+
+        let response = PlaylistWithSongsResponse {
+            id: playlist.id.to_string(),
+            name: playlist.name.clone(),
+            comment: playlist.comment.clone(),
+            owner: playlist.owner.clone(),
+            public: playlist.public,
+            song_count: playlist.song_count,
+            duration: playlist.duration,
+            created: format_subsonic_datetime(&playlist.created_at),
+            changed: format_subsonic_datetime(&playlist.updated_at),
+            cover_art,
+            entries: song_responses,
+        };
+
+        return SubsonicResponse::playlist(auth.format, response).into_response();
     }
 
-    // Create new playlist
     let name = match params.name.as_deref() {
         Some(n) if !n.is_empty() => n,
         _ => {
@@ -266,53 +306,55 @@ pub async fn create_playlist(
         }
     };
 
-    match auth.state.create_playlist(user_id, name, None, &song_ids) {
-        Ok(playlist) => {
-            let songs = auth.state.get_playlist_songs(playlist.id);
+    let playlist = match repo_result_or_response(
+        auth.format,
+        auth.state().create_playlist(user_id, name, None, &song_ids),
+    ) {
+        Ok(p) => p,
+        Err(response) => return response,
+    };
 
-            // Batch fetch starred status for all songs
-            let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
-            let starred_map = auth
-                .state
-                .get_starred_at_for_songs_batch(user_id, &song_ids);
+    let songs =
+        match repo_result_or_response(auth.format, auth.state().get_playlist_songs(playlist.id)) {
+            Ok(v) => v,
+            Err(response) => return response,
+        };
 
-            let song_responses: Vec<ChildResponse> = songs
-                .iter()
-                .map(|s| {
-                    let starred_at = starred_map.get(&s.id);
-                    ChildResponse::from_song_with_starred(s, starred_at)
-                })
-                .collect();
+    let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
+    let starred_map = match repo_result_or_response(
+        auth.format,
+        auth.state()
+            .get_starred_at_for_songs_batch(user_id, &song_ids),
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
 
-            // Derive cover art from first song
-            let cover_art = songs.first().and_then(|s| s.cover_art.clone());
+    let song_responses: Vec<ChildResponse> = songs
+        .iter()
+        .map(|s| {
+            let starred_at = starred_map.get(&s.id);
+            ChildResponse::from_song_with_starred(s, starred_at)
+        })
+        .collect();
 
-            let response = PlaylistWithSongsResponse {
-                id: playlist.id.to_string(),
-                name: playlist.name.clone(),
-                comment: playlist.comment.clone(),
-                owner: playlist.owner.clone(),
-                public: playlist.public,
-                song_count: playlist.song_count,
-                duration: playlist.duration,
-                created: format_subsonic_datetime(&playlist.created_at),
-                changed: format_subsonic_datetime(&playlist.updated_at),
-                cover_art,
-                entries: song_responses,
-            };
+    let cover_art = songs.first().and_then(|s| s.cover_art.clone());
 
-            SubsonicResponse::playlist(auth.format, response).into_response()
-        }
-        Err(e) => {
-            tracing::event!(
-                name: "playlist.create.failed",
-                tracing::Level::WARN,
-                error = %e,
-                "playlist creation failed"
-            );
-            error_response(auth.format, &ApiError::Generic(e)).into_response()
-        }
-    }
+    let response = PlaylistWithSongsResponse {
+        id: playlist.id.to_string(),
+        name: playlist.name.clone(),
+        comment: playlist.comment.clone(),
+        owner: playlist.owner.clone(),
+        public: playlist.public,
+        song_count: playlist.song_count,
+        duration: playlist.duration,
+        created: format_subsonic_datetime(&playlist.created_at),
+        changed: format_subsonic_datetime(&playlist.updated_at),
+        cover_art,
+        entries: song_responses,
+    };
+
+    SubsonicResponse::playlist(auth.format, response).into_response()
 }
 
 /// Query parameters for updatePlaylist.
@@ -349,53 +391,64 @@ pub async fn update_playlist(
     let query = query.unwrap_or_default();
     let user_id = auth.user.id;
 
-    let Some(playlist_id) = params
-        .playlist_id
-        .as_ref()
-        .and_then(|id| id.parse::<i32>().ok())
-    else {
+    let Some(id_str) = params.playlist_id.as_ref() else {
         return error_response(
             auth.format,
             &ApiError::MissingParameter("playlistId".into()),
         )
         .into_response();
     };
+    let Ok(playlist_id) = id_str.parse::<i32>() else {
+        return error_response(
+            auth.format,
+            &ApiError::Generic(format!("Invalid playlistId: {id_str}")),
+        )
+        .into_response();
+    };
 
-    // Check ownership
-    if !auth.state.is_playlist_owner(user_id, playlist_id) {
-        return error_response(auth.format, &ApiError::NotAuthorized).into_response();
-    }
-
-    // Parse song IDs to add and indices to remove
-    let songs_to_add: Vec<i32> = parse_repeated_param(&query, "songIdToAdd")
-        .iter()
-        .filter_map(|id| id.parse::<i32>().ok())
-        .collect();
-
-    let indices_to_remove: Vec<i32> = parse_repeated_param(&query, "songIndexToRemove")
-        .iter()
-        .filter_map(|id| id.parse::<i32>().ok())
-        .collect();
-
-    if let Err(e) = auth.state.update_playlist(
-        playlist_id,
-        params.name.as_deref(),
-        params.comment.as_deref(),
-        params.public,
-        &songs_to_add,
-        &indices_to_remove,
+    match repo_result_or_response(
+        auth.format,
+        auth.state().is_playlist_owner(user_id, playlist_id),
     ) {
-        tracing::event!(
-            name: "playlist.update.failed",
-            tracing::Level::WARN,
-            playlist.id = playlist_id,
-            error = %e,
-            "playlist update failed"
-        );
-        return error_response(auth.format, &ApiError::Generic(e)).into_response();
+        Ok(true) => {}
+        Ok(false) => return error_response(auth.format, &ApiError::NotAuthorized).into_response(),
+        Err(response) => return response,
     }
 
-    SubsonicResponse::empty(auth.format).into_response()
+    let songs_to_add_strs = parse_repeated_param(&query, "songIdToAdd");
+    let songs_to_add = match crate::api::handlers::parse_i32_list(
+        auth.format,
+        &songs_to_add_strs,
+        "songIdToAdd",
+    ) {
+        Ok(ids) => ids,
+        Err(response) => return response,
+    };
+
+    let indices_to_remove_strs = parse_repeated_param(&query, "songIndexToRemove");
+    let indices_to_remove = match crate::api::handlers::parse_i32_list(
+        auth.format,
+        &indices_to_remove_strs,
+        "songIndexToRemove",
+    ) {
+        Ok(ids) => ids,
+        Err(response) => return response,
+    };
+
+    match repo_result_or_response(
+        auth.format,
+        auth.state().update_playlist(
+            playlist_id,
+            params.name.as_deref(),
+            params.comment.as_deref(),
+            params.public,
+            &songs_to_add,
+            &indices_to_remove,
+        ),
+    ) {
+        Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
+        Err(response) => response,
+    }
 }
 
 /// Query parameters for deletePlaylist.
@@ -413,32 +466,34 @@ pub async fn delete_playlist(
     axum::extract::Query(params): axum::extract::Query<DeletePlaylistParams>,
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
-    let Some(playlist_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+    let Some(id_str) = params.id.as_ref() else {
         return error_response(auth.format, &ApiError::MissingParameter("id".into()))
             .into_response();
+    };
+    let Ok(playlist_id) = id_str.parse::<i32>() else {
+        return error_response(
+            auth.format,
+            &ApiError::Generic(format!("Invalid id: {id_str}")),
+        )
+        .into_response();
     };
 
     let user_id = auth.user.id;
 
-    // Check ownership
-    if !auth.state.is_playlist_owner(user_id, playlist_id) {
-        return error_response(auth.format, &ApiError::NotAuthorized).into_response();
+    match repo_result_or_response(
+        auth.format,
+        auth.state().is_playlist_owner(user_id, playlist_id),
+    ) {
+        Ok(true) => {}
+        Ok(false) => return error_response(auth.format, &ApiError::NotAuthorized).into_response(),
+        Err(response) => return response,
     }
 
-    match auth.state.delete_playlist(playlist_id) {
+    match repo_result_or_response(auth.format, auth.state().delete_playlist(playlist_id)) {
         Ok(true) => SubsonicResponse::empty(auth.format).into_response(),
         Ok(false) => {
             error_response(auth.format, &ApiError::NotFound("Playlist".into())).into_response()
         }
-        Err(e) => {
-            tracing::event!(
-                name: "playlist.delete.failed",
-                tracing::Level::WARN,
-                playlist.id = playlist_id,
-                error = %e,
-                "playlist deletion failed"
-            );
-            error_response(auth.format, &ApiError::Generic(e)).into_response()
-        }
+        Err(response) => response,
     }
 }

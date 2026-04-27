@@ -4,6 +4,7 @@ use axum::response::IntoResponse;
 use serde::Deserialize;
 
 use crate::api::auth::SubsonicAuth;
+use crate::api::handlers::repo_result_or_response;
 use crate::api::response::SubsonicResponse;
 use crate::models::music::{
     AlbumID3Response, ArtistID3Response, ArtistResponse, ChildResponse, SearchMatch,
@@ -60,30 +61,65 @@ pub async fn search3(
     let song_count = params.song_count.unwrap_or(20).clamp(0, 500);
     let song_offset = params.song_offset.unwrap_or(0).max(0);
 
-    // Search for artists, albums, and songs
-    let artists = auth
-        .state
-        .search_artists(query, artist_offset, artist_count);
-    let albums = auth.state.search_albums(query, album_offset, album_count);
-    let songs = auth.state.search_songs(query, song_offset, song_count);
+    let artists = match repo_result_or_response(
+        auth.format,
+        auth.state()
+            .search_artists(query, artist_offset, artist_count),
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
+    let albums = match repo_result_or_response(
+        auth.format,
+        auth.state().search_albums(query, album_offset, album_count),
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
+    let songs = match repo_result_or_response(
+        auth.format,
+        auth.state().search_songs(query, song_offset, song_count),
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
 
-    // Collect IDs for batch queries
     let user_id = auth.user.id;
     let artist_ids: Vec<i32> = artists.iter().map(|a| a.id).collect();
     let album_ids: Vec<i32> = albums.iter().map(|a| a.id).collect();
     let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
 
-    // Batch fetch album counts and starred status
-    let artist_album_counts = auth.state.get_artist_album_counts_batch(&artist_ids);
-    let starred_artists = auth
-        .state
-        .get_starred_at_for_artists_batch(user_id, &artist_ids);
-    let starred_albums = auth
-        .state
-        .get_starred_at_for_albums_batch(user_id, &album_ids);
-    let starred_songs = auth
-        .state
-        .get_starred_at_for_songs_batch(user_id, &song_ids);
+    let artist_album_counts = match repo_result_or_response(
+        auth.format,
+        auth.state().get_artist_album_counts_batch(&artist_ids),
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
+    let starred_artists = match repo_result_or_response(
+        auth.format,
+        auth.state()
+            .get_starred_at_for_artists_batch(user_id, &artist_ids),
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
+    let starred_albums = match repo_result_or_response(
+        auth.format,
+        auth.state()
+            .get_starred_at_for_albums_batch(user_id, &album_ids),
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
+    let starred_songs = match repo_result_or_response(
+        auth.format,
+        auth.state()
+            .get_starred_at_for_songs_batch(user_id, &song_ids),
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
 
     // Convert to response types with starred status from batch results
     let artist_responses: Vec<ArtistID3Response> = artists
@@ -170,29 +206,58 @@ pub async fn search2(
     let song_count = params.song_count.unwrap_or(20).clamp(0, 500);
     let song_offset = params.song_offset.unwrap_or(0).max(0);
 
-    // Search for artists, albums, and songs
-    let artists = auth
-        .state
-        .search_artists(query, artist_offset, artist_count);
-    let albums = auth.state.search_albums(query, album_offset, album_count);
-    let songs = auth.state.search_songs(query, song_offset, song_count);
+    let artists = match repo_result_or_response(
+        auth.format,
+        auth.state()
+            .search_artists(query, artist_offset, artist_count),
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
+    let albums = match repo_result_or_response(
+        auth.format,
+        auth.state().search_albums(query, album_offset, album_count),
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
+    let songs = match repo_result_or_response(
+        auth.format,
+        auth.state().search_songs(query, song_offset, song_count),
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
 
-    // Collect IDs for batch queries
     let user_id = auth.user.id;
     let artist_ids: Vec<i32> = artists.iter().map(|a| a.id).collect();
     let album_ids: Vec<i32> = albums.iter().map(|a| a.id).collect();
     let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
 
-    // Batch fetch starred status
-    let starred_artists = auth
-        .state
-        .get_starred_at_for_artists_batch(user_id, &artist_ids);
-    let starred_albums = auth
-        .state
-        .get_starred_at_for_albums_batch(user_id, &album_ids);
-    let starred_songs = auth
-        .state
-        .get_starred_at_for_songs_batch(user_id, &song_ids);
+    let starred_artists = match repo_result_or_response(
+        auth.format,
+        auth.state()
+            .get_starred_at_for_artists_batch(user_id, &artist_ids),
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
+    let starred_albums = match repo_result_or_response(
+        auth.format,
+        auth.state()
+            .get_starred_at_for_albums_batch(user_id, &album_ids),
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
+    let starred_songs = match repo_result_or_response(
+        auth.format,
+        auth.state()
+            .get_starred_at_for_songs_batch(user_id, &song_ids),
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
 
     // Convert to non-ID3 response types
     let artist_responses: Vec<ArtistResponse> = artists
@@ -271,8 +336,12 @@ pub async fn search(
         .unwrap_or("")
         .trim();
 
-    // Search for songs (legacy search only returns songs as matches)
-    let songs = auth.state.search_songs(query, offset, count);
+    let songs =
+        match repo_result_or_response(auth.format, auth.state().search_songs(query, offset, count))
+        {
+            Ok(v) => v,
+            Err(response) => return response,
+        };
 
     let matches: Vec<SearchMatch> = songs.iter().map(SearchMatch::from).collect();
     #[expect(

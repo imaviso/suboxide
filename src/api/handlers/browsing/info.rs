@@ -6,6 +6,7 @@ use serde::Deserialize;
 use crate::api::auth::SubsonicAuth;
 use crate::api::error::ApiError;
 use crate::api::handlers::browsing::IdParams;
+use crate::api::handlers::repo_result_or_response;
 use crate::api::response::{SubsonicResponse, error_response};
 use crate::models::music::{
     AlbumInfoResponse, LyricLine, LyricsListResponse, LyricsResponse, StructuredLyrics,
@@ -39,7 +40,13 @@ pub async fn get_artist_info2(
     };
 
     // Get the artist
-    let response = auth.state.get_artist_info_with_cache(artist_id);
+    let response = match repo_result_or_response(
+        auth.format,
+        auth.state().get_artist_info_with_cache(artist_id),
+    ) {
+        Ok(response) => response,
+        Err(response) => return response,
+    };
     SubsonicResponse::artist_info2(auth.format, response).into_response()
 }
 
@@ -66,8 +73,13 @@ pub async fn get_album_info2(
     };
 
     // Get the album
-    let Some(album) = auth.state.get_album(album_id) else {
-        return error_response(auth.format, &ApiError::NotFound("Album".into())).into_response();
+    let album = match repo_result_or_response(auth.format, auth.state().get_album(album_id)) {
+        Ok(Some(album)) => album,
+        Ok(None) => {
+            return error_response(auth.format, &ApiError::NotFound("Album".into()))
+                .into_response();
+        }
+        Err(response) => return response,
     };
 
     // Create response with available data from the album
@@ -89,7 +101,13 @@ pub async fn get_artist_info(
     };
 
     // Get the artist info with cache
-    let response = auth.state.get_artist_info_non_id3_with_cache(artist_id);
+    let response = match repo_result_or_response(
+        auth.format,
+        auth.state().get_artist_info_non_id3_with_cache(artist_id),
+    ) {
+        Ok(response) => response,
+        Err(response) => return response,
+    };
     SubsonicResponse::artist_info(auth.format, response).into_response()
 }
 
@@ -107,8 +125,13 @@ pub async fn get_album_info(
     };
 
     // Get the album
-    let Some(album) = auth.state.get_album(album_id) else {
-        return error_response(auth.format, &ApiError::NotFound("Album".into())).into_response();
+    let album = match repo_result_or_response(auth.format, auth.state().get_album(album_id)) {
+        Ok(Some(album)) => album,
+        Ok(None) => {
+            return error_response(auth.format, &ApiError::NotFound("Album".into()))
+                .into_response();
+        }
+        Err(response) => return response,
     };
 
     // Use AlbumInfoResponse which is the same for ID3 and non-ID3
@@ -138,21 +161,29 @@ pub async fn get_lyrics(
 
     // Try to find a song with the requested artist and title
     let mut lyrics_content = None;
-    if !artist.is_empty()
-        && !title.is_empty()
-        && let Some(song) = auth.state.find_song_by_artist_and_title(artist, title)
-    {
-        // Found a song, extract its lyrics
-        let extracted = auth.state.get_song_lyrics(song.id);
-        // Just take the first one and use its text
-        if let Some(lyrics) = extracted.first() {
-            lyrics_content = Some(lyrics.text.clone());
+    if !artist.is_empty() && !title.is_empty() {
+        let maybe_song = match repo_result_or_response(
+            auth.format,
+            auth.state().find_song_by_artist_and_title(artist, title),
+        ) {
+            Ok(song) => song,
+            Err(response) => return response,
+        };
+        if let Some(song) = maybe_song {
+            let extracted =
+                match repo_result_or_response(auth.format, auth.state().get_song_lyrics(song.id)) {
+                    Ok(extracted) => extracted,
+                    Err(response) => return response,
+                };
+            if let Some(lyrics) = extracted.first() {
+                lyrics_content = Some(lyrics.text.clone());
+            }
         }
     }
 
     let response = LyricsResponse::new(params.artist.clone(), params.title.clone(), lyrics_content);
 
-    SubsonicResponse::lyrics(auth.format, response)
+    SubsonicResponse::lyrics(auth.format, response).into_response()
 }
 
 /// GET/POST /rest/getLyricsBySongId[.view]
@@ -173,13 +204,21 @@ pub async fn get_lyrics_by_song_id(
     };
 
     // Get the song (also verifies it exists)
-    let Some(song) = auth.state.get_song(song_id) else {
-        return error_response(auth.format, &ApiError::NotFound("Song not found".into()))
-            .into_response();
+    let song = match repo_result_or_response(auth.format, auth.state().get_song(song_id)) {
+        Ok(Some(song)) => song,
+        Ok(None) => {
+            return error_response(auth.format, &ApiError::NotFound("Song not found".into()))
+                .into_response();
+        }
+        Err(response) => return response,
     };
 
     // Extract lyrics from the audio file
-    let extracted = auth.state.get_song_lyrics(song_id);
+    let extracted =
+        match repo_result_or_response(auth.format, auth.state().get_song_lyrics(song_id)) {
+            Ok(extracted) => extracted,
+            Err(response) => return response,
+        };
 
     // Convert extracted lyrics to OpenSubsonic StructuredLyrics format
     let structured_lyrics: Vec<StructuredLyrics> = extracted

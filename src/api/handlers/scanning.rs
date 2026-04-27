@@ -8,7 +8,7 @@ use crate::scanner::Scanner;
 
 /// Build a `ScanStatusData` from the current scan state.
 fn build_scan_status_data(auth: &SubsonicAuth) -> ScanStatusData {
-    let scan_state = auth.state.get_scan_state();
+    let scan_state = auth.state().get_scan_state();
     ScanStatusData {
         scanning: scan_state.is_scanning(),
         count: scan_state.get_count(),
@@ -25,14 +25,14 @@ fn build_scan_status_data(auth: &SubsonicAuth) -> ScanStatusData {
 ///
 /// Returns: scanStatus with scanning=true/false and count of items scanned.
 pub async fn start_scan(auth: SubsonicAuth) -> impl IntoResponse {
-    let scan_state = auth.state.get_scan_state();
+    let scan_state = auth.state().get_scan_state();
 
     // Try to start a new scan - returns false if one is already running
     if scan_state.try_start() {
         // Reset progress state for this new scan.
         scan_state.reset();
 
-        let pool = auth.state.get_db_pool();
+        let pool = auth.state().get_db_pool();
         let scan_state_for_scanner = scan_state.clone();
         let scan_state_for_finish = scan_state;
 
@@ -50,9 +50,8 @@ pub async fn start_scan(auth: SubsonicAuth) -> impl IntoResponse {
 
             match result {
                 Ok(Ok(stats)) => {
-                    tracing::event!(
-                        name: "scan.manual.completed",
-                        tracing::Level::INFO,
+                    tracing::info!(
+                        name = "scan.manual.completed",
                         tracks.found = stats.tracks_found,
                         tracks.added = stats.tracks_added,
                         tracks.failed = stats.tracks_failed,
@@ -60,17 +59,11 @@ pub async fn start_scan(auth: SubsonicAuth) -> impl IntoResponse {
                     );
                 }
                 Ok(Err(e)) => {
-                    tracing::event!(
-                        name: "scan.manual.failed",
-                        tracing::Level::ERROR,
-                        error = %e,
-                        "manual scan failed"
-                    );
+                    tracing::error!(name = "scan.manual.failed", error = %e, "manual scan failed");
                 }
                 Err(e) => {
-                    tracing::event!(
-                        name: "scan.manual.task_panic",
-                        tracing::Level::ERROR,
+                    tracing::error!(
+                        name = "scan.manual.task_panic",
                         error = %e,
                         "manual scan task panicked"
                     );

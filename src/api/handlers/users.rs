@@ -4,6 +4,7 @@ use serde::Deserialize;
 
 use crate::api::auth::{AuthParams, SubsonicAuth};
 use crate::api::error::ApiError;
+use crate::api::handlers::repo_error_response;
 use crate::api::response::{SubsonicResponse, error_response};
 use crate::models::user::{UserResponse, UserRoles, UsersResponse};
 
@@ -26,21 +27,24 @@ pub async fn get_user(
     let username = match &params.username {
         Some(u) => u.as_str(),
         None => {
-            return error_response(auth.format, &ApiError::MissingParameter("username".into()));
+            return error_response(auth.format, &ApiError::MissingParameter("username".into()))
+                .into_response();
         }
     };
 
     // Non-admins can only query their own user
     if !auth.user.is_admin() && username != auth.user.username {
-        return error_response(auth.format, &ApiError::NotAuthorized);
+        return error_response(auth.format, &ApiError::NotAuthorized).into_response();
     }
 
-    match auth.state.get_user(username) {
-        Some(user) => {
+    match auth.state().get_user(username) {
+        Ok(Some(user)) => {
             let response = UserResponse::from(&user);
-            SubsonicResponse::user(auth.format, response)
+            SubsonicResponse::user(auth.format, response).into_response()
         }
-        None => error_response(auth.format, &ApiError::NotFound("User not found".into())),
+        Ok(None) => error_response(auth.format, &ApiError::NotFound("User not found".into()))
+            .into_response(),
+        Err(error) => repo_error_response(auth.format, error),
     }
 }
 
@@ -50,17 +54,20 @@ pub async fn get_user(
 /// Only users with admin role are allowed to call this method.
 pub async fn get_users(auth: SubsonicAuth) -> impl IntoResponse {
     if !auth.user.is_admin() {
-        return error_response(auth.format, &ApiError::NotAuthorized);
+        return error_response(auth.format, &ApiError::NotAuthorized).into_response();
     }
 
-    let users = auth.state.get_all_users();
+    let users = match auth.state().get_all_users() {
+        Ok(users) => users,
+        Err(error) => return repo_error_response(auth.format, error),
+    };
     let user_responses: Vec<UserResponse> = users.iter().map(UserResponse::from).collect();
 
     let response = UsersResponse {
         users: user_responses,
     };
 
-    SubsonicResponse::users(auth.format, response)
+    SubsonicResponse::users(auth.format, response).into_response()
 }
 
 /// Query parameters for deleteUser.
@@ -80,13 +87,14 @@ pub async fn delete_user(
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     if !auth.user.is_admin() {
-        return error_response(auth.format, &ApiError::NotAuthorized);
+        return error_response(auth.format, &ApiError::NotAuthorized).into_response();
     }
 
     let username = match &params.username {
         Some(u) => u.as_str(),
         None => {
-            return error_response(auth.format, &ApiError::MissingParameter("username".into()));
+            return error_response(auth.format, &ApiError::MissingParameter("username".into()))
+                .into_response();
         }
     };
 
@@ -95,13 +103,15 @@ pub async fn delete_user(
         return error_response(
             auth.format,
             &ApiError::Generic("Cannot delete your own user".into()),
-        );
+        )
+        .into_response();
     }
 
-    match auth.state.delete_user(username) {
-        Ok(true) => SubsonicResponse::empty(auth.format),
-        Ok(false) => error_response(auth.format, &ApiError::NotFound("User not found".into())),
-        Err(e) => error_response(auth.format, &ApiError::Generic(e)),
+    match auth.state().delete_user(username) {
+        Ok(true) => SubsonicResponse::empty(auth.format).into_response(),
+        Ok(false) => error_response(auth.format, &ApiError::NotFound("User not found".into()))
+            .into_response(),
+        Err(error) => repo_error_response(auth.format, error),
     }
 }
 
@@ -127,30 +137,32 @@ pub async fn change_password(
     let username = match &params.username {
         Some(u) => u.as_str(),
         None => {
-            return error_response(auth.format, &ApiError::MissingParameter("username".into()));
+            return error_response(auth.format, &ApiError::MissingParameter("username".into()))
+                .into_response();
         }
     };
 
     let password = match &params.password {
         Some(p) => p.as_str(),
         None => {
-            return error_response(auth.format, &ApiError::MissingParameter("password".into()));
+            return error_response(auth.format, &ApiError::MissingParameter("password".into()))
+                .into_response();
         }
     };
 
     // Non-admins can only change their own password
     if !auth.user.is_admin() && username != auth.user.username {
-        return error_response(auth.format, &ApiError::NotAuthorized);
+        return error_response(auth.format, &ApiError::NotAuthorized).into_response();
     }
 
     // Decode password if hex-encoded
     let Some(decoded_password) = AuthParams::decode_password(password) else {
-        return error_response(auth.format, &ApiError::WrongCredentials);
+        return error_response(auth.format, &ApiError::WrongCredentials).into_response();
     };
 
-    match auth.state.change_password(username, &decoded_password) {
-        Ok(()) => SubsonicResponse::empty(auth.format),
-        Err(e) => error_response(auth.format, &ApiError::Generic(e)),
+    match auth.state().change_password(username, &decoded_password) {
+        Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
+        Err(error) => repo_error_response(auth.format, error),
     }
 }
 
@@ -199,33 +211,36 @@ pub async fn create_user(
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     if !auth.user.is_admin() {
-        return error_response(auth.format, &ApiError::NotAuthorized);
+        return error_response(auth.format, &ApiError::NotAuthorized).into_response();
     }
 
     let username = match &params.username {
         Some(u) => u.as_str(),
         None => {
-            return error_response(auth.format, &ApiError::MissingParameter("username".into()));
+            return error_response(auth.format, &ApiError::MissingParameter("username".into()))
+                .into_response();
         }
     };
 
     let password = match &params.password {
         Some(p) => p.as_str(),
         None => {
-            return error_response(auth.format, &ApiError::MissingParameter("password".into()));
+            return error_response(auth.format, &ApiError::MissingParameter("password".into()))
+                .into_response();
         }
     };
 
     let email = match &params.email {
         Some(e) => e.as_str(),
         None => {
-            return error_response(auth.format, &ApiError::MissingParameter("email".into()));
+            return error_response(auth.format, &ApiError::MissingParameter("email".into()))
+                .into_response();
         }
     };
 
     // Decode password if hex-encoded
     let Some(decoded_password) = AuthParams::decode_password(password) else {
-        return error_response(auth.format, &ApiError::WrongCredentials);
+        return error_response(auth.format, &ApiError::WrongCredentials).into_response();
     };
 
     // Apply default values per the Subsonic API spec
@@ -245,11 +260,11 @@ pub async fn create_user(
     };
 
     match auth
-        .state
+        .state()
         .create_user(username, &decoded_password, email, &roles)
     {
-        Ok(_) => SubsonicResponse::empty(auth.format),
-        Err(e) => error_response(auth.format, &ApiError::Generic(e)),
+        Ok(_) => SubsonicResponse::empty(auth.format).into_response(),
+        Err(error) => repo_error_response(auth.format, error),
     }
 }
 
@@ -300,24 +315,27 @@ pub async fn update_user(
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
     if !auth.user.is_admin() {
-        return error_response(auth.format, &ApiError::NotAuthorized);
+        return error_response(auth.format, &ApiError::NotAuthorized).into_response();
     }
 
     let username = match &params.username {
         Some(u) => u.as_str(),
         None => {
-            return error_response(auth.format, &ApiError::MissingParameter("username".into()));
+            return error_response(auth.format, &ApiError::MissingParameter("username".into()))
+                .into_response();
         }
     };
 
     // Decode password if provided and hex-encoded
     let decoded_password = match params.password.as_deref().map(AuthParams::decode_password) {
         Some(Some(password)) => Some(password),
-        Some(None) => return error_response(auth.format, &ApiError::WrongCredentials),
+        Some(None) => {
+            return error_response(auth.format, &ApiError::WrongCredentials).into_response();
+        }
         None => None,
     };
 
-    match auth.state.update_user(
+    match auth.state().update_user(
         username,
         decoded_password.as_deref(),
         params.email.as_deref(),
@@ -335,7 +353,7 @@ pub async fn update_user(
         params.video_conversion_role,
         params.max_bit_rate,
     ) {
-        Ok(()) => SubsonicResponse::empty(auth.format),
-        Err(e) => error_response(auth.format, &ApiError::Generic(e)),
+        Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
+        Err(error) => repo_error_response(auth.format, error),
     }
 }
