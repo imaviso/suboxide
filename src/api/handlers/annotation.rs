@@ -2,7 +2,7 @@
 use axum::response::IntoResponse;
 use serde::Deserialize;
 
-use crate::api::auth::SubsonicAuth;
+use crate::api::auth::SubsonicContext;
 use crate::api::error::ApiError;
 
 use crate::api::response::{SubsonicResponse, error_response};
@@ -34,7 +34,7 @@ pub struct StarParams {
 /// Supports multiple IDs via repeated parameters: `?id=1&id=2&albumId=3`
 pub async fn star(
     axum::extract::Query(params): axum::extract::Query<StarParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let user_id = auth.user.id;
 
@@ -66,7 +66,7 @@ pub async fn star(
 /// Supports multiple IDs via repeated parameters: `?id=1&id=2&albumId=3`
 pub async fn unstar(
     axum::extract::Query(params): axum::extract::Query<StarParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let user_id = auth.user.id;
 
@@ -96,7 +96,7 @@ pub async fn unstar(
 ///
 /// Returns all starred artists, albums, and songs for the current user.
 /// Uses ID3 tags (artist/album/song structure).
-pub async fn get_starred2(auth: SubsonicAuth) -> impl IntoResponse {
+pub async fn get_starred2(auth: SubsonicContext) -> impl IntoResponse {
     let user_id = auth.user.id;
 
     let starred_artists = match auth.music().get_starred_artists(user_id) {
@@ -178,7 +178,7 @@ pub struct ScrobbleParams {
 /// - `submission` (optional): Whether this is a "scrobble" (true) or a "now playing" notification (false). Default true.
 pub async fn scrobble(
     axum::extract::Query(params): axum::extract::Query<ScrobbleParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let user_id = auth.user.id;
 
@@ -215,7 +215,7 @@ pub async fn scrobble(
 /// GET/POST /rest/getNowPlaying[.view]
 ///
 /// Returns what is currently being played by all users.
-pub async fn get_now_playing(auth: SubsonicAuth) -> impl IntoResponse {
+pub async fn get_now_playing(auth: SubsonicContext) -> impl IntoResponse {
     let entries = match auth.music().get_now_playing() {
         Ok(v) => v,
         Err(e) => {
@@ -265,7 +265,7 @@ pub struct SetRatingParams {
 /// - `rating` (required): The rating (0-5). 0 removes the rating.
 pub async fn set_rating(
     axum::extract::Query(params): axum::extract::Query<SetRatingParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let Some(id_str) = params.id.as_ref() else {
         return error_response(auth.format, &ApiError::MissingParameter("id".into()))

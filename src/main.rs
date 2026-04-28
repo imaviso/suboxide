@@ -2,17 +2,14 @@
 
 use std::path::PathBuf;
 
-use axum::{Router, extract::FromRef};
 use mimalloc::MiMalloc;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 use clap::{Parser, Subcommand};
-use tower_http::cors::{Any, CorsLayer};
-use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use suboxide::api::{SubsonicRouterExt, handlers};
+use suboxide::app::{AppState, create_router};
 use suboxide::crypto::{PasswordError, hash_password};
 use suboxide::db::{
     DbConfig, DbPool, MusicFolderRepository, MusicRepoError, NewUser, UserRepoError,
@@ -20,9 +17,7 @@ use suboxide::db::{
 };
 use suboxide::lastfm::{LastFmClient, LastFmError};
 use suboxide::models::music::NewMusicFolder;
-use suboxide::scanner::{AutoScanner, ScanError, ScanMode, ScanState, ScanStateHandle, Scanner};
-
-use suboxide::api::services::{MusicLibrary, RemoteSessions, Users};
+use suboxide::scanner::{AutoScanner, ScanError, ScanMode, Scanner};
 
 /// Subsonic-compatible music streaming server.
 #[derive(Parser)]
@@ -216,171 +211,6 @@ enum LastfmCommands {
     },
 }
 
-/// Application state shared across all handlers.
-#[derive(Clone, Debug)]
-pub struct AppState {
-    pool: DbPool,
-    scan_state: ScanStateHandle,
-    music: MusicLibrary,
-    users: Users,
-    remote: RemoteSessions,
-}
-
-impl AppState {
-    /// Create a new application state with the given database pool and Last.fm client.
-    #[must_use]
-    pub fn new(pool: DbPool, lastfm_client: Option<LastFmClient>) -> Self {
-        let scan_state = ScanStateHandle::new(ScanState::new());
-        let music = MusicLibrary::new(pool.clone(), lastfm_client);
-        let users = Users::new(pool.clone());
-        let remote = RemoteSessions::new(pool.clone());
-
-        Self {
-            pool,
-            scan_state,
-            music,
-            users,
-            remote,
-        }
-    }
-
-    /// Get the shared scan state for use by `AutoScanner`.
-    #[must_use]
-    pub fn scan_state(&self) -> ScanStateHandle {
-        self.scan_state.clone()
-    }
-}
-
-impl FromRef<AppState> for MusicLibrary {
-    fn from_ref(state: &AppState) -> Self {
-        state.music.clone()
-    }
-}
-
-impl FromRef<AppState> for Users {
-    fn from_ref(state: &AppState) -> Self {
-        state.users.clone()
-    }
-}
-
-impl FromRef<AppState> for RemoteSessions {
-    fn from_ref(state: &AppState) -> Self {
-        state.remote.clone()
-    }
-}
-
-impl FromRef<AppState> for DbPool {
-    fn from_ref(state: &AppState) -> Self {
-        state.pool.clone()
-    }
-}
-
-impl FromRef<AppState> for ScanStateHandle {
-    fn from_ref(state: &AppState) -> Self {
-        state.scan_state.clone()
-    }
-}
-
-/// Create the main router with all Subsonic API routes.
-/// All endpoints support both GET and POST with query-string parameters.
-/// The .view suffix is automatically handled by `SubsonicRouterExt`.
-fn create_router(state: AppState) -> Router {
-    // All endpoints - subsonic_route automatically adds .view suffix and POST method.
-    let rest_routes = Router::new()
-        // System endpoints
-        .subsonic_route("/ping", handlers::ping)
-        .subsonic_route("/getLicense", handlers::get_license)
-        .subsonic_route(
-            "/getOpenSubsonicExtensions",
-            handlers::get_open_subsonic_extensions,
-        )
-        .subsonic_route("/tokenInfo", handlers::token_info)
-        // Bookmarks endpoints
-        .subsonic_route("/getBookmarks", handlers::get_bookmarks)
-        // Browsing endpoints
-        .subsonic_route("/getMusicFolders", handlers::get_music_folders)
-        .subsonic_route("/getIndexes", handlers::get_indexes)
-        .subsonic_route("/getArtists", handlers::get_artists)
-        .subsonic_route("/getArtist", handlers::get_artist)
-        .subsonic_route("/getAlbum", handlers::get_album)
-        .subsonic_route("/getSong", handlers::get_song)
-        .subsonic_route("/getAlbumList2", handlers::get_album_list2)
-        .subsonic_route("/getGenres", handlers::get_genres)
-        .subsonic_route("/search3", handlers::search3)
-        .subsonic_route("/getRandomSongs", handlers::get_random_songs)
-        .subsonic_route("/getSongsByGenre", handlers::get_songs_by_genre)
-        .subsonic_route("/getArtistInfo2", handlers::get_artist_info2)
-        .subsonic_route("/getAlbumInfo2", handlers::get_album_info2)
-        .subsonic_route("/getSimilarSongs2", handlers::get_similar_songs2)
-        .subsonic_route("/getTopSongs", handlers::get_top_songs)
-        // Non-ID3 browsing endpoints (for older clients)
-        .subsonic_route("/getMusicDirectory", handlers::get_music_directory)
-        .subsonic_route("/getAlbumList", handlers::get_album_list)
-        .subsonic_route("/getStarred", handlers::get_starred)
-        .subsonic_route("/getArtistInfo", handlers::get_artist_info)
-        .subsonic_route("/getAlbumInfo", handlers::get_album_info)
-        .subsonic_route("/getSimilarSongs", handlers::get_similar_songs)
-        // Search endpoints
-        .subsonic_route("/search2", handlers::search2)
-        .subsonic_route("/search", handlers::search)
-        // Lyrics endpoints
-        .subsonic_route("/getLyrics", handlers::get_lyrics)
-        .subsonic_route("/getLyricsBySongId", handlers::get_lyrics_by_song_id)
-        // Annotation endpoints
-        .subsonic_route("/star", handlers::star)
-        .subsonic_route("/unstar", handlers::unstar)
-        .subsonic_route("/getStarred2", handlers::get_starred2)
-        .subsonic_route("/scrobble", handlers::scrobble)
-        .subsonic_route("/getNowPlaying", handlers::get_now_playing)
-        .subsonic_route("/setRating", handlers::set_rating)
-        // Playlist endpoints
-        .subsonic_route("/getPlaylists", handlers::get_playlists)
-        .subsonic_route("/getPlaylist", handlers::get_playlist)
-        .subsonic_route("/createPlaylist", handlers::create_playlist)
-        .subsonic_route("/updatePlaylist", handlers::update_playlist)
-        .subsonic_route("/deletePlaylist", handlers::delete_playlist)
-        // Play queue endpoints
-        .subsonic_route("/getPlayQueue", handlers::get_play_queue)
-        .subsonic_route("/savePlayQueue", handlers::save_play_queue)
-        // Play queue by index endpoints (OpenSubsonic extension)
-        .subsonic_route("/getPlayQueueByIndex", handlers::get_play_queue_by_index)
-        .subsonic_route("/savePlayQueueByIndex", handlers::save_play_queue_by_index)
-        // Remote control endpoints (OpenSubsonic extension)
-        .subsonic_route("/createRemoteSession", handlers::create_remote_session)
-        .subsonic_route("/joinRemoteSession", handlers::join_remote_session)
-        .subsonic_route("/getRemoteSession", handlers::get_remote_session)
-        .subsonic_route("/closeRemoteSession", handlers::close_remote_session)
-        .subsonic_route("/sendRemoteCommand", handlers::send_remote_command)
-        .subsonic_route("/getRemoteCommands", handlers::get_remote_commands)
-        .subsonic_route("/updateRemoteState", handlers::update_remote_state)
-        .subsonic_route("/getRemoteState", handlers::get_remote_state)
-        // Media retrieval endpoints
-        .subsonic_route("/stream", handlers::stream)
-        .subsonic_route("/download", handlers::download)
-        .subsonic_route("/getCoverArt", handlers::get_cover_art)
-        // User management endpoints
-        .subsonic_route("/getUser", handlers::get_user)
-        .subsonic_route("/getUsers", handlers::get_users)
-        .subsonic_route("/deleteUser", handlers::delete_user)
-        .subsonic_route("/changePassword", handlers::change_password)
-        .subsonic_route("/createUser", handlers::create_user)
-        .subsonic_route("/updateUser", handlers::update_user)
-        // Scanning endpoints
-        .subsonic_route("/startScan", handlers::start_scan)
-        .subsonic_route("/getScanStatus", handlers::get_scan_status);
-
-    Router::new()
-        .nest("/rest", rest_routes)
-        .layer(
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_methods(Any)
-                .allow_headers(Any),
-        )
-        .layer(TraceLayer::new_for_http())
-        .with_state(state)
-}
-
 /// Errors that can occur during database setup.
 #[derive(Debug, thiserror::Error)]
 enum SetupError {
@@ -458,8 +288,7 @@ fn run_user_command(pool: &DbPool, cmd: UserCommands) -> Result<(), UserCommandE
             create_user(pool, &username, &password, admin)?;
         }
         UserCommands::List => {
-            let users = Users::new(pool.clone());
-            let users = users.get_all_users()?;
+            let users = UserRepository::new(pool.clone()).find_all()?;
             if users.is_empty() {
                 println!("No users found.");
             } else {
@@ -531,8 +360,11 @@ fn run_user_command(pool: &DbPool, cmd: UserCommands) -> Result<(), UserCommandE
             }
         }
         UserCommands::Delete { username } => {
-            let users = Users::new(pool.clone());
-            if users.delete_user(&username)? {
+            let repo = UserRepository::new(pool.clone());
+            let Some(user) = repo.find_by_username(&username)? else {
+                return Err(UserCommandError::NotFound(username));
+            };
+            if repo.delete(user.id)? {
                 println!("Deleted user '{username}'");
             } else {
                 return Err(UserCommandError::NotFound(username));
@@ -906,9 +738,8 @@ async fn run_server(
     lastfm_client: Option<LastFmClient>,
 ) -> Result<(), ServerError> {
     // Check if there are any users
-    let users = Users::new(pool.clone());
-    let has_users = users
-        .get_all_users()
+    let has_users = UserRepository::new(pool.clone())
+        .find_all()
         .map_err(ServerError::UserCheck)?
         .is_empty();
     if !has_users {

@@ -3,9 +3,10 @@
 use axum::response::IntoResponse;
 use serde::Deserialize;
 
-use crate::api::auth::SubsonicAuth;
+use crate::api::auth::SubsonicContext;
 use crate::api::error::ApiError;
 use crate::api::response::{SubsonicResponse, error_response};
+use crate::api::services::saturating_i64_to_i32;
 use crate::models::music::{
     AlbumID3Response, ArtistID3Response, ArtistResponse, ChildResponse, SearchMatch,
     SearchResult2Response, SearchResult3Response, SearchResultResponse, format_subsonic_datetime,
@@ -47,7 +48,7 @@ pub struct Search3Params {
 /// An empty query returns all results (up to the count limits).
 pub async fn search3(
     axum::extract::Query(params): axum::extract::Query<Search3Params>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     // Empty query is allowed - it returns all results
     // Some clients send "" (quoted empty string) which we need to handle
@@ -130,7 +131,7 @@ pub async fn search3(
             let starred_at = starred_artists.get(&a.id);
             ArtistID3Response::from_artist_with_starred(
                 a,
-                Some(i32::try_from(album_count).unwrap_or(0)),
+                Some(saturating_i64_to_i32(album_count)),
                 starred_at,
             )
         })
@@ -195,7 +196,7 @@ pub struct Search2Params {
 /// Returns albums, artists and songs matching the given search criteria (non-ID3).
 pub async fn search2(
     axum::extract::Query(params): axum::extract::Query<Search2Params>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let raw_query = params.query.as_deref().unwrap_or("");
     let query = raw_query.trim_matches('"').trim();
@@ -324,7 +325,7 @@ pub struct SearchParams {
 /// Returns a listing of files matching the given search criteria (legacy).
 pub async fn search(
     axum::extract::Query(params): axum::extract::Query<SearchParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let count = params.count.unwrap_or(20).clamp(0, 500);
     let offset = params.offset.unwrap_or(0).max(0);

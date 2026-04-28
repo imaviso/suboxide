@@ -3,7 +3,7 @@
 use axum::response::IntoResponse;
 use serde::Deserialize;
 
-use crate::api::auth::SubsonicAuth;
+use crate::api::auth::SubsonicContext;
 use crate::api::error::ApiError;
 use crate::api::response::{SubsonicResponse, error_response};
 use crate::api::services::MusicLibrary;
@@ -87,7 +87,7 @@ pub struct AlbumList2Params {
 /// Similar to getAlbumList, but organizes music according to ID3 tags.
 pub async fn get_album_list2(
     axum::extract::Query(params): axum::extract::Query<AlbumList2Params>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let list_type = album_list_type_for_request(params.list_type.as_deref());
     let size = params.size.unwrap_or(10).clamp(1, 500);
@@ -164,7 +164,7 @@ pub async fn get_album_list2(
 /// This is the non-ID3 version that returns Child elements.
 pub async fn get_album_list(
     axum::extract::Query(params): axum::extract::Query<AlbumList2Params>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let list_type = album_list_type_for_request(params.list_type.as_deref());
     let size = params.size.unwrap_or(10).clamp(1, 500);
@@ -244,7 +244,7 @@ pub async fn get_album_list(
 /// GET/POST /rest/getGenres[.view]
 ///
 /// Returns all genres.
-pub async fn get_genres(auth: SubsonicAuth) -> impl IntoResponse {
+pub async fn get_genres(auth: SubsonicContext) -> impl IntoResponse {
     let genres = match auth.music().get_genres() {
         Ok(v) => v,
         Err(e) => {
@@ -291,7 +291,7 @@ pub struct RandomSongsParams {
 /// Returns random songs matching the given criteria.
 pub async fn get_random_songs(
     axum::extract::Query(params): axum::extract::Query<RandomSongsParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let size = params.size.unwrap_or(10).clamp(1, 500);
     let user_id = auth.user.id;
@@ -356,7 +356,7 @@ pub struct SongsByGenreParams {
 /// Returns songs in a given genre.
 pub async fn get_songs_by_genre(
     axum::extract::Query(params): axum::extract::Query<SongsByGenreParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let Some(genre) = params.genre.as_deref() else {
         return error_response(auth.format, &ApiError::MissingParameter("genre".into()))
@@ -419,7 +419,7 @@ pub struct TopSongsParams {
 /// Returns the top songs for a given artist, ordered by play count.
 pub async fn get_top_songs(
     axum::extract::Query(params): axum::extract::Query<TopSongsParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     // Get the required 'artist' parameter
     let artist_name = match params.artist.as_ref() {
@@ -487,7 +487,7 @@ pub struct SimilarSongs2Params {
 /// Since we don't have external metadata, we return random songs from the same artist or genre.
 pub async fn get_similar_songs2(
     axum::extract::Query(params): axum::extract::Query<SimilarSongs2Params>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
     let Some(id) = params.id else {
@@ -541,7 +541,7 @@ pub async fn get_similar_songs2(
 /// Returns similar songs (non-ID3 version). Similar to getSimilarSongs2.
 pub async fn get_similar_songs(
     axum::extract::Query(params): axum::extract::Query<SimilarSongs2Params>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
     let Some(id) = params.id else {
@@ -593,7 +593,7 @@ pub async fn get_similar_songs(
 /// GET/POST /rest/getStarred[.view]
 ///
 /// Returns starred songs, albums and artists (non-ID3 version).
-pub async fn get_starred(auth: SubsonicAuth) -> impl IntoResponse {
+pub async fn get_starred(auth: SubsonicContext) -> impl IntoResponse {
     let user_id = auth.user.id;
 
     // Get starred items

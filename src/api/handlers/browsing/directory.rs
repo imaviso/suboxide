@@ -2,7 +2,7 @@
 
 use axum::response::IntoResponse;
 
-use crate::api::auth::SubsonicAuth;
+use crate::api::auth::SubsonicContext;
 use crate::api::error::ApiError;
 use crate::api::handlers::browsing::IdParams;
 use crate::api::response::{SubsonicResponse, error_response};
@@ -15,7 +15,7 @@ use crate::models::music::{ChildResponse, DirectoryResponse};
 /// The ID can refer to a music folder, artist, or album.
 pub async fn get_music_directory(
     axum::extract::Query(params): axum::extract::Query<IdParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
     let Some(id) = params.id else {

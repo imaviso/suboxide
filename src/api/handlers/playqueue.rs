@@ -2,7 +2,7 @@
 use axum::response::IntoResponse;
 use serde::Deserialize;
 
-use crate::api::auth::SubsonicAuth;
+use crate::api::auth::SubsonicContext;
 use crate::api::error::ApiError;
 use crate::api::response::{SubsonicResponse, error_response};
 use crate::db::PlayQueue;
@@ -11,7 +11,7 @@ use crate::models::music::{
 };
 
 fn play_queue_entries(
-    auth: &SubsonicAuth,
+    auth: &SubsonicContext,
     play_queue: &PlayQueue,
 ) -> Result<Vec<ChildResponse>, ApiError> {
     let song_ids: Vec<i32> = play_queue.songs.iter().map(|song| song.id).collect();
@@ -31,7 +31,7 @@ fn play_queue_entries(
 }
 
 fn play_queue_response(
-    auth: &SubsonicAuth,
+    auth: &SubsonicContext,
     play_queue: PlayQueue,
 ) -> Result<PlayQueueResponse, ApiError> {
     let entries = play_queue_entries(auth, &play_queue)?;
@@ -49,7 +49,7 @@ fn play_queue_response(
 }
 
 fn play_queue_by_index_response(
-    auth: &SubsonicAuth,
+    auth: &SubsonicContext,
     play_queue: PlayQueue,
 ) -> Result<PlayQueueByIndexResponse, ApiError> {
     let entries = play_queue_entries(auth, &play_queue)?;
@@ -74,7 +74,7 @@ fn play_queue_by_index_response(
 /// GET/POST /rest/getPlayQueue[.view]
 ///
 /// Returns the current play queue for the user.
-pub async fn get_play_queue(auth: SubsonicAuth) -> impl IntoResponse {
+pub async fn get_play_queue(auth: SubsonicContext) -> impl IntoResponse {
     let user_id = auth.user.id;
     let username = &auth.user.username;
 
@@ -126,7 +126,7 @@ pub struct SavePlayQueueParams {
 /// - `position`: Position in milliseconds within the currently playing song
 pub async fn save_play_queue(
     axum::extract::Query(params): axum::extract::Query<SavePlayQueueParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let user_id = auth.user.id;
     let song_ids = params.song_id;
@@ -153,7 +153,7 @@ pub async fn save_play_queue(
 ///
 /// Returns the current play queue for the user using queue index instead of song ID.
 /// This is an `OpenSubsonic` extension.
-pub async fn get_play_queue_by_index(auth: SubsonicAuth) -> impl IntoResponse {
+pub async fn get_play_queue_by_index(auth: SubsonicContext) -> impl IntoResponse {
     let user_id = auth.user.id;
     let username = &auth.user.username;
 
@@ -207,7 +207,7 @@ pub struct SavePlayQueueByIndexParams {
 /// - `position`: Position in milliseconds within the currently playing song
 pub async fn save_play_queue_by_index(
     axum::extract::Query(params): axum::extract::Query<SavePlayQueueByIndexParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let user_id = auth.user.id;
     let song_ids = params.song_id;

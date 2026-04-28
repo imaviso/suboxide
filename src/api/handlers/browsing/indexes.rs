@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use axum::response::IntoResponse;
 
-use crate::api::auth::SubsonicAuth;
+use crate::api::auth::SubsonicContext;
 use crate::api::error::ApiError;
 use crate::api::response::{SubsonicResponse, error_response};
 use crate::models::music::{
@@ -29,7 +29,7 @@ fn saturating_i64_to_i32(value: i64) -> i32 {
 /// GET/POST /rest/getMusicFolders[.view]
 ///
 /// Returns all configured top-level music folders.
-pub async fn get_music_folders(auth: SubsonicAuth) -> impl IntoResponse {
+pub async fn get_music_folders(auth: SubsonicContext) -> impl IntoResponse {
     let folders = match auth.music().get_music_folders() {
         Ok(folders) => folders,
         Err(e) => {
@@ -45,7 +45,7 @@ pub async fn get_music_folders(auth: SubsonicAuth) -> impl IntoResponse {
 ///
 /// Returns an indexed structure of all artists.
 /// This is used by older clients that use the folder-based browsing model.
-pub async fn get_indexes(auth: SubsonicAuth) -> impl IntoResponse {
+pub async fn get_indexes(auth: SubsonicContext) -> impl IntoResponse {
     let artists = match auth.music().get_artists() {
         Ok(artists) => artists,
         Err(e) => {
@@ -122,7 +122,7 @@ pub async fn get_indexes(auth: SubsonicAuth) -> impl IntoResponse {
 ///
 /// Similar to getIndexes, but returns artists using ID3 tags.
 /// This is the preferred endpoint for modern clients.
-pub async fn get_artists(auth: SubsonicAuth) -> impl IntoResponse {
+pub async fn get_artists(auth: SubsonicContext) -> impl IntoResponse {
     let artists = match auth.music().get_artists() {
         Ok(artists) => artists,
         Err(e) => {

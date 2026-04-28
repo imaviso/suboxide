@@ -9,7 +9,7 @@ use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::ReaderStream;
 
-use crate::api::auth::SubsonicAuth;
+use crate::api::auth::SubsonicContext;
 use crate::api::error::ApiError;
 use crate::api::response::error_response;
 use crate::models::music::Song;
@@ -18,7 +18,7 @@ use crate::paths::resolve_cover_art_dir;
 /// Validate that a song's path is within one of the configured music folders.
 /// This prevents path traversal attacks where a malicious path in the database
 /// could be used to read arbitrary files.
-fn validate_song_path(song: &Song, auth: &SubsonicAuth) -> Result<PathBuf, &'static str> {
+fn validate_song_path(song: &Song, auth: &SubsonicContext) -> Result<PathBuf, &'static str> {
     let song_path = Path::new(&song.path);
 
     // Canonicalize the song path to resolve any symlinks and ../ components
@@ -88,7 +88,7 @@ pub struct StreamParams {
 pub async fn stream(
     headers: HeaderMap,
     axum::extract::Query(params): axum::extract::Query<StreamParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     // Get song ID
     let Some(song_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
@@ -232,7 +232,7 @@ pub async fn stream(
 /// Similar to stream but with Content-Disposition header for downloading.
 pub async fn download(
     axum::extract::Query(params): axum::extract::Query<StreamParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     // Get song ID
     let Some(song_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
@@ -332,7 +332,7 @@ pub struct CoverArtParams {
 /// - `size` (optional): Requested size in pixels (not yet implemented).
 pub async fn get_cover_art(
     axum::extract::Query(params): axum::extract::Query<CoverArtParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     // Get cover art ID
     let Some(cover_art_id) = params.id.as_ref().filter(|id| !id.is_empty()) else {

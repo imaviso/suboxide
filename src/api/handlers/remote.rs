@@ -3,7 +3,7 @@
 use axum::response::IntoResponse;
 use serde::Deserialize;
 
-use crate::api::auth::SubsonicAuth;
+use crate::api::auth::SubsonicContext;
 use crate::api::error::ApiError;
 
 use crate::api::response::{SubsonicResponse, error_response};
@@ -33,7 +33,7 @@ pub struct CreateRemoteSessionParams {
 /// Creates a new remote-control session and returns a pairing code.
 pub async fn create_remote_session(
     axum::extract::Query(params): axum::extract::Query<CreateRemoteSessionParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let Some(device_id) = resolve_device_id(params.device_id.as_deref(), &auth) else {
         return error_response(auth.format, &ApiError::MissingParameter("deviceId".into()))
@@ -77,7 +77,7 @@ pub struct JoinRemoteSessionParams {
 /// Joins an existing remote-control session by pairing code.
 pub async fn join_remote_session(
     axum::extract::Query(params): axum::extract::Query<JoinRemoteSessionParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let Some(code) = params.code.as_deref().filter(|value| !value.is_empty()) else {
         return error_response(auth.format, &ApiError::MissingParameter("code".into()))
@@ -126,7 +126,7 @@ pub struct GetRemoteSessionParams {
 /// Returns metadata for an active remote-control session.
 pub async fn get_remote_session(
     axum::extract::Query(params): axum::extract::Query<GetRemoteSessionParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let Some(session_id) = params
         .session_id
@@ -155,7 +155,7 @@ pub async fn get_remote_session(
 /// Closes an active remote-control session.
 pub async fn close_remote_session(
     axum::extract::Query(params): axum::extract::Query<CloseRemoteSessionParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let Some(session_id) = params
         .session_id
@@ -192,7 +192,7 @@ pub struct SendRemoteCommandParams {
 /// Queues a command for the paired host device.
 pub async fn send_remote_command(
     axum::extract::Query(params): axum::extract::Query<SendRemoteCommandParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let Some(session_id) = params
         .session_id
@@ -242,7 +242,7 @@ pub struct GetRemoteCommandsParams {
 /// Returns queued commands for the current device.
 pub async fn get_remote_commands(
     axum::extract::Query(params): axum::extract::Query<GetRemoteCommandsParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let Some(session_id) = params
         .session_id
@@ -292,7 +292,7 @@ pub struct UpdateRemoteStateParams {
 /// Updates the latest playback state for a remote session.
 pub async fn update_remote_state(
     axum::extract::Query(params): axum::extract::Query<UpdateRemoteStateParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let Some(session_id) = params
         .session_id
@@ -338,7 +338,7 @@ pub struct GetRemoteStateParams {
 /// Returns the latest playback state for a remote session.
 pub async fn get_remote_state(
     axum::extract::Query(params): axum::extract::Query<GetRemoteStateParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let Some(session_id) = params
         .session_id
@@ -363,7 +363,7 @@ pub async fn get_remote_state(
     }
 }
 
-fn resolve_device_id<'a>(requested: Option<&'a str>, auth: &'a SubsonicAuth) -> Option<&'a str> {
+fn resolve_device_id<'a>(requested: Option<&'a str>, auth: &'a SubsonicContext) -> Option<&'a str> {
     requested
         .filter(|value| !value.is_empty())
         .or_else(|| (!auth.params.c.is_empty()).then_some(auth.params.c.as_str()))

@@ -2,7 +2,7 @@
 
 use axum::response::IntoResponse;
 
-use crate::api::auth::SubsonicAuth;
+use crate::api::auth::SubsonicContext;
 use crate::api::response::{SubsonicResponse, supported_extensions};
 use crate::models::music::TokenInfoResponse;
 
@@ -10,7 +10,7 @@ use crate::models::music::TokenInfoResponse;
 ///
 /// Used to test connectivity with the server.
 /// Returns an empty successful response.
-pub async fn ping(auth: SubsonicAuth) -> impl IntoResponse {
+pub async fn ping(auth: SubsonicContext) -> impl IntoResponse {
     SubsonicResponse::empty(auth.format)
 }
 
@@ -18,7 +18,7 @@ pub async fn ping(auth: SubsonicAuth) -> impl IntoResponse {
 ///
 /// Get details about the software license.
 /// Since this is an open-source implementation, we always return valid.
-pub async fn get_license(auth: SubsonicAuth) -> impl IntoResponse {
+pub async fn get_license(auth: SubsonicContext) -> impl IntoResponse {
     SubsonicResponse::license(auth.format)
 }
 
@@ -26,7 +26,7 @@ pub async fn get_license(auth: SubsonicAuth) -> impl IntoResponse {
 ///
 /// List the `OpenSubsonic` extensions supported by this server.
 /// This endpoint is part of the `OpenSubsonic` specification.
-pub async fn get_open_subsonic_extensions(auth: SubsonicAuth) -> impl IntoResponse {
+pub async fn get_open_subsonic_extensions(auth: SubsonicContext) -> impl IntoResponse {
     SubsonicResponse::open_subsonic_extensions(auth.format, supported_extensions())
 }
 
@@ -35,7 +35,7 @@ pub async fn get_open_subsonic_extensions(auth: SubsonicAuth) -> impl IntoRespon
 /// Returns all bookmarks for this user.
 /// A bookmark is a position within a certain media file.
 /// Currently returns an empty list (bookmarks not yet implemented).
-pub async fn get_bookmarks(auth: SubsonicAuth) -> impl IntoResponse {
+pub async fn get_bookmarks(auth: SubsonicContext) -> impl IntoResponse {
     SubsonicResponse::bookmarks(auth.format)
 }
 
@@ -45,7 +45,7 @@ pub async fn get_bookmarks(auth: SubsonicAuth) -> impl IntoResponse {
 /// This is an `OpenSubsonic` extension.
 ///
 /// Returns the username associated with the API key.
-pub async fn token_info(auth: SubsonicAuth) -> impl IntoResponse {
+pub async fn token_info(auth: SubsonicContext) -> impl IntoResponse {
     let response = TokenInfoResponse {
         username: auth.user.username.clone(),
     };

@@ -5,10 +5,10 @@ pub mod error;
 pub mod handlers;
 pub mod response;
 pub mod router;
-pub mod services;
+pub(crate) mod services;
 
 #[doc(inline)]
-pub use auth::SubsonicAuth;
+pub use auth::{SubsonicAuth, SubsonicContext};
 #[doc(inline)]
 pub use error::ApiError;
 #[doc(inline)]

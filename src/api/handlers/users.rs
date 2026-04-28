@@ -2,7 +2,7 @@
 use axum::response::IntoResponse;
 use serde::Deserialize;
 
-use crate::api::auth::{AuthParams, SubsonicAuth};
+use crate::api::auth::{AuthParams, SubsonicContext};
 use crate::api::error::ApiError;
 
 use crate::api::response::{SubsonicResponse, error_response};
@@ -22,7 +22,7 @@ pub struct GetUserParams {
 /// Can be used to get information about the currently logged in user.
 pub async fn get_user(
     axum::extract::Query(params): axum::extract::Query<GetUserParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let username = match &params.username {
         Some(u) => u.as_str(),
@@ -54,7 +54,7 @@ pub async fn get_user(
 ///
 /// Get details about all users, including which authorization roles and folder access they have.
 /// Only users with admin role are allowed to call this method.
-pub async fn get_users(auth: SubsonicAuth) -> impl IntoResponse {
+pub async fn get_users(auth: SubsonicContext) -> impl IntoResponse {
     if !auth.user.is_admin() {
         return error_response(auth.format, &ApiError::NotAuthorized).into_response();
     }
@@ -89,7 +89,7 @@ pub struct DeleteUserParams {
 /// Only users with admin role are allowed to call this method.
 pub async fn delete_user(
     axum::extract::Query(params): axum::extract::Query<DeleteUserParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     if !auth.user.is_admin() {
         return error_response(auth.format, &ApiError::NotAuthorized).into_response();
@@ -139,7 +139,7 @@ pub struct ChangePasswordParams {
 /// Admins can change anyone's password.
 pub async fn change_password(
     axum::extract::Query(params): axum::extract::Query<ChangePasswordParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let username = match &params.username {
         Some(u) => u.as_str(),
@@ -217,7 +217,7 @@ pub struct CreateUserParams {
 /// Only users with admin role are allowed to call this method.
 pub async fn create_user(
     axum::extract::Query(params): axum::extract::Query<CreateUserParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     if !auth.user.is_admin() {
         return error_response(auth.format, &ApiError::NotAuthorized).into_response();
@@ -323,7 +323,7 @@ pub struct UpdateUserParams {
 /// Only users with admin role are allowed to call this method.
 pub async fn update_user(
     axum::extract::Query(params): axum::extract::Query<UpdateUserParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     if !auth.user.is_admin() {
         return error_response(auth.format, &ApiError::NotAuthorized).into_response();

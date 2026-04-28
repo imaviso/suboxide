@@ -1,6 +1,7 @@
 //! Suboxide API compatible server library.
 
 pub mod api;
+pub mod app;
 pub mod crypto;
 pub mod db;
 pub mod lastfm;

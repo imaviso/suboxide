@@ -2,19 +2,19 @@
 
 use axum::response::IntoResponse;
 
-use crate::api::auth::SubsonicAuth;
+use crate::api::auth::SubsonicContext;
 use crate::api::response::{ScanStatusData, SubsonicResponse};
 use crate::scanner::Scanner;
 
 /// Build a `ScanStatusData` from the current scan state.
-fn build_scan_status_data(auth: &SubsonicAuth) -> ScanStatusData {
-    let scan_state = auth.scan_state();
+fn build_scan_status_data(auth: &SubsonicContext) -> ScanStatusData {
+    let scan_state = auth.scan_state().snapshot();
     ScanStatusData {
-        scanning: scan_state.is_scanning(),
-        count: scan_state.get_count(),
-        total: scan_state.get_total(),
-        phase: scan_state.get_phase(),
-        folder: scan_state.get_current_folder(),
+        scanning: scan_state.scanning,
+        count: scan_state.count,
+        total: scan_state.total,
+        phase: scan_state.phase,
+        folder: scan_state.current_folder,
     }
 }
 
@@ -24,7 +24,7 @@ fn build_scan_status_data(auth: &SubsonicAuth) -> ScanStatusData {
 /// returns the current status without starting a new scan.
 ///
 /// Returns: scanStatus with scanning=true/false and count of items scanned.
-pub async fn start_scan(auth: SubsonicAuth) -> impl IntoResponse {
+pub async fn start_scan(auth: SubsonicContext) -> impl IntoResponse {
     let scan_state = auth.scan_state().clone();
     let pool = auth.pool().clone();
     let Some(guard) = scan_state.try_start() else {
@@ -74,7 +74,7 @@ pub async fn start_scan(auth: SubsonicAuth) -> impl IntoResponse {
 /// Returns the current status of the media library scan.
 ///
 /// Returns: scanStatus with scanning=true/false and count of items scanned.
-pub async fn get_scan_status(auth: SubsonicAuth) -> impl IntoResponse {
+pub async fn get_scan_status(auth: SubsonicContext) -> impl IntoResponse {
     let data = build_scan_status_data(&auth);
     SubsonicResponse::scan_status(auth.format, data)
 }

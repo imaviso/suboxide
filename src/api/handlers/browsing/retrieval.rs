@@ -2,7 +2,7 @@
 
 use axum::response::IntoResponse;
 
-use crate::api::auth::SubsonicAuth;
+use crate::api::auth::SubsonicContext;
 use crate::api::error::ApiError;
 use crate::api::handlers::browsing::IdParams;
 use crate::api::response::{SubsonicResponse, error_response};
@@ -10,57 +10,28 @@ use crate::models::music::{
     AlbumID3Response, AlbumWithSongsID3Response, ArtistWithAlbumsID3Response, ChildResponse,
 };
 
-/// GET/POST /rest/getAlbum[.view]
-///
-/// Returns details for an album, including its songs.
-pub async fn get_album(
-    axum::extract::Query(params): axum::extract::Query<IdParams>,
-    auth: SubsonicAuth,
-) -> impl IntoResponse {
-    let Some(album_id) = params.id else {
-        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-            .into_response();
-    };
-
-    let album = match auth.music().get_album(album_id) {
-        Ok(Some(album)) => album,
-        Ok(None) => {
-            return error_response(auth.format, &ApiError::NotFound("Album".into()))
-                .into_response();
-        }
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
-
-    let album_starred_at = match auth
+fn album_response(
+    auth: &SubsonicContext,
+    album_id: i32,
+) -> Result<AlbumWithSongsID3Response, ApiError> {
+    let album = auth
+        .music()
+        .get_album(album_id)
+        .map_err(|error| ApiError::Generic(error.to_string()))?
+        .ok_or_else(|| ApiError::NotFound("Album".into()))?;
+    let album_starred_at = auth
         .music()
         .get_starred_at_for_album(auth.user.id, album_id)
-    {
-        Ok(starred_at) => starred_at,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
-
-    let songs = match auth.music().get_songs_by_album(album_id) {
-        Ok(songs) => songs,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
-
-    let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
-    let starred_songs = match auth
+        .map_err(|error| ApiError::Generic(error.to_string()))?;
+    let songs = auth
+        .music()
+        .get_songs_by_album(album_id)
+        .map_err(|error| ApiError::Generic(error.to_string()))?;
+    let song_ids: Vec<i32> = songs.iter().map(|song| song.id).collect();
+    let starred_songs = auth
         .music()
         .get_starred_at_for_songs_batch(auth.user.id, &song_ids)
-    {
-        Ok(starred) => starred,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
-
+        .map_err(|error| ApiError::Generic(error.to_string()))?;
     let song_responses: Vec<ChildResponse> = songs
         .iter()
         .map(|song| {
@@ -69,64 +40,37 @@ pub async fn get_album(
         })
         .collect();
 
-    let response = AlbumWithSongsID3Response::from_album_and_songs_with_starred(
-        &album,
-        song_responses,
-        album_starred_at.as_ref(),
-    );
-    SubsonicResponse::album(auth.format, response).into_response()
+    Ok(
+        AlbumWithSongsID3Response::from_album_and_songs_with_starred(
+            &album,
+            song_responses,
+            album_starred_at.as_ref(),
+        ),
+    )
 }
 
-/// GET/POST /rest/getArtist[.view]
-///
-/// Returns details for an artist, including their albums.
-pub async fn get_artist(
-    axum::extract::Query(params): axum::extract::Query<IdParams>,
-    auth: SubsonicAuth,
-) -> impl IntoResponse {
-    let Some(artist_id) = params.id else {
-        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-            .into_response();
-    };
-
-    let artist = match auth.music().get_artist(artist_id) {
-        Ok(Some(artist)) => artist,
-        Ok(None) => {
-            return error_response(auth.format, &ApiError::NotFound("Artist".into()))
-                .into_response();
-        }
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
-
-    let artist_starred_at = match auth
+fn artist_response(
+    auth: &SubsonicContext,
+    artist_id: i32,
+) -> Result<ArtistWithAlbumsID3Response, ApiError> {
+    let artist = auth
+        .music()
+        .get_artist(artist_id)
+        .map_err(|error| ApiError::Generic(error.to_string()))?
+        .ok_or_else(|| ApiError::NotFound("Artist".into()))?;
+    let artist_starred_at = auth
         .music()
         .get_starred_at_for_artist(auth.user.id, artist_id)
-    {
-        Ok(starred_at) => starred_at,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
-
-    let albums = match auth.music().get_albums_by_artist(artist_id) {
-        Ok(albums) => albums,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
-    let album_ids: Vec<i32> = albums.iter().map(|a| a.id).collect();
-    let starred_map = match auth
+        .map_err(|error| ApiError::Generic(error.to_string()))?;
+    let albums = auth
+        .music()
+        .get_albums_by_artist(artist_id)
+        .map_err(|error| ApiError::Generic(error.to_string()))?;
+    let album_ids: Vec<i32> = albums.iter().map(|album| album.id).collect();
+    let starred_map = auth
         .music()
         .get_starred_at_for_albums_batch(auth.user.id, &album_ids)
-    {
-        Ok(starred) => starred,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
-
+        .map_err(|error| ApiError::Generic(error.to_string()))?;
     let album_responses: Vec<AlbumID3Response> = albums
         .iter()
         .map(|album| {
@@ -135,11 +79,67 @@ pub async fn get_artist(
         })
         .collect();
 
-    let response = ArtistWithAlbumsID3Response::from_artist_and_albums_with_starred(
-        &artist,
-        album_responses,
-        artist_starred_at.as_ref(),
-    );
+    Ok(
+        ArtistWithAlbumsID3Response::from_artist_and_albums_with_starred(
+            &artist,
+            album_responses,
+            artist_starred_at.as_ref(),
+        ),
+    )
+}
+
+fn song_response(auth: &SubsonicContext, song_id: i32) -> Result<ChildResponse, ApiError> {
+    let song = auth
+        .music()
+        .get_song(song_id)
+        .map_err(|error| ApiError::Generic(error.to_string()))?
+        .ok_or_else(|| ApiError::NotFound("Song".into()))?;
+    let starred_at = auth
+        .music()
+        .get_starred_at_for_song(auth.user.id, song_id)
+        .map_err(|error| ApiError::Generic(error.to_string()))?;
+
+    Ok(ChildResponse::from_song_with_starred(
+        &song,
+        starred_at.as_ref(),
+    ))
+}
+
+/// GET/POST /rest/getAlbum[.view]
+///
+/// Returns details for an album, including its songs.
+pub async fn get_album(
+    axum::extract::Query(params): axum::extract::Query<IdParams>,
+    auth: SubsonicContext,
+) -> impl IntoResponse {
+    let Some(album_id) = params.id else {
+        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
+            .into_response();
+    };
+
+    let response = match album_response(&auth, album_id) {
+        Ok(response) => response,
+        Err(error) => return error_response(auth.format, &error).into_response(),
+    };
+    SubsonicResponse::album(auth.format, response).into_response()
+}
+
+/// GET/POST /rest/getArtist[.view]
+///
+/// Returns details for an artist, including their albums.
+pub async fn get_artist(
+    axum::extract::Query(params): axum::extract::Query<IdParams>,
+    auth: SubsonicContext,
+) -> impl IntoResponse {
+    let Some(artist_id) = params.id else {
+        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
+            .into_response();
+    };
+
+    let response = match artist_response(&auth, artist_id) {
+        Ok(response) => response,
+        Err(error) => return error_response(auth.format, &error).into_response(),
+    };
     SubsonicResponse::artist(auth.format, response).into_response()
 }
 
@@ -148,29 +148,16 @@ pub async fn get_artist(
 /// Returns details for a song.
 pub async fn get_song(
     axum::extract::Query(params): axum::extract::Query<IdParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let Some(song_id) = params.id else {
         return error_response(auth.format, &ApiError::MissingParameter("id".into()))
             .into_response();
     };
 
-    let song = match auth.music().get_song(song_id) {
-        Ok(Some(song)) => song,
-        Ok(None) => {
-            return error_response(auth.format, &ApiError::NotFound("Song".into())).into_response();
-        }
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
+    let response = match song_response(&auth, song_id) {
+        Ok(response) => response,
+        Err(error) => return error_response(auth.format, &error).into_response(),
     };
-
-    let starred_at = match auth.music().get_starred_at_for_song(auth.user.id, song_id) {
-        Ok(starred_at) => starred_at,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
-    let response = ChildResponse::from_song_with_starred(&song, starred_at.as_ref());
     SubsonicResponse::song(auth.format, response).into_response()
 }

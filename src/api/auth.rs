@@ -153,6 +153,17 @@ pub struct SubsonicAuth {
     pub format: Format,
     /// Common Subsonic authentication parameters.
     pub params: AuthParams,
+}
+
+/// Authenticated request context.
+#[derive(Clone)]
+pub struct SubsonicContext {
+    /// The authenticated user.
+    pub user: User,
+    /// The requested response format.
+    pub format: Format,
+    /// Common Subsonic authentication parameters.
+    pub params: AuthParams,
     music: MusicLibrary,
     users: Users,
     remote: RemoteSessions,
@@ -160,7 +171,7 @@ pub struct SubsonicAuth {
     pool: DbPool,
 }
 
-impl SubsonicAuth {
+impl SubsonicContext {
     /// Return the music service.
     #[must_use]
     pub const fn music(&self) -> &MusicLibrary {
@@ -202,6 +213,16 @@ impl std::fmt::Debug for SubsonicAuth {
     }
 }
 
+impl std::fmt::Debug for SubsonicContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SubsonicContext")
+            .field("user", &self.user)
+            .field("format", &self.format)
+            .field("params", &self.params)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Error wrapper that includes format information for proper error responses.
 #[derive(Debug)]
 pub struct AuthError {
@@ -218,11 +239,7 @@ impl IntoResponse for AuthError {
 impl<S> FromRequest<S> for SubsonicAuth
 where
     S: Send + Sync,
-    MusicLibrary: FromRef<S>,
     Users: FromRef<S>,
-    RemoteSessions: FromRef<S>,
-    ScanStateHandle: FromRef<S>,
-    DbPool: FromRef<S>,
 {
     type Rejection = AuthError;
 
@@ -332,11 +349,6 @@ where
                 user,
                 format,
                 params,
-                music: MusicLibrary::from_ref(state),
-                users: Users::from_ref(state),
-                remote: RemoteSessions::from_ref(state),
-                scan_state: ScanStateHandle::from_ref(state),
-                pool: DbPool::from_ref(state),
             })
         } else {
             // Username/password or token authentication
@@ -385,11 +397,6 @@ where
                     user,
                     format,
                     params,
-                    music: MusicLibrary::from_ref(state),
-                    users: Users::from_ref(state),
-                    remote: RemoteSessions::from_ref(state),
-                    scan_state: ScanStateHandle::from_ref(state),
-                    pool: DbPool::from_ref(state),
                 })
             } else {
                 Err(AuthError {
@@ -398,6 +405,32 @@ where
                 })
             }
         }
+    }
+}
+
+impl<S> FromRequest<S> for SubsonicContext
+where
+    S: Send + Sync,
+    MusicLibrary: FromRef<S>,
+    Users: FromRef<S>,
+    RemoteSessions: FromRef<S>,
+    ScanStateHandle: FromRef<S>,
+    DbPool: FromRef<S>,
+{
+    type Rejection = AuthError;
+
+    async fn from_request(req: Request<Body>, state: &S) -> Result<Self, Self::Rejection> {
+        let auth = SubsonicAuth::from_request(req, state).await?;
+        Ok(Self {
+            user: auth.user,
+            format: auth.format,
+            params: auth.params,
+            music: MusicLibrary::from_ref(state),
+            users: Users::from_ref(state),
+            remote: RemoteSessions::from_ref(state),
+            scan_state: ScanStateHandle::from_ref(state),
+            pool: DbPool::from_ref(state),
+        })
     }
 }
 

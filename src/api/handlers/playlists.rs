@@ -2,7 +2,7 @@
 use axum::response::IntoResponse;
 use serde::Deserialize;
 
-use crate::api::auth::SubsonicAuth;
+use crate::api::auth::SubsonicContext;
 use crate::api::error::ApiError;
 use crate::api::response::{SubsonicResponse, error_response};
 use crate::models::music::{
@@ -24,7 +24,7 @@ pub struct GetPlaylistsParams {
 /// Returns all playlists a user is allowed to play.
 pub async fn get_playlists(
     axum::extract::Query(_params): axum::extract::Query<GetPlaylistsParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let user_id = auth.user.id;
     let username = &auth.user.username;
@@ -83,7 +83,7 @@ pub struct GetPlaylistParams {
 /// Returns a listing of files in a saved playlist.
 pub async fn get_playlist(
     axum::extract::Query(params): axum::extract::Query<GetPlaylistParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let Some(id_str) = params.id.as_ref() else {
         return error_response(auth.format, &ApiError::MissingParameter("id".into()))
@@ -186,7 +186,7 @@ pub struct CreatePlaylistParams {
 )]
 pub async fn create_playlist(
     axum::extract::Query(params): axum::extract::Query<CreatePlaylistParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let user_id = auth.user.id;
     let song_ids = params.song_id;
@@ -371,7 +371,7 @@ pub struct UpdatePlaylistParams {
 /// - `songIndexToRemove`: Index (0-based) of song to remove (can be repeated)
 pub async fn update_playlist(
     axum::extract::Query(params): axum::extract::Query<UpdatePlaylistParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let user_id = auth.user.id;
 
@@ -424,7 +424,7 @@ pub struct DeletePlaylistParams {
 /// Deletes a playlist.
 pub async fn delete_playlist(
     axum::extract::Query(params): axum::extract::Query<DeletePlaylistParams>,
-    auth: SubsonicAuth,
+    auth: SubsonicContext,
 ) -> impl IntoResponse {
     let Some(id_str) = params.id.as_ref() else {
         return error_response(auth.format, &ApiError::MissingParameter("id".into()))

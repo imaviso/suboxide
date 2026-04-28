@@ -74,14 +74,15 @@ impl ScanStateHandle {
         self.0.get_current_folder()
     }
 
+    /// Get a consistent scan progress snapshot.
+    #[must_use]
+    pub fn snapshot(&self) -> ScanSnapshot {
+        self.0.snapshot()
+    }
+
     /// Reset the count to 0.
     pub fn reset_count(&self) {
         self.0.reset_count();
-    }
-
-    /// Reset all progress state for a new scan.
-    pub fn reset(&self) {
-        self.0.reset();
     }
 
     /// Increment the count by 1 and return the new value.
@@ -125,6 +126,21 @@ impl ScanStateHandle {
 #[derive(Debug)]
 pub struct ScanGuard<'a> {
     inner: ScanGuardInner<'a>,
+}
+
+/// Current scan progress snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScanSnapshot {
+    /// Whether a scan is currently running.
+    pub scanning: bool,
+    /// Number of processed items.
+    pub count: u64,
+    /// Total items, or zero if unknown.
+    pub total: u64,
+    /// Current scan phase.
+    pub phase: ScanPhase,
+    /// Current folder being scanned.
+    pub current_folder: Option<String>,
 }
 
 #[derive(Debug)]
@@ -215,6 +231,29 @@ impl ScanState {
             .clone()
     }
 
+    /// Get a consistent scan progress snapshot.
+    pub fn snapshot(&self) -> ScanSnapshot {
+        let _transition = self
+            .transition
+            .lock()
+            .unwrap_or_else(|_| panic!("scan transition lock poisoned"));
+        ScanSnapshot {
+            scanning: self.scanning.load(Ordering::SeqCst),
+            count: self.count.load(Ordering::SeqCst),
+            total: self.total.load(Ordering::SeqCst),
+            phase: self
+                .phase
+                .read()
+                .unwrap_or_else(|_| panic!("scan phase lock poisoned"))
+                .clone(),
+            current_folder: self
+                .current_folder
+                .read()
+                .unwrap_or_else(|_| panic!("scan folder lock poisoned"))
+                .clone(),
+        }
+    }
+
     /// Try to start a scan.
     /// The guard resets state and finalizes it on drop.
     #[must_use]
@@ -276,15 +315,6 @@ impl ScanState {
     /// Reset the count to 0.
     pub fn reset_count(&self) {
         self.count.store(0, Ordering::SeqCst);
-    }
-
-    /// Reset all progress state for a new scan.
-    pub fn reset(&self) {
-        let _transition = self
-            .transition
-            .lock()
-            .unwrap_or_else(|_| panic!("scan transition lock poisoned"));
-        self.reset_progress();
     }
 
     fn reset_progress(&self) {
@@ -396,16 +426,18 @@ mod tests {
     }
 
     #[test]
-    fn scan_state_reset_clears_progress_without_starting_scan() {
+    fn scan_state_guard_acquisition_resets_previous_progress() {
         let state = ScanState::new();
 
-        let _guard = state.try_start().expect("should start");
-        state.set_total(5);
-        state.set_count(4);
-        state.set_phase(ScanPhase::Cleaning);
-        state.set_current_folder(Some("Music/B".into()));
+        {
+            let _guard = state.try_start().expect("should start");
+            state.set_total(5);
+            state.set_count(4);
+            state.set_phase(ScanPhase::Cleaning);
+            state.set_current_folder(Some("Music/B".into()));
+        }
 
-        state.reset();
+        let _guard = state.try_start().expect("should start again");
 
         assert!(state.is_scanning());
         assert_eq!(state.get_count(), 0);
