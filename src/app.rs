@@ -23,7 +23,7 @@ pub struct AppState {
 impl AppState {
     /// Create application state.
     #[must_use]
-    pub fn new(pool: DbPool, lastfm_client: Option<LastFmClient>) -> Self {
+    pub fn new(pool: DbPool, lastfm_client: LastFmClient) -> Self {
         let scan_state = ScanStateHandle::new(ScanState::new());
         let music = MusicLibrary::new(pool.clone(), lastfm_client);
         let users = Users::new(pool.clone());

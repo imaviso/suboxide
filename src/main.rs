@@ -515,8 +515,10 @@ async fn run_lastfm_command(pool: &DbPool, cmd: LastfmCommands) -> Result<(), La
             let api_key = std::env::var("LASTFM_API_KEY").unwrap_or_default();
             let api_secret = std::env::var("LASTFM_API_SECRET").unwrap_or_default();
 
-            let client = LastFmClient::new(api_key.clone(), api_secret)?
-                .ok_or(LastfmCommandError::NotConfigured)?;
+            let client = LastFmClient::new(api_key.clone(), api_secret)?;
+            if !client.is_configured() {
+                return Err(LastfmCommandError::NotConfigured);
+            }
 
             let Some(user) = repo.find_by_username(&username)? else {
                 return Err(LastfmCommandError::UserNotFound(username.clone()));
@@ -528,7 +530,7 @@ async fn run_lastfm_command(pool: &DbPool, cmd: LastfmCommands) -> Result<(), La
                 println!("To link your Last.fm account, please visit:");
                 println!(
                     "http://www.last.fm/api/auth/?api_key={}&cb=http://localhost:8080/callback",
-                    client.api_key()
+                    client.api_key()?
                 );
                 println!(
                     "\nAfter approving access, you will be redirected to a URL (or see a token)."
@@ -560,8 +562,10 @@ async fn run_lastfm_command(pool: &DbPool, cmd: LastfmCommands) -> Result<(), La
             let api_key = std::env::var("LASTFM_API_KEY").unwrap_or_default();
             let api_secret = std::env::var("LASTFM_API_SECRET").unwrap_or_default();
 
-            let client =
-                LastFmClient::new(api_key, api_secret)?.ok_or(LastfmCommandError::NotConfigured)?;
+            let client = LastFmClient::new(api_key, api_secret)?;
+            if !client.is_configured() {
+                return Err(LastfmCommandError::NotConfigured);
+            }
 
             println!("Querying Last.fm for artist: '{artist}'");
             match client.get_artist_info(&artist).await? {
@@ -613,7 +617,7 @@ fn run_scan_command(pool: &DbPool, folder: Option<i32>, full: bool) -> Result<()
     Ok(())
 }
 
-fn load_lastfm_client() -> Result<Option<LastFmClient>, LastFmError> {
+fn load_lastfm_client() -> Result<LastFmClient, LastFmError> {
     let api_key = std::env::var("LASTFM_API_KEY").unwrap_or_default();
     let api_secret = std::env::var("LASTFM_API_SECRET").unwrap_or_default();
     LastFmClient::new(api_key, api_secret)
@@ -733,7 +737,7 @@ struct ServerConfig {
     port: u16,
     auto_scan: bool,
     auto_scan_interval: u64,
-    lastfm_client: Option<LastFmClient>,
+    lastfm_client: LastFmClient,
 }
 
 /// Errors that can occur during server startup.

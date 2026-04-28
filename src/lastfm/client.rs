@@ -15,7 +15,15 @@ const LASTFM_API_URL: &str = "https://ws.audioscrobbler.com/2.0/";
 /// Last.fm API client.
 #[derive(Debug, Clone)]
 pub struct LastFmClient {
-    inner: Arc<Inner>,
+    inner: LastFmClientInner,
+}
+
+#[derive(Debug, Clone)]
+enum LastFmClientInner {
+    /// Live Last.fm client with configured credentials.
+    Live(Arc<Inner>),
+    /// Last.fm integration is disabled because credentials are absent.
+    Disabled,
 }
 
 #[derive(Debug)]
@@ -46,10 +54,11 @@ pub type Result<T> = std::result::Result<T, LastFmError>;
 impl LastFmClient {
     /// Create a new Last.fm client.
     ///
-    /// Returns `Ok(None)` when Last.fm credentials are absent.
-    pub fn new(api_key: String, api_secret: String) -> Result<Option<Self>> {
+    pub fn new(api_key: String, api_secret: String) -> Result<Self> {
         if api_key.is_empty() || api_secret.is_empty() {
-            return Ok(None);
+            return Ok(Self {
+                inner: LastFmClientInner::Disabled,
+            });
         }
 
         let client = Client::builder()
@@ -58,30 +67,45 @@ impl LastFmClient {
             .build()
             .map_err(LastFmError::Network)?;
 
-        Ok(Some(Self {
-            inner: Arc::new(Inner {
+        Ok(Self {
+            inner: LastFmClientInner::Live(Arc::new(Inner {
                 client,
                 api_key,
                 api_secret,
-            }),
-        }))
+            })),
+        })
     }
 
     /// Check if Last.fm is configured.
     #[must_use]
     pub const fn is_configured(&self) -> bool {
-        true // If we exist, we're configured
+        matches!(self.inner, LastFmClientInner::Live(_))
     }
 
     /// Get the API key.
-    #[must_use]
-    pub fn api_key(&self) -> &str {
-        &self.inner.api_key
+    ///
+    /// # Errors
+    /// Returns an error when Last.fm credentials are not configured.
+    pub fn api_key(&self) -> Result<&str> {
+        Ok(&self.inner()?.api_key)
+    }
+
+    fn inner(&self) -> Result<&Inner> {
+        match self {
+            Self {
+                inner: LastFmClientInner::Live(inner),
+            } => Ok(inner),
+            Self {
+                inner: LastFmClientInner::Disabled,
+            } => Err(LastFmError::Config(
+                "LASTFM_API_KEY and LASTFM_API_SECRET are required".to_string(),
+            )),
+        }
     }
 
     /// Sign API parameters according to Last.fm rules.
     /// The signature is: `md5(sorted_param_names_concatenated_with_values` + secret)
-    fn sign_params(&self, params: &BTreeMap<String, String>) -> String {
+    fn sign_params(&self, params: &BTreeMap<String, String>) -> Result<String> {
         let mut signature_input = String::new();
 
         for (key, value) in params {
@@ -89,11 +113,11 @@ impl LastFmClient {
             signature_input.push_str(value);
         }
 
-        signature_input.push_str(&self.inner.api_secret);
+        signature_input.push_str(&self.inner()?.api_secret);
 
         let mut hasher = Md5::new();
         hasher.update(signature_input.as_bytes());
-        hex::encode(hasher.finalize())
+        Ok(hex::encode(hasher.finalize()))
     }
 
     /// Build signed parameters for an API call.
@@ -102,10 +126,10 @@ impl LastFmClient {
         method: &str,
         session_key: Option<&str>,
         extra: BTreeMap<String, String>,
-    ) -> BTreeMap<String, String> {
+    ) -> Result<BTreeMap<String, String>> {
         let mut params = BTreeMap::new();
         params.insert("method".to_string(), method.to_string());
-        params.insert("api_key".to_string(), self.inner.api_key.clone());
+        params.insert("api_key".to_string(), self.inner()?.api_key.clone());
 
         // Add extra params
         for (key, value) in extra {
@@ -118,13 +142,13 @@ impl LastFmClient {
         }
 
         // Generate and add signature
-        let signature = self.sign_params(&params);
+        let signature = self.sign_params(&params)?;
         params.insert("api_sig".to_string(), signature);
 
         // Format must be added after signature
         params.insert("format".to_string(), "json".to_string());
 
-        params
+        Ok(params)
     }
 
     /// Get a Last.fm session from a token.
@@ -142,10 +166,10 @@ impl LastFmClient {
         let mut extra = BTreeMap::new();
         extra.insert("token".to_string(), token.to_string());
 
-        let params = self.build_params("auth.getSession", None, extra);
+        let params = self.build_params("auth.getSession", None, extra)?;
 
         let response = self
-            .inner
+            .inner()?
             .client
             .get(LASTFM_API_URL)
             .query(&params)
@@ -196,10 +220,10 @@ impl LastFmClient {
             extra.insert("album".to_string(), album_name.to_string());
         }
 
-        let params = self.build_params("track.scrobble", Some(session_key), extra);
+        let params = self.build_params("track.scrobble", Some(session_key), extra)?;
 
         let response = self
-            .inner
+            .inner()?
             .client
             .post(LASTFM_API_URL)
             .form(&params)
@@ -233,10 +257,10 @@ impl LastFmClient {
             extra.insert("duration".to_string(), dur.to_string());
         }
 
-        let params = self.build_params("track.updateNowPlaying", Some(session_key), extra);
+        let params = self.build_params("track.updateNowPlaying", Some(session_key), extra)?;
 
         let response = self
-            .inner
+            .inner()?
             .client
             .post(LASTFM_API_URL)
             .form(&params)
@@ -264,13 +288,13 @@ impl LastFmClient {
         // We simply build params manually to avoid signing logic
         let mut params = BTreeMap::new();
         params.insert("method".to_string(), "artist.getInfo".to_string());
-        params.insert("api_key".to_string(), self.inner.api_key.clone());
+        params.insert("api_key".to_string(), self.inner()?.api_key.clone());
         params.insert("format".to_string(), "json".to_string());
         params.insert("artist".to_string(), artist_name.to_string());
         params.insert("autocorrect".to_string(), "1".to_string());
 
         let response = self
-            .inner
+            .inner()?
             .client
             .get(LASTFM_API_URL)
             .query(&params)
@@ -306,7 +330,7 @@ impl LastFmClient {
     /// # Errors
     /// Returns an error when fetching or parsing the artist page fails.
     pub async fn fetch_artist_image_from_page(&self, url: &str) -> Result<Option<String>> {
-        let response = self.inner.client.get(url).send().await?;
+        let response = self.inner()?.client.get(url).send().await?;
         let status = response.status();
         let body = response.text().await?;
 
@@ -375,34 +399,36 @@ struct LastFmApiError {
 
 #[cfg(test)]
 mod tests {
-    use super::LastFmClient;
+    use super::{LastFmClient, LastFmClientInner};
 
     #[test]
     fn client_clone_shares_same_inner_state() {
-        let client = LastFmClient::new("test_key".into(), "test_secret".into())
-            .unwrap()
-            .unwrap();
+        let client = LastFmClient::new("test_key".into(), "test_secret".into()).unwrap();
         let cloned = client.clone();
 
-        assert_eq!(client.api_key(), cloned.api_key());
-        assert!(std::ptr::eq(
-            &*client.inner as *const _,
-            &*cloned.inner as *const _
-        ));
+        assert_eq!(client.api_key().unwrap(), cloned.api_key().unwrap());
+        let LastFmClientInner::Live(client_inner) = &client.inner else {
+            panic!("configured client must be live");
+        };
+        let LastFmClientInner::Live(cloned_inner) = &cloned.inner else {
+            panic!("configured client clone must be live");
+        };
+        assert!(std::ptr::eq(&**client_inner, &**cloned_inner));
     }
 
     #[test]
-    fn new_returns_none_when_api_key_is_empty() {
-        assert!(
-            LastFmClient::new("".into(), "secret".into())
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            LastFmClient::new("key".into(), "".into())
-                .unwrap()
-                .is_none()
-        );
-        assert!(LastFmClient::new("".into(), "".into()).unwrap().is_none());
+    fn new_returns_disabled_when_credentials_are_empty() {
+        assert!(matches!(
+            LastFmClient::new("".into(), "secret".into()).unwrap().inner,
+            LastFmClientInner::Disabled
+        ));
+        assert!(matches!(
+            LastFmClient::new("key".into(), "".into()).unwrap().inner,
+            LastFmClientInner::Disabled
+        ));
+        assert!(matches!(
+            LastFmClient::new("".into(), "".into()).unwrap().inner,
+            LastFmClientInner::Disabled
+        ));
     }
 }

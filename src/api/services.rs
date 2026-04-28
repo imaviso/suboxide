@@ -14,7 +14,9 @@ use crate::db::{
 };
 use crate::lastfm::{LastFmClient, models::extract_biography, models::extract_image_urls};
 use crate::models::User;
-use crate::models::music::{Album, Artist, ArtistID3Response, ArtistInfo2Response, Song};
+use crate::models::music::{
+    Album, Artist, ArtistID3Response, ArtistInfo2Response, Song, saturating_i64_to_i32,
+};
 use crate::models::user::UserRoles;
 use crate::paths::resolve_cover_art_dir;
 use crate::scanner::lyrics::{ExtractedLyrics, extract_lyrics};
@@ -23,20 +25,12 @@ const LASTFM_PLACEHOLDER_IMAGE_MARKER: &str = "2a96cbd8b46e442fc41c2b86b821562f"
 
 #[derive(Debug, thiserror::Error)]
 enum ArtistImageError {
-    #[error("failed to create cover-art directory: {0}")]
-    CreateDirectory(#[source] std::io::Error),
-    #[error("failed to download artist image: {0}")]
-    Download(#[source] reqwest::Error),
+    #[error("artist image IO failed: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("artist image HTTP request failed: {0}")]
+    Http(#[from] reqwest::Error),
     #[error("artist image request returned {0}")]
     HttpStatus(reqwest::StatusCode),
-    #[error("failed to read artist image bytes: {0}")]
-    ReadBytes(#[source] reqwest::Error),
-    #[error("failed to create artist image file: {0}")]
-    CreateFile(#[source] std::io::Error),
-    #[error("failed to write artist image file: {0}")]
-    WriteFile(#[source] std::io::Error),
-    #[error("failed to check artist image file: {0}")]
-    CheckFile(#[source] std::io::Error),
 }
 
 fn is_lastfm_placeholder_image(url: &str) -> bool {
@@ -50,9 +44,7 @@ async fn download_artist_image(
     use tokio::io::AsyncWriteExt;
 
     let cover_art_dir = resolve_cover_art_dir();
-    tokio::fs::create_dir_all(&cover_art_dir)
-        .await
-        .map_err(ArtistImageError::CreateDirectory)?;
+    tokio::fs::create_dir_all(&cover_art_dir).await?;
 
     let image_extension = std::path::Path::new(image_url).extension();
     let extension =
@@ -66,61 +58,33 @@ async fn download_artist_image(
 
     let cover_art_id = format!("artist-{artist_id}");
     let filepath = cover_art_dir.join(format!("{cover_art_id}.{extension}"));
-    if tokio::fs::try_exists(&filepath)
-        .await
-        .map_err(ArtistImageError::CheckFile)?
-    {
+    if tokio::fs::try_exists(&filepath).await? {
         return Ok(cover_art_id);
     }
 
-    let response = reqwest::get(image_url)
-        .await
-        .map_err(ArtistImageError::Download)?;
+    let response = reqwest::get(image_url).await?;
     if !response.status().is_success() {
         return Err(ArtistImageError::HttpStatus(response.status()));
     }
 
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(ArtistImageError::ReadBytes)?;
-    let mut file = tokio::fs::File::create(&filepath)
-        .await
-        .map_err(ArtistImageError::CreateFile)?;
-    file.write_all(&bytes)
-        .await
-        .map_err(ArtistImageError::WriteFile)?;
+    let bytes = response.bytes().await?;
+    let mut file = tokio::fs::File::create(&filepath).await?;
+    file.write_all(&bytes).await?;
 
     Ok(cover_art_id)
-}
-
-/// Saturating cast from `i64` to `i32`.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "Subsonic album counts are bounded to signed 32-bit fields"
-)]
-#[must_use]
-pub fn saturating_i64_to_i32(value: i64) -> i32 {
-    if value > i64::from(i32::MAX) {
-        i32::MAX
-    } else if value < i64::from(i32::MIN) {
-        i32::MIN
-    } else {
-        value as i32
-    }
 }
 
 /// Music library and playback operations.
 #[derive(Clone, Debug)]
 pub struct MusicLibrary {
     pool: DbPool,
-    lastfm_client: Option<LastFmClient>,
+    lastfm_client: LastFmClient,
 }
 
 impl MusicLibrary {
     /// Create a new music library.
     #[must_use]
-    pub const fn new(pool: DbPool, lastfm_client: Option<LastFmClient>) -> Self {
+    pub const fn new(pool: DbPool, lastfm_client: LastFmClient) -> Self {
         Self {
             pool,
             lastfm_client,
@@ -581,16 +545,16 @@ impl MusicLibrary {
     }
 
     fn submit_lastfm_scrobble(&self, user_id: i32, song: &Song, timestamp: i64) {
-        let Some(client) = &self.lastfm_client else {
+        if !self.lastfm_client.is_configured() {
             return;
-        };
+        }
         let Ok(Some(session_key)) =
             UserRepository::new(self.pool.clone()).get_lastfm_session_key(user_id)
         else {
             return;
         };
 
-        let client = client.clone();
+        let client = self.lastfm_client.clone();
         let artist = song.artist_name.clone().unwrap_or_default();
         let track = song.title.clone();
         let album = song.album_name.clone();
@@ -608,16 +572,16 @@ impl MusicLibrary {
     }
 
     fn update_lastfm_now_playing(&self, user_id: i32, song: &Song) {
-        let Some(client) = &self.lastfm_client else {
+        if !self.lastfm_client.is_configured() {
             return;
-        };
+        }
         let Ok(Some(session_key)) =
             UserRepository::new(self.pool.clone()).get_lastfm_session_key(user_id)
         else {
             return;
         };
 
-        let client = client.clone();
+        let client = self.lastfm_client.clone();
         let artist = song.artist_name.clone().unwrap_or_default();
         let track = song.title.clone();
         let album = song.album_name.clone();
@@ -791,7 +755,7 @@ impl MusicLibrary {
                 }
             }
             Ok(None) => {
-                if self.lastfm_client.is_some() {
+                if self.lastfm_client.is_configured() {
                     let service = self.clone();
                     let artist_name = artist.name;
                     tokio::spawn(async move {
@@ -816,9 +780,10 @@ impl MusicLibrary {
     async fn fetch_and_cache_artist_info(&self, artist_id: i32, artist_name: String) {
         use crate::lastfm::models::LastFmArtistCache;
 
-        let Some(client) = self.lastfm_client.clone() else {
+        if !self.lastfm_client.is_configured() {
             return;
-        };
+        }
+        let client = self.lastfm_client.clone();
         let pool = self.pool.clone();
 
         match client.get_artist_info(&artist_name).await {
@@ -991,10 +956,6 @@ impl Users {
         api_key: &str,
     ) -> Result<Option<User>, UserRepoError> {
         UserRepository::new(self.pool.clone()).find_by_api_key(api_key)
-    }
-
-    pub(in crate::api) fn get_user(&self, username: &str) -> Result<Option<User>, UserRepoError> {
-        UserRepository::new(self.pool.clone()).find_by_username(username)
     }
 
     /// List all users.
@@ -1221,31 +1182,5 @@ impl RemoteSessions {
             })?;
 
         RemoteControlRepository::new(self.pool.clone()).get_state(session_id)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::saturating_i64_to_i32;
-
-    #[test]
-    fn saturating_i64_to_i32_clamps_positive_overflow() {
-        assert_eq!(saturating_i64_to_i32(i64::MAX), i32::MAX);
-        assert_eq!(saturating_i64_to_i32(i64::from(i32::MAX) + 1), i32::MAX);
-    }
-
-    #[test]
-    fn saturating_i64_to_i32_clamps_negative_overflow() {
-        assert_eq!(saturating_i64_to_i32(i64::MIN), i32::MIN);
-        assert_eq!(saturating_i64_to_i32(i64::from(i32::MIN) - 1), i32::MIN);
-    }
-
-    #[test]
-    fn saturating_i64_to_i32_passes_through_in_range() {
-        assert_eq!(saturating_i64_to_i32(0), 0);
-        assert_eq!(saturating_i64_to_i32(-1), -1);
-        assert_eq!(saturating_i64_to_i32(42), 42);
-        assert_eq!(saturating_i64_to_i32(i64::from(i32::MAX)), i32::MAX);
-        assert_eq!(saturating_i64_to_i32(i64::from(i32::MIN)), i32::MIN);
     }
 }
