@@ -85,10 +85,10 @@ impl AuthParams {
         )
     }
 
-    /// Merge with another `AuthParams`, taking non-empty values from self.
-    /// This is used to combine query params (higher priority) with form params.
+    /// Fill missing fields from lower-priority fallback params.
+    /// Query parameters should call this with form parameters as fallback.
     #[must_use]
-    pub fn merge_with(mut self, other: Self) -> Self {
+    pub fn with_fallback(mut self, other: Self) -> Self {
         if self.u.is_empty() {
             self.u = other.u;
         }
@@ -505,7 +505,7 @@ mod tests {
     }
 
     #[test]
-    fn test_params_merge() {
+    fn params_with_fallback_fills_missing_fields() {
         let query = AuthParams {
             u: "user".into(),
             v: "1.16.1".into(),
@@ -521,7 +521,7 @@ mod tests {
             ..Default::default()
         };
 
-        let merged = query.merge_with(form);
+        let merged = query.with_fallback(form);
 
         // Query params should take precedence
         assert_eq!(merged.u, "user");
@@ -533,7 +533,7 @@ mod tests {
     }
 
     #[test]
-    fn params_merge_preserves_query_auth_fields_and_fills_missing_form_fields() {
+    fn params_with_fallback_preserves_query_auth_fields_and_fills_missing_form_fields() {
         let query = AuthParams {
             u: "query-user".into(),
             t: Some("query-token".into()),
@@ -552,7 +552,7 @@ mod tests {
             f: Some("json".into()),
         };
 
-        let merged = query.merge_with(form);
+        let merged = query.with_fallback(form);
 
         assert_eq!(merged.u, "query-user");
         assert_eq!(merged.t.as_deref(), Some("query-token"));

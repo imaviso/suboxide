@@ -7,7 +7,7 @@ use crate::api::auth::SubsonicContext;
 use crate::api::error::ApiError;
 use crate::api::response::{SubsonicResponse, error_response};
 use crate::api::services::MusicLibrary;
-use crate::db::{MusicRepoError, MusicRepoErrorKind};
+use crate::db::MusicRepoError;
 use crate::models::music::{
     AlbumID3Response, AlbumList2Response, AlbumListResponse, ArtistResponse, ChildResponse,
     GenreResponse, GenresResponse, RandomSongsResponse, SimilarSongs2Response,
@@ -22,52 +22,79 @@ fn album_list_type_for_request(list_type: Option<&str>) -> &str {
     }
 }
 
-fn similar_songs_for_id(
+#[derive(Clone, Copy)]
+enum SimilarSongsSeed {
+    Song(i32),
+    Album(i32),
+    Artist(i32),
+}
+
+fn similar_songs_for_seed(
     music: &MusicLibrary,
-    id: i32,
+    seed: SimilarSongsSeed,
     count: i64,
 ) -> Result<Option<Vec<Song>>, MusicRepoError> {
-    let song = music.get_song(id)?;
-    let album = music.get_album(id)?;
-    let artist = music.get_artist(id)?;
-    let matches =
-        usize::from(song.is_some()) + usize::from(album.is_some()) + usize::from(artist.is_some());
-
-    if matches > 1 {
-        return Err(MusicRepoError::new(
-            MusicRepoErrorKind::Database,
-            format!("ambiguous similar-songs id: {id}"),
-        ));
-    }
-
-    if let Some(song) = song {
-        if let Some(artist_id) = song.artist_id {
-            return music
-                .get_similar_songs_by_artist(artist_id, id, count)
-                .map(Some);
+    match seed {
+        SimilarSongsSeed::Song(song_id) => {
+            let Some(song) = music.get_song(song_id)? else {
+                return Ok(None);
+            };
+            if let Some(artist_id) = song.artist_id {
+                return music
+                    .get_similar_songs_by_artist(artist_id, song_id, count)
+                    .map(Some);
+            }
+            if let Some(genre) = song.genre {
+                return music.get_songs_by_genre(&genre, count, 0, None).map(Some);
+            }
+            Ok(Some(Vec::new()))
         }
-        if let Some(genre) = song.genre {
-            return music.get_songs_by_genre(&genre, count, 0, None).map(Some);
+        SimilarSongsSeed::Album(album_id) => {
+            let Some(album) = music.get_album(album_id)? else {
+                return Ok(None);
+            };
+            album.artist_id.map_or_else(
+                || Ok(Some(Vec::new())),
+                |artist_id| {
+                    music
+                        .get_similar_songs_by_artist(artist_id, -1, count)
+                        .map(Some)
+                },
+            )
         }
-        return Ok(Some(Vec::new()));
+        SimilarSongsSeed::Artist(artist_id) => music
+            .get_similar_songs_by_artist(artist_id, -1, count)
+            .map(Some),
     }
+}
 
-    if let Some(album) = album {
-        return album.artist_id.map_or_else(
-            || Ok(Some(Vec::new())),
-            |artist_id| {
-                music
-                    .get_similar_songs_by_artist(artist_id, -1, count)
-                    .map(Some)
+fn similar_songs_seed(params: &SimilarSongs2Params) -> Result<SimilarSongsSeed, ApiError> {
+    let seed_count = usize::from(params.song_id.is_some())
+        + usize::from(params.album_id.is_some())
+        + usize::from(params.artist_id.is_some());
+
+    match seed_count {
+        0 => Err(ApiError::MissingParameter(
+            "songId, albumId, or artistId".into(),
+        )),
+        1 => params.song_id.map_or_else(
+            || {
+                params.album_id.map_or_else(
+                    || {
+                        params.artist_id.map_or_else(
+                            || unreachable!("seed_count verified exactly one seed"),
+                            |artist_id| Ok(SimilarSongsSeed::Artist(artist_id)),
+                        )
+                    },
+                    |album_id| Ok(SimilarSongsSeed::Album(album_id)),
+                )
             },
-        );
+            |song_id| Ok(SimilarSongsSeed::Song(song_id)),
+        ),
+        _ => Err(ApiError::Generic(
+            "Specify exactly one of songId, albumId, or artistId".into(),
+        )),
     }
-
-    if artist.is_some() {
-        return music.get_similar_songs_by_artist(id, -1, count).map(Some);
-    }
-
-    Ok(None)
 }
 
 /// Query parameters for getAlbumList2.
@@ -488,8 +515,15 @@ pub async fn get_top_songs(
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct SimilarSongs2Params {
-    /// The song/album/artist ID.
-    pub id: Option<i32>,
+    /// The song ID to use as similarity seed.
+    #[serde(rename = "songId")]
+    pub song_id: Option<i32>,
+    /// The album ID to use as similarity seed.
+    #[serde(rename = "albumId")]
+    pub album_id: Option<i32>,
+    /// The artist ID to use as similarity seed.
+    #[serde(rename = "artistId")]
+    pub artist_id: Option<i32>,
     /// Max number of similar songs to return. Default 50.
     pub count: Option<i64>,
 }
@@ -502,16 +536,15 @@ pub async fn get_similar_songs2(
     crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<SimilarSongs2Params>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
-    // Get the required 'id' parameter
-    let Some(id) = params.id else {
-        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-            .into_response();
+    let seed = match similar_songs_seed(&params) {
+        Ok(seed) => seed,
+        Err(error) => return error_response(auth.format, &error).into_response(),
     };
 
     let count = params.count.unwrap_or(50).clamp(1, 500);
     let user_id = auth.user.id;
 
-    let songs = match similar_songs_for_id(auth.music(), id, count) {
+    let songs = match similar_songs_for_seed(auth.music(), seed, count) {
         Ok(Some(songs)) => songs,
         Ok(None) => {
             return error_response(auth.format, &ApiError::NotFound("Item".into())).into_response();
@@ -556,16 +589,15 @@ pub async fn get_similar_songs(
     crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<SimilarSongs2Params>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
-    // Get the required 'id' parameter
-    let Some(id) = params.id else {
-        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-            .into_response();
+    let seed = match similar_songs_seed(&params) {
+        Ok(seed) => seed,
+        Err(error) => return error_response(auth.format, &error).into_response(),
     };
 
     let count = params.count.unwrap_or(50).clamp(1, 500);
     let user_id = auth.user.id;
 
-    let songs = match similar_songs_for_id(auth.music(), id, count) {
+    let songs = match similar_songs_for_seed(auth.music(), seed, count) {
         Ok(Some(songs)) => songs,
         Ok(None) => {
             return error_response(auth.format, &ApiError::NotFound("Item".into())).into_response();

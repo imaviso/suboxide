@@ -37,7 +37,7 @@ pub async fn get_user(
         return error_response(auth.format, &ApiError::NotAuthorized).into_response();
     }
 
-    match auth.users().get_user(username) {
+    match auth.users().find_user(username) {
         Ok(Some(user)) => {
             let response = UserResponse::from(&user);
             SubsonicResponse::user(auth.format, response).into_response()
