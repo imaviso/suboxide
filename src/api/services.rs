@@ -580,7 +580,7 @@ impl MusicLibrary {
                 .update_now_playing(&session_key, &artist, &track, album.as_deref(), duration)
                 .await
             {
-                tracing::debug!(error = %e, "Failed to update Last.fm now playing");
+                tracing::warn!(error = %e, "Failed to update Last.fm now playing");
             } else {
                 tracing::debug!(artist = %artist, track = %track, "Updated Last.fm now playing");
             }
