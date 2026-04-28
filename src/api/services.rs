@@ -406,30 +406,24 @@ impl MusicLibrary {
         &self,
         user_id: i32,
         artist_id: i32,
-    ) -> Result<(), MusicRepoError> {
-        StarredRepository::new(self.pool.clone())
-            .unstar_artist(user_id, artist_id)
-            .map(|_| ())
+    ) -> Result<bool, MusicRepoError> {
+        StarredRepository::new(self.pool.clone()).unstar_artist(user_id, artist_id)
     }
 
     pub(in crate::api) fn unstar_album(
         &self,
         user_id: i32,
         album_id: i32,
-    ) -> Result<(), MusicRepoError> {
-        StarredRepository::new(self.pool.clone())
-            .unstar_album(user_id, album_id)
-            .map(|_| ())
+    ) -> Result<bool, MusicRepoError> {
+        StarredRepository::new(self.pool.clone()).unstar_album(user_id, album_id)
     }
 
     pub(in crate::api) fn unstar_song(
         &self,
         user_id: i32,
         song_id: i32,
-    ) -> Result<(), MusicRepoError> {
-        StarredRepository::new(self.pool.clone())
-            .unstar_song(user_id, song_id)
-            .map(|_| ())
+    ) -> Result<bool, MusicRepoError> {
+        StarredRepository::new(self.pool.clone()).unstar_song(user_id, song_id)
     }
 
     pub(in crate::api) fn get_starred_artists(
@@ -545,9 +539,6 @@ impl MusicLibrary {
     }
 
     fn submit_lastfm_scrobble(&self, user_id: i32, song: &Song, timestamp: i64) {
-        if !self.lastfm_client.is_configured() {
-            return;
-        }
         let Ok(Some(session_key)) =
             UserRepository::new(self.pool.clone()).get_lastfm_session_key(user_id)
         else {
@@ -572,9 +563,6 @@ impl MusicLibrary {
     }
 
     fn update_lastfm_now_playing(&self, user_id: i32, song: &Song) {
-        if !self.lastfm_client.is_configured() {
-            return;
-        }
         let Ok(Some(session_key)) =
             UserRepository::new(self.pool.clone()).get_lastfm_session_key(user_id)
         else {
@@ -755,15 +743,13 @@ impl MusicLibrary {
                 }
             }
             Ok(None) => {
-                if self.lastfm_client.is_configured() {
-                    let service = self.clone();
-                    let artist_name = artist.name;
-                    tokio::spawn(async move {
-                        service
-                            .fetch_and_cache_artist_info(artist_id, artist_name)
-                            .await;
-                    });
-                }
+                let service = self.clone();
+                let artist_name = artist.name;
+                tokio::spawn(async move {
+                    service
+                        .fetch_and_cache_artist_info(artist_id, artist_name)
+                        .await;
+                });
             }
             Err(e) => {
                 tracing::warn!(error = %e, artist_id = artist_id, "Failed to read artist cache");
@@ -780,9 +766,6 @@ impl MusicLibrary {
     async fn fetch_and_cache_artist_info(&self, artist_id: i32, artist_name: String) {
         use crate::lastfm::models::LastFmArtistCache;
 
-        if !self.lastfm_client.is_configured() {
-            return;
-        }
         let client = self.lastfm_client.clone();
         let pool = self.pool.clone();
 

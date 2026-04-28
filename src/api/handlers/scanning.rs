@@ -37,7 +37,7 @@ pub async fn start_scan(auth: SubsonicContext) -> impl IntoResponse {
         let result = tokio::task::spawn_blocking(move || {
             let scanner = Scanner::new(pool);
             let _guard = guard;
-            scanner.scan_all_with_state(Some(scan_state.get()))
+            scanner.scan_all_with_state(Some(&scan_state))
         })
         .await;
 

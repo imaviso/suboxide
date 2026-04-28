@@ -87,6 +87,7 @@ impl AuthParams {
 
     /// Fill missing fields from lower-priority fallback params.
     /// Query parameters should call this with form parameters as fallback.
+    #[cfg(test)]
     #[must_use]
     pub fn with_fallback(mut self, other: Self) -> Self {
         if self.u.is_empty() {
@@ -159,11 +160,15 @@ fn query_format(query: Option<&str>) -> Format {
         return Format::Xml;
     };
 
-    let format = serde_urlencoded::from_str::<AuthParams>(query)
+    serde_urlencoded::from_str::<Vec<(String, String)>>(query)
         .ok()
-        .and_then(|params| params.format().ok());
-
-    format.unwrap_or(Format::Xml)
+        .and_then(|params| {
+            params
+                .into_iter()
+                .find_map(|(key, value)| (key == "f").then_some(value))
+        })
+        .and_then(|format| Format::from_param(Some(&format)).ok())
+        .unwrap_or(Format::Xml)
 }
 
 /// Authenticated user extractor that also includes the response format.

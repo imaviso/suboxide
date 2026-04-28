@@ -1158,7 +1158,7 @@ impl AutoScanner {
                     "auto-scan cycle started"
                 );
                 scanner
-                    .scan_all_with_options(Some(scan_state_clone.get()), ScanMode::Incremental)
+                    .scan_all_with_options(Some(&scan_state_clone), ScanMode::Incremental)
                     .map(AutoScanOutcome::Completed)
             })
             .await;

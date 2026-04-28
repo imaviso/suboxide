@@ -16,10 +16,7 @@ pub struct ScanState {
     pub(crate) count: AtomicU64,
     /// Total number of items to scan (0 if unknown/discovery phase).
     pub(crate) total: AtomicU64,
-    /// Current scan phase.
-    pub(crate) phase: std::sync::RwLock<ScanPhase>,
-    /// Current folder being scanned (if any).
-    pub(crate) current_folder: std::sync::RwLock<Option<String>>,
+    fields: std::sync::RwLock<ScanFields>,
     transition: Mutex<()>,
     generation: AtomicU64,
 }
@@ -38,84 +35,19 @@ impl ScanStateHandle {
         Self(Arc::new(state))
     }
 
-    /// Get a reference to the underlying scan state.
-    #[must_use]
-    pub fn get(&self) -> &ScanState {
-        &self.0
-    }
-
-    /// Check if a scan is currently in progress.
-    #[must_use]
-    pub fn is_scanning(&self) -> bool {
-        self.0.is_scanning()
-    }
-
-    /// Get the current item count.
-    #[must_use]
-    pub fn get_count(&self) -> u64 {
-        self.0.get_count()
-    }
-
-    /// Get the total item count (0 if unknown).
-    #[must_use]
-    pub fn get_total(&self) -> u64 {
-        self.0.get_total()
-    }
-
-    /// Get the current scan phase.
-    #[must_use]
-    pub fn get_phase(&self) -> ScanPhase {
-        self.0.get_phase()
-    }
-
-    /// Get the current folder being scanned.
-    #[must_use]
-    pub fn get_current_folder(&self) -> Option<String> {
-        self.0.get_current_folder()
-    }
-
-    /// Get a consistent scan progress snapshot.
-    #[must_use]
-    pub fn snapshot(&self) -> ScanSnapshot {
-        self.0.snapshot()
-    }
-
-    /// Reset the count to 0.
-    pub fn reset_count(&self) {
-        self.0.reset_count();
-    }
-
-    /// Increment the count by 1 and return the new value.
-    #[must_use]
-    pub fn increment_count(&self) -> u64 {
-        self.0.increment_count()
-    }
-
-    /// Set the count to a specific value.
-    pub fn set_count(&self, value: u64) {
-        self.0.set_count(value);
-    }
-
-    /// Set the total item count.
-    pub fn set_total(&self, value: u64) {
-        self.0.set_total(value);
-    }
-
-    /// Set the current scan phase.
-    pub fn set_phase(&self, phase: ScanPhase) {
-        self.0.set_phase(phase);
-    }
-
-    /// Set the current folder being scanned.
-    pub fn set_current_folder(&self, folder: Option<String>) {
-        self.0.set_current_folder(folder);
-    }
-
     /// Attempt to start a scan.
     /// The guard resets state and finalizes it on drop.
     #[must_use]
     pub fn try_start(&self) -> Option<ScanGuard<'static>> {
         self.0.try_start_owned(Arc::clone(&self.0))
+    }
+}
+
+impl std::ops::Deref for ScanStateHandle {
+    type Target = ScanState;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
@@ -142,6 +74,12 @@ pub struct ScanSnapshot {
     pub phase: ScanPhase,
     /// Current folder being scanned.
     pub current_folder: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ScanFields {
+    phase: ScanPhase,
+    current_folder: Option<String>,
 }
 
 #[derive(Debug)]
@@ -194,8 +132,10 @@ impl ScanState {
             scanning: AtomicBool::new(false),
             count: AtomicU64::new(0),
             total: AtomicU64::new(0),
-            phase: std::sync::RwLock::new(ScanPhase::Idle),
-            current_folder: std::sync::RwLock::new(None),
+            fields: std::sync::RwLock::new(ScanFields {
+                phase: ScanPhase::Idle,
+                current_folder: None,
+            }),
             transition: Mutex::new(()),
             generation: AtomicU64::new(0),
         }
@@ -218,17 +158,19 @@ impl ScanState {
 
     /// Get the current scan phase.
     pub fn get_phase(&self) -> ScanPhase {
-        self.phase
+        self.fields
             .read()
-            .unwrap_or_else(|_| panic!("scan phase lock poisoned"))
+            .unwrap_or_else(|_| panic!("scan fields lock poisoned"))
+            .phase
             .clone()
     }
 
     /// Get the current folder being scanned.
     pub fn get_current_folder(&self) -> Option<String> {
-        self.current_folder
+        self.fields
             .read()
-            .unwrap_or_else(|_| panic!("scan folder lock poisoned"))
+            .unwrap_or_else(|_| panic!("scan fields lock poisoned"))
+            .current_folder
             .clone()
     }
 
@@ -238,20 +180,17 @@ impl ScanState {
             .transition
             .lock()
             .unwrap_or_else(|_| panic!("scan transition lock poisoned"));
+        let fields = self
+            .fields
+            .read()
+            .unwrap_or_else(|_| panic!("scan fields lock poisoned"))
+            .clone();
         ScanSnapshot {
             scanning: self.scanning.load(Ordering::SeqCst),
             count: self.count.load(Ordering::SeqCst),
             total: self.total.load(Ordering::SeqCst),
-            phase: self
-                .phase
-                .read()
-                .unwrap_or_else(|_| panic!("scan phase lock poisoned"))
-                .clone(),
-            current_folder: self
-                .current_folder
-                .read()
-                .unwrap_or_else(|_| panic!("scan folder lock poisoned"))
-                .clone(),
+            phase: fields.phase,
+            current_folder: fields.current_folder,
         }
     }
 
@@ -303,14 +242,12 @@ impl ScanState {
     }
 
     fn clear_active_fields(&self) {
-        *self
-            .phase
+        let mut fields = self
+            .fields
             .write()
-            .unwrap_or_else(|_| panic!("scan phase lock poisoned")) = ScanPhase::Idle;
-        *self
-            .current_folder
-            .write()
-            .unwrap_or_else(|_| panic!("scan folder lock poisoned")) = None;
+            .unwrap_or_else(|_| panic!("scan fields lock poisoned"));
+        fields.phase = ScanPhase::Idle;
+        fields.current_folder = None;
     }
 
     /// Reset the count to 0.
@@ -341,18 +278,18 @@ impl ScanState {
 
     /// Set the current scan phase.
     pub fn set_phase(&self, phase: ScanPhase) {
-        *self
-            .phase
+        self.fields
             .write()
-            .unwrap_or_else(|_| panic!("scan phase lock poisoned")) = phase;
+            .unwrap_or_else(|_| panic!("scan fields lock poisoned"))
+            .phase = phase;
     }
 
     /// Set the current folder being scanned.
     pub fn set_current_folder(&self, folder: Option<String>) {
-        *self
-            .current_folder
+        self.fields
             .write()
-            .unwrap_or_else(|_| panic!("scan folder lock poisoned")) = folder;
+            .unwrap_or_else(|_| panic!("scan fields lock poisoned"))
+            .current_folder = folder;
     }
 }
 

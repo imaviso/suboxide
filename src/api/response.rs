@@ -46,9 +46,10 @@ impl Format {
     /// Get the format from the `f` query parameter.
     pub fn from_param(f: Option<&str>) -> Result<Self, String> {
         match f {
-            Some("json") => Ok(Self::Json),
-            Some("xml") | None => Ok(Self::Xml),
-            Some(other) => Err(other.to_string()),
+            Some(format) if format.eq_ignore_ascii_case("json") => Ok(Self::Json),
+            Some(format) if format.eq_ignore_ascii_case("xml") => Ok(Self::Xml),
+            None => Ok(Self::Xml),
+            Some(format) => Err(format.to_string()),
         }
     }
 }
@@ -692,105 +693,10 @@ mod xml {
 }
 
 mod json {
-    use super::{
-        API_VERSION, OpenSubsonicExtension, ResponseStatus, SERVER_NAME, SERVER_VERSION, Serialize,
-    };
+    use super::Serialize;
 
     #[derive(Debug, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct SubsonicResponse {
-        pub status: ResponseStatus,
-        pub version: &'static str,
-        #[serde(rename = "type")]
-        pub server_type: &'static str,
-        pub server_version: &'static str,
-        pub open_subsonic: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub error: Option<ErrorDetail>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub license: Option<License>,
-        #[serde(
-            skip_serializing_if = "Option::is_none",
-            rename = "openSubsonicExtensions"
-        )]
-        pub open_subsonic_extensions: Option<Vec<OpenSubsonicExtension>>,
-        #[serde(skip_serializing_if = "Option::is_none", rename = "musicFolders")]
-        pub music_folders: Option<MusicFoldersJson>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub indexes: Option<super::IndexesResponse>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub artists: Option<super::ArtistsID3Response>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub album: Option<super::AlbumWithSongsID3Response>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub artist: Option<super::ArtistWithAlbumsID3Response>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub song: Option<super::ChildResponse>,
-        #[serde(skip_serializing_if = "Option::is_none", rename = "albumList2")]
-        pub album_list2: Option<super::AlbumList2Response>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub genres: Option<super::GenresResponse>,
-        #[serde(skip_serializing_if = "Option::is_none", rename = "searchResult3")]
-        pub search_result3: Option<super::SearchResult3Response>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub starred2: Option<super::Starred2Response>,
-        #[serde(skip_serializing_if = "Option::is_none", rename = "nowPlaying")]
-        pub now_playing: Option<super::NowPlayingResponse>,
-        #[serde(skip_serializing_if = "Option::is_none", rename = "randomSongs")]
-        pub random_songs: Option<super::RandomSongsResponse>,
-        #[serde(skip_serializing_if = "Option::is_none", rename = "songsByGenre")]
-        pub songs_by_genre: Option<super::SongsByGenreResponse>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub playlists: Option<super::PlaylistsResponse>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub playlist: Option<super::PlaylistWithSongsResponse>,
-        #[serde(skip_serializing_if = "Option::is_none", rename = "playQueue")]
-        pub play_queue: Option<super::PlayQueueResponse>,
-        #[serde(skip_serializing_if = "Option::is_none", rename = "playQueueByIndex")]
-        pub play_queue_by_index: Option<super::PlayQueueByIndexResponse>,
-        #[serde(skip_serializing_if = "Option::is_none", rename = "tokenInfo")]
-        pub token_info: Option<super::TokenInfoResponse>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub user: Option<super::UserResponse>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub users: Option<super::UsersResponse>,
-        #[serde(skip_serializing_if = "Option::is_none", rename = "scanStatus")]
-        pub scan_status: Option<ScanStatusJson>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub bookmarks: Option<BookmarksJson>,
-        #[serde(skip_serializing_if = "Option::is_none", rename = "artistInfo2")]
-        pub artist_info2: Option<super::ArtistInfo2Response>,
-        #[serde(skip_serializing_if = "Option::is_none", rename = "albumInfo")]
-        pub album_info: Option<super::AlbumInfoResponse>,
-        #[serde(skip_serializing_if = "Option::is_none", rename = "similarSongs2")]
-        pub similar_songs2: Option<super::SimilarSongs2Response>,
-        #[serde(skip_serializing_if = "Option::is_none", rename = "topSongs")]
-        pub top_songs: Option<super::TopSongsResponse>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub lyrics: Option<super::LyricsResponse>,
-        #[serde(skip_serializing_if = "Option::is_none", rename = "lyricsList")]
-        pub lyrics_list: Option<super::LyricsListResponse>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub directory: Option<super::DirectoryResponse>,
-        #[serde(skip_serializing_if = "Option::is_none", rename = "albumList")]
-        pub album_list: Option<super::AlbumListResponse>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub starred: Option<super::StarredResponse>,
-        #[serde(skip_serializing_if = "Option::is_none", rename = "searchResult2")]
-        pub search_result2: Option<super::SearchResult2Response>,
-        #[serde(skip_serializing_if = "Option::is_none", rename = "searchResult")]
-        pub search_result: Option<super::SearchResultResponse>,
-        #[serde(skip_serializing_if = "Option::is_none", rename = "artistInfo")]
-        pub artist_info: Option<super::ArtistInfoResponse>,
-        #[serde(skip_serializing_if = "Option::is_none", rename = "similarSongs")]
-        pub similar_songs: Option<super::SimilarSongsResponse>,
-        #[serde(skip_serializing_if = "Option::is_none", rename = "remoteSession")]
-        pub remote_session: Option<super::RemoteSessionResponse>,
-        #[serde(skip_serializing_if = "Option::is_none", rename = "remoteCommands")]
-        pub remote_commands: Option<super::RemoteCommandsResponse>,
-        #[serde(skip_serializing_if = "Option::is_none", rename = "remoteState")]
-        pub remote_state: Option<super::RemoteStateResponse>,
-    }
+    pub struct Empty;
 
     #[derive(Debug, Serialize)]
     pub struct ScanStatusJson {
@@ -824,14 +730,8 @@ mod json {
         }
     }
 
-    /// Empty bookmarks response for JSON format.
     #[derive(Debug, Serialize)]
-    pub struct BookmarksJson {
-        // Empty - no bookmarks implemented yet
-    }
-
-    #[derive(Debug, Serialize)]
-    pub struct MusicFoldersJson {
+    pub struct MusicFolders {
         #[serde(rename = "musicFolder")]
         pub folders: Vec<super::MusicFolderResponse>,
     }
@@ -845,328 +745,6 @@ mod json {
     #[derive(Debug, Serialize)]
     pub struct License {
         pub valid: bool,
-    }
-
-    #[derive(Debug, Serialize)]
-    pub struct JsonWrapper {
-        #[serde(rename = "subsonic-response")]
-        pub subsonic_response: SubsonicResponse,
-    }
-
-    impl SubsonicResponse {
-        pub const fn ok() -> Self {
-            Self {
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                error: None,
-                license: None,
-                open_subsonic_extensions: None,
-                music_folders: None,
-                indexes: None,
-                artists: None,
-                album: None,
-                artist: None,
-                song: None,
-                album_list2: None,
-                genres: None,
-                search_result3: None,
-                starred2: None,
-                now_playing: None,
-                random_songs: None,
-                songs_by_genre: None,
-                playlists: None,
-                playlist: None,
-                play_queue: None,
-                play_queue_by_index: None,
-                token_info: None,
-                user: None,
-                users: None,
-                scan_status: None,
-                bookmarks: None,
-                artist_info2: None,
-                album_info: None,
-                similar_songs2: None,
-                top_songs: None,
-                lyrics: None,
-                lyrics_list: None,
-                directory: None,
-                album_list: None,
-                starred: None,
-                search_result2: None,
-                search_result: None,
-                artist_info: None,
-                similar_songs: None,
-                remote_session: None,
-                remote_commands: None,
-                remote_state: None,
-            }
-        }
-
-        pub const fn error(code: u32, message: String) -> Self {
-            Self {
-                status: ResponseStatus::Failed,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                error: Some(ErrorDetail { code, message }),
-                license: None,
-                open_subsonic_extensions: None,
-                music_folders: None,
-                indexes: None,
-                artists: None,
-                album: None,
-                artist: None,
-                song: None,
-                album_list2: None,
-                genres: None,
-                search_result3: None,
-                starred2: None,
-                now_playing: None,
-                random_songs: None,
-                songs_by_genre: None,
-                playlists: None,
-                playlist: None,
-                play_queue: None,
-                play_queue_by_index: None,
-                token_info: None,
-                user: None,
-                users: None,
-                scan_status: None,
-                bookmarks: None,
-                artist_info2: None,
-                album_info: None,
-                similar_songs2: None,
-                top_songs: None,
-                lyrics: None,
-                lyrics_list: None,
-                directory: None,
-                album_list: None,
-                starred: None,
-                search_result2: None,
-                search_result: None,
-                artist_info: None,
-                similar_songs: None,
-                remote_session: None,
-                remote_commands: None,
-                remote_state: None,
-            }
-        }
-
-        pub const fn with_license(mut self) -> Self {
-            self.license = Some(License { valid: true });
-            self
-        }
-
-        pub fn with_extensions(mut self, extensions: Vec<OpenSubsonicExtension>) -> Self {
-            self.open_subsonic_extensions = Some(extensions);
-            self
-        }
-
-        pub fn with_music_folders(mut self, folders: Vec<super::MusicFolderResponse>) -> Self {
-            self.music_folders = Some(MusicFoldersJson { folders });
-            self
-        }
-
-        pub fn with_indexes(mut self, indexes: super::IndexesResponse) -> Self {
-            self.indexes = Some(indexes);
-            self
-        }
-
-        pub fn with_artists(mut self, artists: super::ArtistsID3Response) -> Self {
-            self.artists = Some(artists);
-            self
-        }
-
-        pub fn with_album(mut self, album: super::AlbumWithSongsID3Response) -> Self {
-            self.album = Some(album);
-            self
-        }
-
-        pub fn with_artist(mut self, artist: super::ArtistWithAlbumsID3Response) -> Self {
-            self.artist = Some(artist);
-            self
-        }
-
-        pub fn with_song(mut self, song: super::ChildResponse) -> Self {
-            self.song = Some(song);
-            self
-        }
-
-        pub fn with_album_list2(mut self, album_list2: super::AlbumList2Response) -> Self {
-            self.album_list2 = Some(album_list2);
-            self
-        }
-
-        pub fn with_genres(mut self, genres: super::GenresResponse) -> Self {
-            self.genres = Some(genres);
-            self
-        }
-
-        pub fn with_search_result3(mut self, search_result3: super::SearchResult3Response) -> Self {
-            self.search_result3 = Some(search_result3);
-            self
-        }
-
-        pub fn with_starred2(mut self, starred2: super::Starred2Response) -> Self {
-            self.starred2 = Some(starred2);
-            self
-        }
-
-        pub fn with_now_playing(mut self, now_playing: super::NowPlayingResponse) -> Self {
-            self.now_playing = Some(now_playing);
-            self
-        }
-
-        pub fn with_random_songs(mut self, random_songs: super::RandomSongsResponse) -> Self {
-            self.random_songs = Some(random_songs);
-            self
-        }
-
-        pub fn with_songs_by_genre(mut self, songs_by_genre: super::SongsByGenreResponse) -> Self {
-            self.songs_by_genre = Some(songs_by_genre);
-            self
-        }
-
-        pub fn with_playlists(mut self, playlists: super::PlaylistsResponse) -> Self {
-            self.playlists = Some(playlists);
-            self
-        }
-
-        pub fn with_playlist(mut self, playlist: super::PlaylistWithSongsResponse) -> Self {
-            self.playlist = Some(playlist);
-            self
-        }
-
-        pub fn with_play_queue(mut self, play_queue: super::PlayQueueResponse) -> Self {
-            self.play_queue = Some(play_queue);
-            self
-        }
-
-        pub fn with_play_queue_by_index(
-            mut self,
-            play_queue_by_index: super::PlayQueueByIndexResponse,
-        ) -> Self {
-            self.play_queue_by_index = Some(play_queue_by_index);
-            self
-        }
-
-        pub fn with_token_info(mut self, token_info: super::TokenInfoResponse) -> Self {
-            self.token_info = Some(token_info);
-            self
-        }
-
-        pub fn with_user(mut self, user: super::UserResponse) -> Self {
-            self.user = Some(user);
-            self
-        }
-
-        pub fn with_users(mut self, users: super::UsersResponse) -> Self {
-            self.users = Some(users);
-            self
-        }
-
-        pub fn with_scan_status(mut self, data: &super::ScanStatusData) -> Self {
-            self.scan_status = Some(ScanStatusJson::from_data(data));
-            self
-        }
-
-        pub const fn with_bookmarks(mut self) -> Self {
-            self.bookmarks = Some(BookmarksJson {});
-            self
-        }
-
-        pub fn with_artist_info2(mut self, artist_info2: super::ArtistInfo2Response) -> Self {
-            self.artist_info2 = Some(artist_info2);
-            self
-        }
-
-        pub fn with_album_info(mut self, album_info: super::AlbumInfoResponse) -> Self {
-            self.album_info = Some(album_info);
-            self
-        }
-
-        pub fn with_similar_songs2(mut self, similar_songs2: super::SimilarSongs2Response) -> Self {
-            self.similar_songs2 = Some(similar_songs2);
-            self
-        }
-
-        pub fn with_top_songs(mut self, top_songs: super::TopSongsResponse) -> Self {
-            self.top_songs = Some(top_songs);
-            self
-        }
-
-        pub fn with_lyrics(mut self, lyrics: super::LyricsResponse) -> Self {
-            self.lyrics = Some(lyrics);
-            self
-        }
-
-        pub fn with_lyrics_list(mut self, lyrics_list: super::LyricsListResponse) -> Self {
-            self.lyrics_list = Some(lyrics_list);
-            self
-        }
-
-        pub fn with_directory(mut self, directory: super::DirectoryResponse) -> Self {
-            self.directory = Some(directory);
-            self
-        }
-
-        pub fn with_album_list(mut self, album_list: super::AlbumListResponse) -> Self {
-            self.album_list = Some(album_list);
-            self
-        }
-
-        pub fn with_starred(mut self, starred: super::StarredResponse) -> Self {
-            self.starred = Some(starred);
-            self
-        }
-
-        pub fn with_search_result2(mut self, search_result2: super::SearchResult2Response) -> Self {
-            self.search_result2 = Some(search_result2);
-            self
-        }
-
-        pub fn with_search_result(mut self, search_result: super::SearchResultResponse) -> Self {
-            self.search_result = Some(search_result);
-            self
-        }
-
-        pub fn with_artist_info(mut self, artist_info: super::ArtistInfoResponse) -> Self {
-            self.artist_info = Some(artist_info);
-            self
-        }
-
-        pub fn with_similar_songs(mut self, similar_songs: super::SimilarSongsResponse) -> Self {
-            self.similar_songs = Some(similar_songs);
-            self
-        }
-
-        pub fn with_remote_session(mut self, remote_session: super::RemoteSessionResponse) -> Self {
-            self.remote_session = Some(remote_session);
-            self
-        }
-
-        pub fn with_remote_commands(
-            mut self,
-            remote_commands: super::RemoteCommandsResponse,
-        ) -> Self {
-            self.remote_commands = Some(remote_commands);
-            self
-        }
-
-        pub fn with_remote_state(mut self, remote_state: super::RemoteStateResponse) -> Self {
-            self.remote_state = Some(remote_state);
-            self
-        }
-
-        pub const fn wrap(self) -> JsonWrapper {
-            JsonWrapper {
-                subsonic_response: self,
-            }
-        }
     }
 }
 
@@ -1498,142 +1076,79 @@ impl SubsonicResponse {
         clippy::wrong_self_convention,
         reason = "This method consumes self to avoid cloning large response payloads"
     )]
-    #[expect(
-        clippy::too_many_lines,
-        reason = "Serialization dispatch covers all Subsonic response variants"
-    )]
     fn to_json_response(self) -> Response {
         let response = match self.kind {
-            ResponseKind::Empty => json::SubsonicResponse::ok().wrap(),
-            ResponseKind::License => json::SubsonicResponse::ok().with_license().wrap(),
-            ResponseKind::Error { code, message } => {
-                json::SubsonicResponse::error(code, message).wrap()
+            ResponseKind::Empty => Ok(json_empty()),
+            ResponseKind::License => json_named("license", json::License { valid: true }),
+            ResponseKind::Error { code, message } => json_error(code, message),
+            ResponseKind::OpenSubsonicExtensions(extensions) => {
+                json_named("openSubsonicExtensions", extensions)
             }
-            ResponseKind::OpenSubsonicExtensions(extensions) => json::SubsonicResponse::ok()
-                .with_extensions(extensions)
-                .wrap(),
-            ResponseKind::MusicFolders(folders) => json::SubsonicResponse::ok()
-                .with_music_folders(folders)
-                .wrap(),
-            ResponseKind::Indexes(indexes) => {
-                json::SubsonicResponse::ok().with_indexes(indexes).wrap()
+            ResponseKind::MusicFolders(folders) => {
+                json_named("musicFolders", json::MusicFolders { folders })
             }
-            ResponseKind::Artists(artists) => {
-                json::SubsonicResponse::ok().with_artists(artists).wrap()
+            ResponseKind::Indexes(indexes) => json_named("indexes", indexes),
+            ResponseKind::Artists(artists) => json_named("artists", artists),
+            ResponseKind::Album(album) => json_named("album", album),
+            ResponseKind::Artist(artist) => json_named("artist", artist),
+            ResponseKind::Song(song) => json_named("song", song),
+            ResponseKind::AlbumList2(album_list2) => json_named("albumList2", album_list2),
+            ResponseKind::Genres(genres) => json_named("genres", genres),
+            ResponseKind::SearchResult3(search_result3) => {
+                json_named("searchResult3", search_result3)
             }
-            ResponseKind::Album(album) => json::SubsonicResponse::ok().with_album(album).wrap(),
-            ResponseKind::Artist(artist) => json::SubsonicResponse::ok().with_artist(artist).wrap(),
-            ResponseKind::Song(song) => json::SubsonicResponse::ok().with_song(song).wrap(),
-            ResponseKind::AlbumList2(album_list2) => json::SubsonicResponse::ok()
-                .with_album_list2(album_list2)
-                .wrap(),
-            ResponseKind::Genres(genres) => json::SubsonicResponse::ok().with_genres(genres).wrap(),
-            ResponseKind::SearchResult3(search_result3) => json::SubsonicResponse::ok()
-                .with_search_result3(search_result3)
-                .wrap(),
-            ResponseKind::Starred2(starred2) => {
-                json::SubsonicResponse::ok().with_starred2(starred2).wrap()
+            ResponseKind::Starred2(starred2) => json_named("starred2", starred2),
+            ResponseKind::NowPlaying(now_playing) => json_named("nowPlaying", now_playing),
+            ResponseKind::RandomSongs(random_songs) => json_named("randomSongs", random_songs),
+            ResponseKind::SongsByGenre(songs_by_genre) => {
+                json_named("songsByGenre", songs_by_genre)
             }
-            ResponseKind::NowPlaying(now_playing) => json::SubsonicResponse::ok()
-                .with_now_playing(now_playing)
-                .wrap(),
-            ResponseKind::RandomSongs(random_songs) => json::SubsonicResponse::ok()
-                .with_random_songs(random_songs)
-                .wrap(),
-            ResponseKind::SongsByGenre(songs_by_genre) => json::SubsonicResponse::ok()
-                .with_songs_by_genre(songs_by_genre)
-                .wrap(),
-            ResponseKind::Playlists(playlists) => json::SubsonicResponse::ok()
-                .with_playlists(playlists)
-                .wrap(),
-            ResponseKind::Playlist(playlist) => {
-                json::SubsonicResponse::ok().with_playlist(playlist).wrap()
+            ResponseKind::Playlists(playlists) => json_named("playlists", playlists),
+            ResponseKind::Playlist(playlist) => json_named("playlist", playlist),
+            ResponseKind::PlayQueue(play_queue) => json_named("playQueue", play_queue),
+            ResponseKind::PlayQueueByIndex(play_queue_by_index) => {
+                json_named("playQueueByIndex", play_queue_by_index)
             }
-            ResponseKind::PlayQueue(play_queue) => json::SubsonicResponse::ok()
-                .with_play_queue(play_queue)
-                .wrap(),
-            ResponseKind::PlayQueueByIndex(play_queue_by_index) => json::SubsonicResponse::ok()
-                .with_play_queue_by_index(play_queue_by_index)
-                .wrap(),
-            ResponseKind::TokenInfo(token_info) => json::SubsonicResponse::ok()
-                .with_token_info(token_info)
-                .wrap(),
-            ResponseKind::User(user) => json::SubsonicResponse::ok().with_user(user).wrap(),
-            ResponseKind::Users(users) => json::SubsonicResponse::ok().with_users(users).wrap(),
+            ResponseKind::TokenInfo(token_info) => json_named("tokenInfo", token_info),
+            ResponseKind::User(user) => json_named("user", user),
+            ResponseKind::Users(users) => json_named("users", users),
             ResponseKind::ScanStatus(data) => {
-                json::SubsonicResponse::ok().with_scan_status(&data).wrap()
+                json_named("scanStatus", json::ScanStatusJson::from_data(&data))
             }
-            ResponseKind::Bookmarks => json::SubsonicResponse::ok().with_bookmarks().wrap(),
-            ResponseKind::ArtistInfo2(artist_info2) => json::SubsonicResponse::ok()
-                .with_artist_info2(artist_info2)
-                .wrap(),
-            ResponseKind::AlbumInfo(album_info) => json::SubsonicResponse::ok()
-                .with_album_info(album_info)
-                .wrap(),
-            ResponseKind::SimilarSongs2(similar_songs2) => json::SubsonicResponse::ok()
-                .with_similar_songs2(similar_songs2)
-                .wrap(),
-            ResponseKind::TopSongs(top_songs) => json::SubsonicResponse::ok()
-                .with_top_songs(top_songs)
-                .wrap(),
-            ResponseKind::Lyrics(lyrics) => json::SubsonicResponse::ok().with_lyrics(lyrics).wrap(),
-            ResponseKind::LyricsList(lyrics_list) => json::SubsonicResponse::ok()
-                .with_lyrics_list(lyrics_list)
-                .wrap(),
-            ResponseKind::Directory(directory) => json::SubsonicResponse::ok()
-                .with_directory(directory)
-                .wrap(),
-            ResponseKind::AlbumList(album_list) => json::SubsonicResponse::ok()
-                .with_album_list(album_list)
-                .wrap(),
-            ResponseKind::Starred(starred) => {
-                json::SubsonicResponse::ok().with_starred(starred).wrap()
+            ResponseKind::Bookmarks => json_named("bookmarks", json::Empty),
+            ResponseKind::ArtistInfo2(artist_info2) => json_named("artistInfo2", artist_info2),
+            ResponseKind::AlbumInfo(album_info) => json_named("albumInfo", album_info),
+            ResponseKind::SimilarSongs2(similar_songs2) => {
+                json_named("similarSongs2", similar_songs2)
             }
-            ResponseKind::SearchResult2(search_result2) => json::SubsonicResponse::ok()
-                .with_search_result2(search_result2)
-                .wrap(),
-            ResponseKind::SearchResult(search_result) => json::SubsonicResponse::ok()
-                .with_search_result(search_result)
-                .wrap(),
-            ResponseKind::ArtistInfo(artist_info) => json::SubsonicResponse::ok()
-                .with_artist_info(artist_info)
-                .wrap(),
-            ResponseKind::SimilarSongs(similar_songs) => json::SubsonicResponse::ok()
-                .with_similar_songs(similar_songs)
-                .wrap(),
-            ResponseKind::RemoteSession(remote_session) => json::SubsonicResponse::ok()
-                .with_remote_session(remote_session)
-                .wrap(),
-            ResponseKind::RemoteCommands(remote_commands) => json::SubsonicResponse::ok()
-                .with_remote_commands(remote_commands)
-                .wrap(),
-            ResponseKind::RemoteState(remote_state) => json::SubsonicResponse::ok()
-                .with_remote_state(remote_state)
-                .wrap(),
+            ResponseKind::TopSongs(top_songs) => json_named("topSongs", top_songs),
+            ResponseKind::Lyrics(lyrics) => json_named("lyrics", lyrics),
+            ResponseKind::LyricsList(lyrics_list) => json_named("lyricsList", lyrics_list),
+            ResponseKind::Directory(directory) => json_named("directory", directory),
+            ResponseKind::AlbumList(album_list) => json_named("albumList", album_list),
+            ResponseKind::Starred(starred) => json_named("starred", starred),
+            ResponseKind::SearchResult2(search_result2) => {
+                json_named("searchResult2", search_result2)
+            }
+            ResponseKind::SearchResult(search_result) => json_named("searchResult", search_result),
+            ResponseKind::ArtistInfo(artist_info) => json_named("artistInfo", artist_info),
+            ResponseKind::SimilarSongs(similar_songs) => json_named("similarSongs", similar_songs),
+            ResponseKind::RemoteSession(remote_session) => {
+                json_named("remoteSession", remote_session)
+            }
+            ResponseKind::RemoteCommands(remote_commands) => {
+                json_named("remoteCommands", remote_commands)
+            }
+            ResponseKind::RemoteState(remote_state) => json_named("remoteState", remote_state),
         };
 
-        match serde_json::to_string(&response) {
-            Ok(json) => {
-                // Transform JSON keys: remove @ prefix and convert $text to $value
-                let transformed = match transform_json_keys(&json) {
-                    Ok(transformed) => transformed,
-                    Err(error) => {
-                        tracing::event!(
-                            name: "api.response.transform_json.failed",
-                            tracing::Level::ERROR,
-                            error = %error,
-                            "json response transform failed"
-                        );
-                        return json_internal_error_response();
-                    }
-                };
-                (
-                    StatusCode::OK,
-                    [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
-                    transformed,
-                )
-                    .into_response()
-            }
+        match response.and_then(|response| serde_json::to_string(&response)) {
+            Ok(json) => (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+                json,
+            )
+                .into_response(),
             Err(e) => {
                 tracing::event!(
                     name: "api.response.serialize_json.failed",
@@ -1645,6 +1160,47 @@ impl SubsonicResponse {
             }
         }
     }
+}
+
+fn json_base(status: ResponseStatus) -> serde_json::Map<String, serde_json::Value> {
+    let mut response = serde_json::Map::new();
+    response.insert("status".into(), serde_json::json!(status));
+    response.insert("version".into(), serde_json::json!(API_VERSION));
+    response.insert("type".into(), serde_json::json!(SERVER_NAME));
+    response.insert("serverVersion".into(), serde_json::json!(SERVER_VERSION));
+    response.insert("openSubsonic".into(), serde_json::json!(true));
+    response
+}
+
+fn json_wrap(response: serde_json::Map<String, serde_json::Value>) -> serde_json::Value {
+    let mut wrapper = serde_json::Map::new();
+    wrapper.insert(
+        "subsonic-response".into(),
+        serde_json::Value::Object(response),
+    );
+    serde_json::Value::Object(wrapper)
+}
+
+fn json_empty() -> serde_json::Value {
+    json_wrap(json_base(ResponseStatus::Ok))
+}
+
+fn json_named<T: Serialize>(
+    name: &'static str,
+    payload: T,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let mut response = json_base(ResponseStatus::Ok);
+    response.insert(name.into(), transform_value(serde_json::to_value(payload)?));
+    Ok(json_wrap(response))
+}
+
+fn json_error(code: u32, message: String) -> Result<serde_json::Value, serde_json::Error> {
+    let mut response = json_base(ResponseStatus::Failed);
+    response.insert(
+        "error".into(),
+        serde_json::to_value(json::ErrorDetail { code, message })?,
+    );
+    Ok(json_wrap(response))
 }
 
 fn json_internal_error_response() -> Response {
@@ -1659,6 +1215,7 @@ fn json_internal_error_response() -> Response {
 /// Transform JSON keys to match Subsonic API expectations:
 /// - Remove @ prefix from attribute keys
 /// - Convert $text to value (for genre text content)
+#[cfg(test)]
 fn transform_json_keys(json: &str) -> Result<String, serde_json::Error> {
     // Parse as Value, transform, and re-serialize
     let value = serde_json::from_str::<serde_json::Value>(json)?;
@@ -1705,10 +1262,11 @@ mod tests {
     #[test]
     fn format_from_param_accepts_only_json_like_formats() {
         assert_eq!(Format::from_param(Some("json")), Ok(Format::Json));
+        assert_eq!(Format::from_param(Some("JSON")), Ok(Format::Json));
         assert_eq!(Format::from_param(Some("xml")), Ok(Format::Xml));
+        assert_eq!(Format::from_param(Some("XML")), Ok(Format::Xml));
         assert_eq!(Format::from_param(None), Ok(Format::Xml));
         assert_eq!(Format::from_param(Some("jsonp")), Err("jsonp".to_string()));
-        assert_eq!(Format::from_param(Some("JSON")), Err("JSON".to_string()));
     }
 
     #[test]

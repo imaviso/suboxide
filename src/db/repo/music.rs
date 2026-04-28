@@ -223,20 +223,19 @@ impl ArtistRepository {
 
     /// Get all artists.
     pub fn find_all(&self) -> Result<Vec<Artist>, MusicRepoError> {
-        let mut conn = self.pool.get().map_err(MusicRepoError::from)?;
+        let mut conn = self.pool.get()?;
 
         let results = artists::table
             .select(ArtistRow::as_select())
             .order(artists::name.asc())
-            .load(&mut conn)
-            .map_err(MusicRepoError::from)?;
+            .load(&mut conn)?;
 
         Ok(results.into_iter().map(Artist::from).collect())
     }
 
     /// Get artists with songs in a music folder.
     pub fn find_by_music_folder(&self, folder_id: i32) -> Result<Vec<Artist>, MusicRepoError> {
-        let mut conn = self.pool.get().map_err(MusicRepoError::from)?;
+        let mut conn = self.pool.get()?;
 
         let results = artists::table
             .inner_join(songs::table.on(songs::artist_id.eq(artists::id.nullable())))
@@ -244,22 +243,20 @@ impl ArtistRepository {
             .select(ArtistRow::as_select())
             .distinct()
             .order(artists::name.asc())
-            .load(&mut conn)
-            .map_err(MusicRepoError::from)?;
+            .load(&mut conn)?;
 
         Ok(results.into_iter().map(Artist::from).collect())
     }
 
     /// Find an artist by ID.
     pub fn find_by_id(&self, artist_id: i32) -> Result<Option<Artist>, MusicRepoError> {
-        let mut conn = self.pool.get().map_err(MusicRepoError::from)?;
+        let mut conn = self.pool.get()?;
 
         let result = artists::table
             .filter(artists::id.eq(artist_id))
             .select(ArtistRow::as_select())
             .first(&mut conn)
-            .optional()
-            .map_err(MusicRepoError::from)?;
+            .optional()?;
 
         Ok(result.map(Artist::from))
     }
@@ -974,15 +971,14 @@ impl SongRepository {
         artist: &str,
         title: &str,
     ) -> Result<Option<Song>, MusicRepoError> {
-        let mut conn = self.pool.get().map_err(MusicRepoError::from)?;
+        let mut conn = self.pool.get()?;
 
         let result = songs::table
             .filter(songs::artist_name.eq(artist))
             .filter(songs::title.eq(title))
             .select(SongRow::as_select())
             .first(&mut conn)
-            .optional()
-            .map_err(MusicRepoError::from)?;
+            .optional()?;
 
         Ok(result.map(Song::from))
     }
@@ -994,15 +990,14 @@ impl SongRepository {
         artist_name: &str,
         limit: i64,
     ) -> Result<Vec<Song>, MusicRepoError> {
-        let mut conn = self.pool.get().map_err(MusicRepoError::from)?;
+        let mut conn = self.pool.get()?;
 
         let results = songs::table
             .filter(songs::artist_name.eq(artist_name))
             .select(SongRow::as_select())
             .order(songs::play_count.desc())
             .limit(limit)
-            .load(&mut conn)
-            .map_err(MusicRepoError::from)?;
+            .load(&mut conn)?;
 
         Ok(results.into_iter().map(Song::from).collect())
     }
