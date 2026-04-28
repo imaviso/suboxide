@@ -126,35 +126,84 @@ mod xml {
     // Note: quick_xml doesn't support #[serde(flatten)], so we need to include
     // all base attributes directly in each response struct.
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct EmptyResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
+    // Generates an XML response struct with the standard Subsonic base attributes.
+    macro_rules! xml_response {
+        // Empty response (no content fields).
+        (pub struct $name:ident) => {
+            #[derive(Debug, Serialize)]
+            #[serde(rename = "subsonic-response")]
+            pub struct $name {
+                #[serde(rename = "@xmlns")]
+                pub xmlns: &'static str,
+                #[serde(rename = "@status")]
+                pub status: ResponseStatus,
+                #[serde(rename = "@version")]
+                pub version: &'static str,
+                #[serde(rename = "@type")]
+                pub server_type: &'static str,
+                #[serde(rename = "@serverVersion")]
+                pub server_version: &'static str,
+                #[serde(rename = "@openSubsonic")]
+                pub open_subsonic: bool,
+            }
+
+            impl $name {
+                pub const fn ok() -> Self {
+                    Self {
+                        xmlns: "http://subsonic.org/restapi",
+                        status: ResponseStatus::Ok,
+                        version: API_VERSION,
+                        server_type: SERVER_NAME,
+                        server_version: SERVER_VERSION,
+                        open_subsonic: true,
+                    }
+                }
+            }
+        };
+
+        // Single-field response with a `new` constructor.
+        (
+            pub struct $name:ident {
+                $(#[$field_meta:meta])*
+                $field_vis:vis $field_name:ident: $field_ty:ty $(,)?
+            }
+        ) => {
+            #[derive(Debug, Serialize)]
+            #[serde(rename = "subsonic-response")]
+            pub struct $name {
+                #[serde(rename = "@xmlns")]
+                pub xmlns: &'static str,
+                #[serde(rename = "@status")]
+                pub status: ResponseStatus,
+                #[serde(rename = "@version")]
+                pub version: &'static str,
+                #[serde(rename = "@type")]
+                pub server_type: &'static str,
+                #[serde(rename = "@serverVersion")]
+                pub server_version: &'static str,
+                #[serde(rename = "@openSubsonic")]
+                pub open_subsonic: bool,
+                $(#[$field_meta])*
+                $field_vis $field_name: $field_ty,
+            }
+
+            impl $name {
+                pub const fn new($field_name: $field_ty) -> Self {
+                    Self {
+                        xmlns: "http://subsonic.org/restapi",
+                        status: ResponseStatus::Ok,
+                        version: API_VERSION,
+                        server_type: SERVER_NAME,
+                        server_version: SERVER_VERSION,
+                        open_subsonic: true,
+                        $field_name,
+                    }
+                }
+            }
+        };
     }
 
-    impl EmptyResponse {
-        pub const fn ok() -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-            }
-        }
-    }
+    xml_response!(pub struct EmptyResponse);
 
     #[derive(Debug, Serialize)]
     pub struct ErrorDetail {
@@ -242,36 +291,10 @@ mod xml {
         pub versions: Vec<i32>,
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct OpenSubsonicExtensionsResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "openSubsonicExtensions")]
-        pub extensions: Vec<OpenSubsonicExtensionXml>,
-    }
-
-    impl OpenSubsonicExtensionsResponse {
-        pub const fn new(extensions: Vec<OpenSubsonicExtensionXml>) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                extensions,
-            }
+    xml_response! {
+        pub struct OpenSubsonicExtensionsResponse {
+            #[serde(rename = "openSubsonicExtensions")]
+            pub extensions: Vec<OpenSubsonicExtensionXml>
         }
     }
 
@@ -314,630 +337,136 @@ mod xml {
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct IndexesResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "indexes")]
-        pub indexes: super::IndexesResponse,
-    }
-
-    impl IndexesResponse {
-        pub const fn new(indexes: super::IndexesResponse) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                indexes,
-            }
+    xml_response! {
+        pub struct IndexesResponse {
+            #[serde(rename = "indexes")]
+            pub indexes: super::IndexesResponse
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct ArtistsResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "artists")]
-        pub artists: super::ArtistsID3Response,
-    }
-
-    impl ArtistsResponse {
-        pub const fn new(artists: super::ArtistsID3Response) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                artists,
-            }
+    xml_response! {
+        pub struct ArtistsResponse {
+            #[serde(rename = "artists")]
+            pub artists: super::ArtistsID3Response
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct AlbumResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "album")]
-        pub album: super::AlbumWithSongsID3Response,
-    }
-
-    impl AlbumResponse {
-        pub const fn new(album: super::AlbumWithSongsID3Response) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                album,
-            }
+    xml_response! {
+        pub struct AlbumResponse {
+            #[serde(rename = "album")]
+            pub album: super::AlbumWithSongsID3Response
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct ArtistResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "artist")]
-        pub artist: super::ArtistWithAlbumsID3Response,
-    }
-
-    impl ArtistResponse {
-        pub const fn new(artist: super::ArtistWithAlbumsID3Response) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                artist,
-            }
+    xml_response! {
+        pub struct ArtistResponse {
+            #[serde(rename = "artist")]
+            pub artist: super::ArtistWithAlbumsID3Response
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct SongResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "song")]
-        pub song: super::ChildResponse,
-    }
-
-    impl SongResponse {
-        pub const fn new(song: super::ChildResponse) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                song,
-            }
+    xml_response! {
+        pub struct SongResponse {
+            #[serde(rename = "song")]
+            pub song: super::ChildResponse
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct AlbumList2Response {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "albumList2")]
-        pub album_list2: super::AlbumList2Response,
-    }
-
-    impl AlbumList2Response {
-        pub const fn new(album_list2: super::AlbumList2Response) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                album_list2,
-            }
+    xml_response! {
+        pub struct AlbumList2Response {
+            #[serde(rename = "albumList2")]
+            pub album_list2: super::AlbumList2Response
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct GenresResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "genres")]
-        pub genres: super::GenresResponse,
-    }
-
-    impl GenresResponse {
-        pub const fn new(genres: super::GenresResponse) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                genres,
-            }
+    xml_response! {
+        pub struct GenresResponse {
+            #[serde(rename = "genres")]
+            pub genres: super::GenresResponse
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct SearchResult3Response {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "searchResult3")]
-        pub search_result3: super::SearchResult3Response,
-    }
-
-    impl SearchResult3Response {
-        pub const fn new(search_result3: super::SearchResult3Response) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                search_result3,
-            }
+    xml_response! {
+        pub struct SearchResult3Response {
+            #[serde(rename = "searchResult3")]
+            pub search_result3: super::SearchResult3Response
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct Starred2Response {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "starred2")]
-        pub starred2: super::Starred2Response,
-    }
-
-    impl Starred2Response {
-        pub const fn new(starred2: super::Starred2Response) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                starred2,
-            }
+    xml_response! {
+        pub struct Starred2Response {
+            #[serde(rename = "starred2")]
+            pub starred2: super::Starred2Response
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct NowPlayingResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "nowPlaying")]
-        pub now_playing: super::NowPlayingResponse,
-    }
-
-    impl NowPlayingResponse {
-        pub const fn new(now_playing: super::NowPlayingResponse) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                now_playing,
-            }
+    xml_response! {
+        pub struct NowPlayingResponse {
+            #[serde(rename = "nowPlaying")]
+            pub now_playing: super::NowPlayingResponse
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct RandomSongsResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "randomSongs")]
-        pub random_songs: super::RandomSongsResponse,
-    }
-
-    impl RandomSongsResponse {
-        pub const fn new(random_songs: super::RandomSongsResponse) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                random_songs,
-            }
+    xml_response! {
+        pub struct RandomSongsResponse {
+            #[serde(rename = "randomSongs")]
+            pub random_songs: super::RandomSongsResponse
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct SongsByGenreResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "songsByGenre")]
-        pub songs_by_genre: super::SongsByGenreResponse,
-    }
-
-    impl SongsByGenreResponse {
-        pub const fn new(songs_by_genre: super::SongsByGenreResponse) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                songs_by_genre,
-            }
+    xml_response! {
+        pub struct SongsByGenreResponse {
+            #[serde(rename = "songsByGenre")]
+            pub songs_by_genre: super::SongsByGenreResponse
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct PlaylistsResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "playlists")]
-        pub playlists: super::PlaylistsResponse,
-    }
-
-    impl PlaylistsResponse {
-        pub const fn new(playlists: super::PlaylistsResponse) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                playlists,
-            }
+    xml_response! {
+        pub struct PlaylistsResponse {
+            #[serde(rename = "playlists")]
+            pub playlists: super::PlaylistsResponse
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct PlaylistResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "playlist")]
-        pub playlist: super::PlaylistWithSongsResponse,
-    }
-
-    impl PlaylistResponse {
-        pub const fn new(playlist: super::PlaylistWithSongsResponse) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                playlist,
-            }
+    xml_response! {
+        pub struct PlaylistResponse {
+            #[serde(rename = "playlist")]
+            pub playlist: super::PlaylistWithSongsResponse
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct PlayQueueResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "playQueue")]
-        pub play_queue: super::PlayQueueResponse,
-    }
-
-    impl PlayQueueResponse {
-        pub const fn new(play_queue: super::PlayQueueResponse) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                play_queue,
-            }
+    xml_response! {
+        pub struct PlayQueueResponse {
+            #[serde(rename = "playQueue")]
+            pub play_queue: super::PlayQueueResponse
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct PlayQueueByIndexResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "playQueueByIndex")]
-        pub play_queue_by_index: super::PlayQueueByIndexResponse,
-    }
-
-    impl PlayQueueByIndexResponse {
-        pub const fn new(play_queue_by_index: super::PlayQueueByIndexResponse) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                play_queue_by_index,
-            }
+    xml_response! {
+        pub struct PlayQueueByIndexResponse {
+            #[serde(rename = "playQueueByIndex")]
+            pub play_queue_by_index: super::PlayQueueByIndexResponse
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct TokenInfoResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "tokenInfo")]
-        pub token_info: super::TokenInfoResponse,
-    }
-
-    impl TokenInfoResponse {
-        pub const fn new(token_info: super::TokenInfoResponse) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                token_info,
-            }
+    xml_response! {
+        pub struct TokenInfoResponse {
+            #[serde(rename = "tokenInfo")]
+            pub token_info: super::TokenInfoResponse
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct UserResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "user")]
-        pub user: super::UserResponse,
-    }
-
-    impl UserResponse {
-        pub const fn new(user: super::UserResponse) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                user,
-            }
+    xml_response! {
+        pub struct UserResponse {
+            #[serde(rename = "user")]
+            pub user: super::UserResponse
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct UsersResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "users")]
-        pub users: super::UsersResponse,
-    }
-
-    impl UsersResponse {
-        pub const fn new(users: super::UsersResponse) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                users,
-            }
+    xml_response! {
+        pub struct UsersResponse {
+            #[serde(rename = "users")]
+            pub users: super::UsersResponse
         }
     }
 
@@ -1047,538 +576,118 @@ mod xml {
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct ArtistInfo2Response {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "artistInfo2")]
-        pub artist_info2: super::ArtistInfo2Response,
-    }
-
-    impl ArtistInfo2Response {
-        pub const fn new(artist_info2: super::ArtistInfo2Response) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                artist_info2,
-            }
+    xml_response! {
+        pub struct ArtistInfo2Response {
+            #[serde(rename = "artistInfo2")]
+            pub artist_info2: super::ArtistInfo2Response
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct AlbumInfoResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "albumInfo")]
-        pub album_info: super::AlbumInfoResponse,
-    }
-
-    impl AlbumInfoResponse {
-        pub const fn new(album_info: super::AlbumInfoResponse) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                album_info,
-            }
+    xml_response! {
+        pub struct AlbumInfoResponse {
+            #[serde(rename = "albumInfo")]
+            pub album_info: super::AlbumInfoResponse
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct SimilarSongs2Response {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "similarSongs2")]
-        pub similar_songs2: super::SimilarSongs2Response,
-    }
-
-    impl SimilarSongs2Response {
-        pub const fn new(similar_songs2: super::SimilarSongs2Response) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                similar_songs2,
-            }
+    xml_response! {
+        pub struct SimilarSongs2Response {
+            #[serde(rename = "similarSongs2")]
+            pub similar_songs2: super::SimilarSongs2Response
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct TopSongsResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "topSongs")]
-        pub top_songs: super::TopSongsResponse,
-    }
-
-    impl TopSongsResponse {
-        pub const fn new(top_songs: super::TopSongsResponse) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                top_songs,
-            }
+    xml_response! {
+        pub struct TopSongsResponse {
+            #[serde(rename = "topSongs")]
+            pub top_songs: super::TopSongsResponse
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct LyricsResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "lyrics")]
-        pub lyrics: super::LyricsResponse,
-    }
-
-    impl LyricsResponse {
-        pub const fn new(lyrics: super::LyricsResponse) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                lyrics,
-            }
+    xml_response! {
+        pub struct LyricsResponse {
+            #[serde(rename = "lyrics")]
+            pub lyrics: super::LyricsResponse
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct LyricsListResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "lyricsList")]
-        pub lyrics_list: super::LyricsListResponse,
-    }
-
-    impl LyricsListResponse {
-        pub const fn new(lyrics_list: super::LyricsListResponse) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                lyrics_list,
-            }
+    xml_response! {
+        pub struct LyricsListResponse {
+            #[serde(rename = "lyricsList")]
+            pub lyrics_list: super::LyricsListResponse
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct DirectoryResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "directory")]
-        pub directory: super::DirectoryResponse,
-    }
-
-    impl DirectoryResponse {
-        pub const fn new(directory: super::DirectoryResponse) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                directory,
-            }
+    xml_response! {
+        pub struct DirectoryResponse {
+            #[serde(rename = "directory")]
+            pub directory: super::DirectoryResponse
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct AlbumListResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "albumList")]
-        pub album_list: super::AlbumListResponse,
-    }
-
-    impl AlbumListResponse {
-        pub const fn new(album_list: super::AlbumListResponse) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                album_list,
-            }
+    xml_response! {
+        pub struct AlbumListResponse {
+            #[serde(rename = "albumList")]
+            pub album_list: super::AlbumListResponse
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct StarredResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "starred")]
-        pub starred: super::StarredResponse,
-    }
-
-    impl StarredResponse {
-        pub const fn new(starred: super::StarredResponse) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                starred,
-            }
+    xml_response! {
+        pub struct StarredResponse {
+            #[serde(rename = "starred")]
+            pub starred: super::StarredResponse
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct SearchResult2Response {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "searchResult2")]
-        pub search_result2: super::SearchResult2Response,
-    }
-
-    impl SearchResult2Response {
-        pub const fn new(search_result2: super::SearchResult2Response) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                search_result2,
-            }
+    xml_response! {
+        pub struct SearchResult2Response {
+            #[serde(rename = "searchResult2")]
+            pub search_result2: super::SearchResult2Response
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct SearchResultResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "searchResult")]
-        pub search_result: super::SearchResultResponse,
-    }
-
-    impl SearchResultResponse {
-        pub const fn new(search_result: super::SearchResultResponse) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                search_result,
-            }
+    xml_response! {
+        pub struct SearchResultResponse {
+            #[serde(rename = "searchResult")]
+            pub search_result: super::SearchResultResponse
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct ArtistInfoResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "artistInfo")]
-        pub artist_info: super::ArtistInfoResponse,
-    }
-
-    impl ArtistInfoResponse {
-        pub const fn new(artist_info: super::ArtistInfoResponse) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                artist_info,
-            }
+    xml_response! {
+        pub struct ArtistInfoResponse {
+            #[serde(rename = "artistInfo")]
+            pub artist_info: super::ArtistInfoResponse
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct SimilarSongsResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "similarSongs")]
-        pub similar_songs: super::SimilarSongsResponse,
-    }
-
-    impl SimilarSongsResponse {
-        pub const fn new(similar_songs: super::SimilarSongsResponse) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                similar_songs,
-            }
+    xml_response! {
+        pub struct SimilarSongsResponse {
+            #[serde(rename = "similarSongs")]
+            pub similar_songs: super::SimilarSongsResponse
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct RemoteSessionResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "remoteSession")]
-        pub remote_session: super::RemoteSessionResponse,
-    }
-
-    impl RemoteSessionResponse {
-        pub const fn new(remote_session: super::RemoteSessionResponse) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                remote_session,
-            }
+    xml_response! {
+        pub struct RemoteSessionResponse {
+            #[serde(rename = "remoteSession")]
+            pub remote_session: super::RemoteSessionResponse
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct RemoteCommandsResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "remoteCommands")]
-        pub remote_commands: super::RemoteCommandsResponse,
-    }
-
-    impl RemoteCommandsResponse {
-        pub const fn new(remote_commands: super::RemoteCommandsResponse) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                remote_commands,
-            }
+    xml_response! {
+        pub struct RemoteCommandsResponse {
+            #[serde(rename = "remoteCommands")]
+            pub remote_commands: super::RemoteCommandsResponse
         }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct RemoteStateResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "remoteState")]
-        pub remote_state: super::RemoteStateResponse,
-    }
-
-    impl RemoteStateResponse {
-        pub const fn new(remote_state: super::RemoteStateResponse) -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                remote_state,
-            }
+    xml_response! {
+        pub struct RemoteStateResponse {
+            #[serde(rename = "remoteState")]
+            pub remote_state: super::RemoteStateResponse
         }
     }
 }
-
-// ============================================================================
-// JSON Response Types (use camelCase naming, wrapped in subsonic-response)
-// ============================================================================
 
 mod json {
     use super::{
