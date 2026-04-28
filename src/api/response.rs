@@ -1232,351 +1232,92 @@ enum ResponseKind {
     RemoteState(RemoteStateResponse),
 }
 
+macro_rules! response_constructor {
+    ($name:ident, $payload:ty, $variant:ident) => {
+        #[must_use]
+        pub const fn $name(format: Format, payload: $payload) -> Self {
+            Self::new(format, ResponseKind::$variant(payload))
+        }
+    };
+}
+
 impl SubsonicResponse {
+    const fn new(format: Format, kind: ResponseKind) -> Self {
+        Self { format, kind }
+    }
+
     #[must_use]
     pub const fn empty(format: Format) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::Empty,
-        }
+        Self::new(format, ResponseKind::Empty)
     }
 
     #[must_use]
     pub const fn license(format: Format) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::License,
-        }
+        Self::new(format, ResponseKind::License)
     }
 
     #[must_use]
     pub fn error(format: Format, error: &ApiError) -> Self {
-        Self {
+        Self::new(
             format,
-            kind: ResponseKind::Error {
+            ResponseKind::Error {
                 code: error.code(),
                 message: error.message(),
             },
-        }
-    }
-
-    #[must_use]
-    pub const fn open_subsonic_extensions(
-        format: Format,
-        extensions: Vec<OpenSubsonicExtension>,
-    ) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::OpenSubsonicExtensions(extensions),
-        }
-    }
-
-    #[must_use]
-    pub const fn music_folders(format: Format, folders: Vec<MusicFolderResponse>) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::MusicFolders(folders),
-        }
-    }
-
-    #[must_use]
-    pub const fn indexes(format: Format, indexes: IndexesResponse) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::Indexes(indexes),
-        }
-    }
-
-    #[must_use]
-    pub const fn artists(format: Format, artists: ArtistsID3Response) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::Artists(artists),
-        }
-    }
-
-    #[must_use]
-    pub const fn album(format: Format, album: AlbumWithSongsID3Response) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::Album(album),
-        }
-    }
-
-    #[must_use]
-    pub const fn artist(format: Format, artist: ArtistWithAlbumsID3Response) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::Artist(artist),
-        }
-    }
-
-    #[must_use]
-    pub const fn song(format: Format, song: ChildResponse) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::Song(song),
-        }
-    }
-
-    #[must_use]
-    pub const fn album_list2(format: Format, album_list2: AlbumList2Response) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::AlbumList2(album_list2),
-        }
-    }
-
-    #[must_use]
-    pub const fn genres(format: Format, genres: GenresResponse) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::Genres(genres),
-        }
-    }
-
-    #[must_use]
-    pub const fn search_result3(format: Format, search_result3: SearchResult3Response) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::SearchResult3(search_result3),
-        }
-    }
-
-    #[must_use]
-    pub const fn starred2(format: Format, starred2: Starred2Response) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::Starred2(starred2),
-        }
-    }
-
-    #[must_use]
-    pub const fn now_playing(format: Format, now_playing: NowPlayingResponse) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::NowPlaying(now_playing),
-        }
-    }
-
-    #[must_use]
-    pub const fn random_songs(format: Format, random_songs: RandomSongsResponse) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::RandomSongs(random_songs),
-        }
-    }
-
-    #[must_use]
-    pub const fn songs_by_genre(format: Format, songs_by_genre: SongsByGenreResponse) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::SongsByGenre(songs_by_genre),
-        }
-    }
-
-    #[must_use]
-    pub const fn playlists(format: Format, playlists: PlaylistsResponse) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::Playlists(playlists),
-        }
-    }
-
-    #[must_use]
-    pub const fn playlist(format: Format, playlist: PlaylistWithSongsResponse) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::Playlist(playlist),
-        }
-    }
-
-    #[must_use]
-    pub const fn play_queue(format: Format, play_queue: PlayQueueResponse) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::PlayQueue(play_queue),
-        }
-    }
-
-    #[must_use]
-    pub const fn play_queue_by_index(
-        format: Format,
-        play_queue_by_index: PlayQueueByIndexResponse,
-    ) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::PlayQueueByIndex(play_queue_by_index),
-        }
-    }
-
-    #[must_use]
-    pub const fn token_info(format: Format, token_info: TokenInfoResponse) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::TokenInfo(token_info),
-        }
-    }
-
-    #[must_use]
-    pub const fn user(format: Format, user: UserResponse) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::User(user),
-        }
-    }
-
-    #[must_use]
-    pub const fn users(format: Format, users: UsersResponse) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::Users(users),
-        }
-    }
-
-    #[must_use]
-    pub const fn scan_status(format: Format, data: ScanStatusData) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::ScanStatus(data),
-        }
+        )
     }
 
     #[must_use]
     pub const fn bookmarks(format: Format) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::Bookmarks,
-        }
+        Self::new(format, ResponseKind::Bookmarks)
     }
 
-    #[must_use]
-    pub const fn artist_info2(format: Format, artist_info2: ArtistInfo2Response) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::ArtistInfo2(artist_info2),
-        }
-    }
-
-    #[must_use]
-    pub const fn album_info(format: Format, album_info: AlbumInfoResponse) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::AlbumInfo(album_info),
-        }
-    }
-
-    #[must_use]
-    pub const fn similar_songs2(format: Format, similar_songs2: SimilarSongs2Response) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::SimilarSongs2(similar_songs2),
-        }
-    }
-
-    #[must_use]
-    pub const fn top_songs(format: Format, top_songs: TopSongsResponse) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::TopSongs(top_songs),
-        }
-    }
-
-    #[must_use]
-    pub const fn lyrics(format: Format, lyrics: LyricsResponse) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::Lyrics(lyrics),
-        }
-    }
-
-    #[must_use]
-    pub const fn lyrics_list(format: Format, lyrics_list: LyricsListResponse) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::LyricsList(lyrics_list),
-        }
-    }
-
-    #[must_use]
-    pub const fn directory(format: Format, directory: DirectoryResponse) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::Directory(directory),
-        }
-    }
-
-    #[must_use]
-    pub const fn album_list(format: Format, album_list: AlbumListResponse) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::AlbumList(album_list),
-        }
-    }
-
-    #[must_use]
-    pub const fn starred(format: Format, starred: StarredResponse) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::Starred(starred),
-        }
-    }
-
-    #[must_use]
-    pub const fn search_result2(format: Format, search_result2: SearchResult2Response) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::SearchResult2(search_result2),
-        }
-    }
-
-    #[must_use]
-    pub const fn search_result(format: Format, search_result: SearchResultResponse) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::SearchResult(search_result),
-        }
-    }
-
-    #[must_use]
-    pub const fn artist_info(format: Format, artist_info: ArtistInfoResponse) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::ArtistInfo(artist_info),
-        }
-    }
-
-    #[must_use]
-    pub const fn similar_songs(format: Format, similar_songs: SimilarSongsResponse) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::SimilarSongs(similar_songs),
-        }
-    }
-
-    #[must_use]
-    pub const fn remote_session(format: Format, remote_session: RemoteSessionResponse) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::RemoteSession(remote_session),
-        }
-    }
-
-    #[must_use]
-    pub const fn remote_commands(format: Format, remote_commands: RemoteCommandsResponse) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::RemoteCommands(remote_commands),
-        }
-    }
-
-    #[must_use]
-    pub const fn remote_state(format: Format, remote_state: RemoteStateResponse) -> Self {
-        Self {
-            format,
-            kind: ResponseKind::RemoteState(remote_state),
-        }
-    }
+    response_constructor!(
+        open_subsonic_extensions,
+        Vec<OpenSubsonicExtension>,
+        OpenSubsonicExtensions
+    );
+    response_constructor!(music_folders, Vec<MusicFolderResponse>, MusicFolders);
+    response_constructor!(indexes, IndexesResponse, Indexes);
+    response_constructor!(artists, ArtistsID3Response, Artists);
+    response_constructor!(album, AlbumWithSongsID3Response, Album);
+    response_constructor!(artist, ArtistWithAlbumsID3Response, Artist);
+    response_constructor!(song, ChildResponse, Song);
+    response_constructor!(album_list2, AlbumList2Response, AlbumList2);
+    response_constructor!(genres, GenresResponse, Genres);
+    response_constructor!(search_result3, SearchResult3Response, SearchResult3);
+    response_constructor!(starred2, Starred2Response, Starred2);
+    response_constructor!(now_playing, NowPlayingResponse, NowPlaying);
+    response_constructor!(random_songs, RandomSongsResponse, RandomSongs);
+    response_constructor!(songs_by_genre, SongsByGenreResponse, SongsByGenre);
+    response_constructor!(playlists, PlaylistsResponse, Playlists);
+    response_constructor!(playlist, PlaylistWithSongsResponse, Playlist);
+    response_constructor!(play_queue, PlayQueueResponse, PlayQueue);
+    response_constructor!(
+        play_queue_by_index,
+        PlayQueueByIndexResponse,
+        PlayQueueByIndex
+    );
+    response_constructor!(token_info, TokenInfoResponse, TokenInfo);
+    response_constructor!(user, UserResponse, User);
+    response_constructor!(users, UsersResponse, Users);
+    response_constructor!(scan_status, ScanStatusData, ScanStatus);
+    response_constructor!(artist_info2, ArtistInfo2Response, ArtistInfo2);
+    response_constructor!(album_info, AlbumInfoResponse, AlbumInfo);
+    response_constructor!(similar_songs2, SimilarSongs2Response, SimilarSongs2);
+    response_constructor!(top_songs, TopSongsResponse, TopSongs);
+    response_constructor!(lyrics, LyricsResponse, Lyrics);
+    response_constructor!(lyrics_list, LyricsListResponse, LyricsList);
+    response_constructor!(directory, DirectoryResponse, Directory);
+    response_constructor!(album_list, AlbumListResponse, AlbumList);
+    response_constructor!(starred, StarredResponse, Starred);
+    response_constructor!(search_result2, SearchResult2Response, SearchResult2);
+    response_constructor!(search_result, SearchResultResponse, SearchResult);
+    response_constructor!(artist_info, ArtistInfoResponse, ArtistInfo);
+    response_constructor!(similar_songs, SimilarSongsResponse, SimilarSongs);
+    response_constructor!(remote_session, RemoteSessionResponse, RemoteSession);
+    response_constructor!(remote_commands, RemoteCommandsResponse, RemoteCommands);
+    response_constructor!(remote_state, RemoteStateResponse, RemoteState);
 }
 
 impl IntoResponse for SubsonicResponse {
