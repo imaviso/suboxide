@@ -338,32 +338,36 @@ pub async fn update_user(
     };
 
     // Decode password if provided and hex-encoded
-    let decoded_password = match params.password.as_deref().map(AuthParams::decode_password) {
-        Some(Some(password)) => Some(password),
-        Some(None) => {
+    if let Some(password) = params.password.as_deref().map(AuthParams::decode_password) {
+        let Some(password) = password else {
             return error_response(auth.format, &ApiError::WrongCredentials).into_response();
+        };
+        if let Err(error) = auth.users().change_password(username, &password) {
+            return error_response(auth.format, &ApiError::Generic(error.to_string()))
+                .into_response();
         }
-        None => None,
+    }
+
+    let update = crate::db::UserUpdate {
+        username: username.to_string(),
+        email: params.email,
+        admin_role: params.admin_role,
+        settings_role: params.settings_role,
+        stream_role: params.stream_role,
+        jukebox_role: params.jukebox_role,
+        download_role: params.download_role,
+        upload_role: params.upload_role,
+        playlist_role: params.playlist_role,
+        cover_art_role: params.cover_art_role,
+        comment_role: params.comment_role,
+        podcast_role: params.podcast_role,
+        share_role: params.share_role,
+        video_conversion_role: params.video_conversion_role,
+        max_bit_rate: params.max_bit_rate,
+        lastfm_session_key: None,
     };
 
-    match auth.users().update_user(
-        username,
-        decoded_password.as_deref(),
-        params.email.as_deref(),
-        params.admin_role,
-        params.settings_role,
-        params.stream_role,
-        params.jukebox_role,
-        params.download_role,
-        params.upload_role,
-        params.playlist_role,
-        params.cover_art_role,
-        params.comment_role,
-        params.podcast_role,
-        params.share_role,
-        params.video_conversion_role,
-        params.max_bit_rate,
-    ) {
+    match auth.users().update_user(&update) {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
         Err(error) => {
             error_response(auth.format, &ApiError::Generic(error.to_string())).into_response()

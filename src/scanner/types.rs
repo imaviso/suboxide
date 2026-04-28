@@ -20,6 +20,9 @@ pub enum ScanError {
     #[error("Music folder not found: {0}")]
     FolderNotFound(String),
 
+    #[error("Scan already in progress")]
+    AlreadyScanning,
+
     #[error("Failed to read metadata for {path}: {message}")]
     Metadata { path: PathBuf, message: String },
 }

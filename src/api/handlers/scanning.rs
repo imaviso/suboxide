@@ -4,7 +4,7 @@ use axum::response::IntoResponse;
 
 use crate::api::auth::SubsonicAuth;
 use crate::api::response::{ScanStatusData, SubsonicResponse};
-use crate::scanner::Scanner;
+use crate::scanner::{ScanResult, Scanner};
 
 /// Build a `ScanStatusData` from the current scan state.
 fn build_scan_status_data(auth: &SubsonicAuth) -> ScanStatusData {
@@ -26,51 +26,43 @@ fn build_scan_status_data(auth: &SubsonicAuth) -> ScanStatusData {
 /// Returns: scanStatus with scanning=true/false and count of items scanned.
 pub async fn start_scan(auth: SubsonicAuth) -> impl IntoResponse {
     let scan_state = auth.scan_state().clone();
+    let pool = auth.pool().clone();
 
-    // Try to start a new scan - returns false if one is already running
-    if scan_state.try_start() {
-        // Reset progress state for this new scan.
-        scan_state.reset();
+    // Spawn background task to run the scan.
+    // The actual start check (try_start) happens inside spawn_blocking so the
+    // ScanGuard lives for the full scan duration.
+    tokio::spawn(async move {
+        let result = tokio::task::spawn_blocking(move || {
+            let scanner = Scanner::new(pool);
+            let Some(_guard) = scan_state.try_start() else {
+                return Ok(ScanResult::default());
+            };
+            scanner.scan_all_with_state(Some(scan_state.get()))
+        })
+        .await;
 
-        let pool = auth.pool().clone();
-        let scan_state_for_scanner = scan_state.clone();
-        let scan_state_for_finish = scan_state;
-
-        // Spawn background task to run the scan
-        tokio::spawn(async move {
-            // Run the scan in a blocking task since it's CPU-intensive
-            let result = tokio::task::spawn_blocking(move || {
-                let scanner = Scanner::new(pool);
-                scanner.scan_all_with_state(Some(scan_state_for_scanner.get()))
-            })
-            .await;
-
-            // Mark scan as complete
-            scan_state_for_finish.finish();
-
-            match result {
-                Ok(Ok(stats)) => {
-                    tracing::info!(
-                        name = "scan.manual.completed",
-                        tracks.found = stats.tracks_found,
-                        tracks.added = stats.tracks_added,
-                        tracks.failed = stats.tracks_failed,
-                        "manual scan completed"
-                    );
-                }
-                Ok(Err(e)) => {
-                    tracing::error!(name = "scan.manual.failed", error = %e, "manual scan failed");
-                }
-                Err(e) => {
-                    tracing::error!(
-                        name = "scan.manual.task_panic",
-                        error = %e,
-                        "manual scan task panicked"
-                    );
-                }
+        match result {
+            Ok(Ok(stats)) => {
+                tracing::info!(
+                    name = "scan.manual.completed",
+                    tracks.found = stats.tracks_found,
+                    tracks.added = stats.tracks_added,
+                    tracks.failed = stats.tracks_failed,
+                    "manual scan completed"
+                );
             }
-        });
-    }
+            Ok(Err(e)) => {
+                tracing::error!(name = "scan.manual.failed", error = %e, "manual scan failed");
+            }
+            Err(e) => {
+                tracing::error!(
+                    name = "scan.manual.task_panic",
+                    error = %e,
+                    "manual scan task panicked"
+                );
+            }
+        }
+    });
 
     // Return current status (scanning should be true now)
     let data = build_scan_status_data(&auth);

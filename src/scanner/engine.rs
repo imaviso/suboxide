@@ -1084,35 +1084,29 @@ impl AutoScanner {
                 }
             }
 
-            // Try to start a scan (skip if one is already in progress)
-            if !scan_state.try_start() {
-                tracing::event!(
-                    name: "scan.auto.skipped_in_progress",
-                    tracing::Level::DEBUG,
-                    "auto-scan skipped because a scan is already running"
-                );
-                continue;
-            }
-
-            tracing::event!(
-                name: "scan.auto.started_cycle",
-                tracing::Level::DEBUG,
-                scan.mode = "incremental",
-                "auto-scan cycle started"
-            );
-            scan_state.reset();
-
             // Run the scan in a blocking task since it uses diesel
             let pool_clone = pool.clone();
             let cover_art_dir_clone = cover_art_dir.clone();
             let scan_state_clone = scan_state.clone();
             let result = tokio::task::spawn_blocking(move || {
                 let scanner = Scanner::with_cover_art_dir(pool_clone, cover_art_dir_clone);
+                let Some(_guard) = scan_state_clone.try_start() else {
+                    tracing::event!(
+                        name: "scan.auto.skipped_in_progress",
+                        tracing::Level::DEBUG,
+                        "auto-scan skipped because a scan is already running"
+                    );
+                    return Ok(ScanResult::default());
+                };
+                tracing::event!(
+                    name: "scan.auto.started_cycle",
+                    tracing::Level::DEBUG,
+                    scan.mode = "incremental",
+                    "auto-scan cycle started"
+                );
                 scanner.scan_all_with_options(Some(scan_state_clone.get()), ScanMode::Incremental)
             })
             .await;
-
-            scan_state.finish();
 
             match result {
                 Ok(Ok(stats)) => {

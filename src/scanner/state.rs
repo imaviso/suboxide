@@ -71,12 +71,6 @@ impl ScanStateHandle {
         self.0.get_current_folder()
     }
 
-    /// Try to start a scan. Returns false if a scan is already in progress.
-    #[must_use]
-    pub fn try_start(&self) -> bool {
-        self.0.try_start()
-    }
-
     /// Mark the scan as complete.
     pub fn finish(&self) {
         self.0.finish();
@@ -116,6 +110,26 @@ impl ScanStateHandle {
     /// Set the current folder being scanned.
     pub fn set_current_folder(&self, folder: Option<String>) {
         self.0.set_current_folder(folder);
+    }
+
+    /// Attempt to start a scan. Returns `Some(ScanGuard)` if no scan is running.
+    /// The guard resets state on acquisition and calls `finish()` on drop.
+    #[must_use]
+    pub fn try_start(&self) -> Option<ScanGuard<'_>> {
+        self.0.try_start()
+    }
+}
+
+/// RAII guard ensuring a scan is properly finalized.
+///
+/// Acquired via `ScanState::try_start` or `ScanStateHandle::try_start`.
+/// Resets counters on creation and marks the scan as finished on drop.
+#[derive(Debug)]
+pub struct ScanGuard<'a>(&'a ScanState);
+
+impl Drop for ScanGuard<'_> {
+    fn drop(&mut self) {
+        self.0.finish();
     }
 }
 
@@ -190,11 +204,20 @@ impl ScanState {
             .clone()
     }
 
-    /// Try to start a scan. Returns false if a scan is already in progress.
-    pub fn try_start(&self) -> bool {
-        self.scanning
+    /// Try to start a scan. Returns `Some(ScanGuard)` if no scan is running.
+    /// The guard resets state on acquisition and calls `finish()` on drop.
+    #[must_use]
+    pub fn try_start(&self) -> Option<ScanGuard<'_>> {
+        if self
+            .scanning
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_ok()
+        {
+            self.reset();
+            Some(ScanGuard(self))
+        } else {
+            None
+        }
     }
 
     /// Mark the scan as complete.
@@ -277,8 +300,8 @@ mod tests {
     fn scan_state_tracks_progress_then_resets_on_finish() {
         let state = ScanState::new();
 
-        assert!(state.try_start());
-        assert!(!state.try_start());
+        let _guard = state.try_start().expect("should start");
+        assert!(state.try_start().is_none());
         state.set_total(10);
         state.set_phase(ScanPhase::Processing);
         state.set_current_folder(Some("Music/A".into()));
@@ -301,10 +324,28 @@ mod tests {
     }
 
     #[test]
+    fn scan_state_guard_resets_and_finishes_on_drop() {
+        let state = ScanState::new();
+
+        {
+            let guard = state.try_start();
+            assert!(guard.is_some());
+            assert!(state.is_scanning());
+            assert_eq!(state.get_phase(), ScanPhase::Idle);
+            state.set_total(5);
+            state.set_count(3);
+            // guard drops here
+        }
+
+        assert!(!state.is_scanning());
+        assert_eq!(state.get_phase(), ScanPhase::Idle);
+    }
+
+    #[test]
     fn scan_state_reset_clears_progress_without_starting_scan() {
         let state = ScanState::new();
 
-        assert!(state.try_start());
+        let _guard = state.try_start().expect("should start");
         state.set_total(5);
         state.set_count(4);
         state.set_phase(ScanPhase::Cleaning);

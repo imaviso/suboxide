@@ -951,54 +951,9 @@ impl UserService {
         UserRepository::new(self.pool.clone()).create(&new_user)
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "Subsonic user updates expose many independently optional role fields"
-    )]
-    pub fn update_user(
-        &self,
-        username: &str,
-        password: Option<&str>,
-        email: Option<&str>,
-        admin_role: Option<bool>,
-        settings_role: Option<bool>,
-        stream_role: Option<bool>,
-        jukebox_role: Option<bool>,
-        download_role: Option<bool>,
-        upload_role: Option<bool>,
-        playlist_role: Option<bool>,
-        cover_art_role: Option<bool>,
-        comment_role: Option<bool>,
-        podcast_role: Option<bool>,
-        share_role: Option<bool>,
-        video_conversion_role: Option<bool>,
-        max_bit_rate: Option<i32>,
-    ) -> Result<(), UserRepoError> {
-        if let Some(pwd) = password {
-            self.change_password(username, pwd)?;
-        }
-
-        let update = UserUpdate {
-            username: username.to_string(),
-            email: email.map(std::string::ToString::to_string),
-            admin_role,
-            settings_role,
-            stream_role,
-            jukebox_role,
-            download_role,
-            upload_role,
-            playlist_role,
-            cover_art_role,
-            comment_role,
-            podcast_role,
-            share_role,
-            video_conversion_role,
-            max_bit_rate,
-            lastfm_session_key: None,
-        };
-
+    pub fn update_user(&self, update: &UserUpdate) -> Result<(), UserRepoError> {
         UserRepository::new(self.pool.clone())
-            .update_user(&update)
+            .update_user(update)
             .map(|_| ())
     }
 }
