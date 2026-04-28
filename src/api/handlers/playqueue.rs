@@ -5,9 +5,71 @@ use serde::Deserialize;
 use crate::api::auth::SubsonicAuth;
 use crate::api::error::ApiError;
 use crate::api::response::{SubsonicResponse, error_response};
+use crate::db::PlayQueue;
 use crate::models::music::{
     ChildResponse, PlayQueueByIndexResponse, PlayQueueResponse, format_subsonic_datetime,
 };
+
+fn play_queue_entries(
+    auth: &SubsonicAuth,
+    play_queue: &PlayQueue,
+) -> Result<Vec<ChildResponse>, ApiError> {
+    let song_ids: Vec<i32> = play_queue.songs.iter().map(|song| song.id).collect();
+    let starred_map = auth
+        .music()
+        .get_starred_at_for_songs_batch(auth.user.id, &song_ids)
+        .map_err(|error| ApiError::Generic(error.to_string()))?;
+
+    Ok(play_queue
+        .songs
+        .iter()
+        .map(|song| {
+            let starred_at = starred_map.get(&song.id);
+            ChildResponse::from_song_with_starred(song, starred_at)
+        })
+        .collect())
+}
+
+fn play_queue_response(
+    auth: &SubsonicAuth,
+    play_queue: PlayQueue,
+) -> Result<PlayQueueResponse, ApiError> {
+    let entries = play_queue_entries(auth, &play_queue)?;
+    Ok(PlayQueueResponse {
+        current: play_queue
+            .current_song
+            .as_ref()
+            .map(|song| song.id.to_string()),
+        position: play_queue.position,
+        username: play_queue.username,
+        changed: format_subsonic_datetime(&play_queue.changed_at),
+        changed_by: play_queue.changed_by,
+        entries,
+    })
+}
+
+fn play_queue_by_index_response(
+    auth: &SubsonicAuth,
+    play_queue: PlayQueue,
+) -> Result<PlayQueueByIndexResponse, ApiError> {
+    let entries = play_queue_entries(auth, &play_queue)?;
+    let current_index = play_queue.current_song.as_ref().and_then(|current_song| {
+        play_queue
+            .songs
+            .iter()
+            .position(|song| song.id == current_song.id)
+            .and_then(|index| i32::try_from(index).ok())
+    });
+
+    Ok(PlayQueueByIndexResponse {
+        current_index,
+        position: play_queue.position,
+        username: play_queue.username,
+        changed: format_subsonic_datetime(&play_queue.changed_at),
+        changed_by: play_queue.changed_by,
+        entries,
+    })
+}
 
 /// GET/POST /rest/getPlayQueue[.view]
 ///
@@ -18,34 +80,9 @@ pub async fn get_play_queue(auth: SubsonicAuth) -> impl IntoResponse {
 
     match auth.music().get_play_queue(user_id, username) {
         Ok(Some(play_queue)) => {
-            let song_ids: Vec<i32> = play_queue.songs.iter().map(|s| s.id).collect();
-            let starred_map = match auth
-                .music()
-                .get_starred_at_for_songs_batch(user_id, &song_ids)
-            {
-                Ok(v) => v,
-                Err(e) => {
-                    return error_response(auth.format, &ApiError::Generic(e.to_string()))
-                        .into_response();
-                }
-            };
-
-            let song_responses: Vec<ChildResponse> = play_queue
-                .songs
-                .iter()
-                .map(|s| {
-                    let starred_at = starred_map.get(&s.id);
-                    ChildResponse::from_song_with_starred(s, starred_at)
-                })
-                .collect();
-
-            let response = PlayQueueResponse {
-                current: play_queue.current_song.as_ref().map(|s| s.id.to_string()),
-                position: play_queue.position,
-                username: play_queue.username.clone(),
-                changed: format_subsonic_datetime(&play_queue.changed_at),
-                changed_by: play_queue.changed_by.clone(),
-                entries: song_responses,
+            let response = match play_queue_response(&auth, play_queue) {
+                Ok(response) => response,
+                Err(error) => return error_response(auth.format, &error).into_response(),
             };
 
             SubsonicResponse::play_queue(auth.format, response).into_response()
@@ -122,42 +159,9 @@ pub async fn get_play_queue_by_index(auth: SubsonicAuth) -> impl IntoResponse {
 
     match auth.music().get_play_queue(user_id, username) {
         Ok(Some(play_queue)) => {
-            let song_ids: Vec<i32> = play_queue.songs.iter().map(|s| s.id).collect();
-            let starred_map = match auth
-                .music()
-                .get_starred_at_for_songs_batch(user_id, &song_ids)
-            {
-                Ok(v) => v,
-                Err(e) => {
-                    return error_response(auth.format, &ApiError::Generic(e.to_string()))
-                        .into_response();
-                }
-            };
-
-            let song_responses: Vec<ChildResponse> = play_queue
-                .songs
-                .iter()
-                .map(|s| {
-                    let starred_at = starred_map.get(&s.id);
-                    ChildResponse::from_song_with_starred(s, starred_at)
-                })
-                .collect();
-
-            let current_index = play_queue.current_song.as_ref().and_then(|current_song| {
-                play_queue
-                    .songs
-                    .iter()
-                    .position(|s| s.id == current_song.id)
-                    .and_then(|idx| i32::try_from(idx).ok())
-            });
-
-            let response = PlayQueueByIndexResponse {
-                current_index,
-                position: play_queue.position,
-                username: play_queue.username.clone(),
-                changed: format_subsonic_datetime(&play_queue.changed_at),
-                changed_by: play_queue.changed_by.clone(),
-                entries: song_responses,
+            let response = match play_queue_by_index_response(&auth, play_queue) {
+                Ok(response) => response,
+                Err(error) => return error_response(auth.format, &error).into_response(),
             };
 
             SubsonicResponse::play_queue_by_index(auth.format, response).into_response()

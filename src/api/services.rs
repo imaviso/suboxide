@@ -969,7 +969,7 @@ pub struct Users {
 }
 
 impl Users {
-    /// Create new user accounts.
+    /// Create a user account handle.
     #[must_use]
     pub const fn new(pool: DbPool) -> Self {
         Self { pool }
@@ -1076,7 +1076,7 @@ pub struct RemoteSessions {
 }
 
 impl RemoteSessions {
-    /// Create new remote sessions.
+    /// Create a remote session handle.
     #[must_use]
     pub const fn new(pool: DbPool) -> Self {
         Self { pool }

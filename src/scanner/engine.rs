@@ -45,7 +45,6 @@ struct DiscoveredFile {
 
 enum AutoScanOutcome {
     Completed(ScanResult),
-    SkippedAlreadyRunning,
 }
 
 impl Scanner {
@@ -1093,16 +1092,17 @@ impl AutoScanner {
             let pool_clone = pool.clone();
             let cover_art_dir_clone = cover_art_dir.clone();
             let scan_state_clone = scan_state.clone();
+            let Some(guard) = scan_state_clone.try_start() else {
+                tracing::event!(
+                    name: "scan.auto.skipped_in_progress",
+                    tracing::Level::DEBUG,
+                    "auto-scan skipped because a scan is already running"
+                );
+                continue;
+            };
             let result = tokio::task::spawn_blocking(move || {
                 let scanner = Scanner::with_cover_art_dir(pool_clone, cover_art_dir_clone);
-                let Some(_guard) = scan_state_clone.try_start() else {
-                    tracing::event!(
-                        name: "scan.auto.skipped_in_progress",
-                        tracing::Level::DEBUG,
-                        "auto-scan skipped because a scan is already running"
-                    );
-                    return Ok(AutoScanOutcome::SkippedAlreadyRunning);
-                };
+                let _guard = guard;
                 tracing::event!(
                     name: "scan.auto.started_cycle",
                     tracing::Level::DEBUG,
@@ -1129,7 +1129,6 @@ impl AutoScanner {
                         "auto-scan completed"
                     );
                 }
-                Ok(Ok(AutoScanOutcome::SkippedAlreadyRunning)) => {}
                 Ok(Err(ScanError::NoMusicFolders)) => {
                     tracing::event!(
                         name: "scan.auto.skipped_no_folders",

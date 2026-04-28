@@ -524,7 +524,9 @@ fn run_user_command(pool: &DbPool, cmd: UserCommands) -> Result<(), UserCommandE
 
             if let Some(password) = password {
                 let hash = hash_password(&password)?;
-                repo.update_password(user_id, &hash)?;
+                if !repo.update_password(user_id, &hash)? {
+                    return Err(UserCommandError::NotFound(username));
+                }
                 println!("Updated password for '{username}'");
             }
         }
@@ -718,7 +720,9 @@ async fn run_lastfm_command(pool: &DbPool, cmd: LastfmCommands) -> Result<(), La
                 "Successfully authenticated as Last.fm user: {}",
                 session.name
             );
-            let _ = repo.set_lastfm_session_key(user.id, Some(&session.key))?;
+            if !repo.set_lastfm_session_key(user.id, Some(&session.key))? {
+                return Err(LastfmCommandError::UserNotFound(user.username));
+            }
             println!("Last.fm session linked successfully!");
         }
         LastfmCommands::Debug { artist } => {
@@ -751,17 +755,7 @@ async fn run_lastfm_command(pool: &DbPool, cmd: LastfmCommands) -> Result<(), La
     Ok(())
 }
 
-#[derive(Debug, thiserror::Error)]
-enum ScanCommandError {
-    #[error(transparent)]
-    Scan(#[from] ScanError),
-}
-
-fn run_scan_command(
-    pool: &DbPool,
-    folder: Option<i32>,
-    full: bool,
-) -> Result<(), ScanCommandError> {
+fn run_scan_command(pool: &DbPool, folder: Option<i32>, full: bool) -> Result<(), ScanError> {
     let scanner = Scanner::new(pool.clone());
     let mode = if full {
         ScanMode::Full
