@@ -11,7 +11,6 @@ use tokio_util::io::ReaderStream;
 
 use crate::api::auth::SubsonicAuth;
 use crate::api::error::ApiError;
-use crate::api::handlers::repo_result_or_response;
 use crate::api::response::error_response;
 use crate::models::music::Song;
 use crate::paths::resolve_cover_art_dir;
@@ -98,13 +97,13 @@ pub async fn stream(
     };
 
     // Look up song in database
-    let song = match repo_result_or_response(auth.format, auth.music().get_song(song_id)) {
+    let song = match auth.music().get_song(song_id) {
         Ok(Some(song)) => song,
         Ok(None) => {
             return error_response(auth.format, &ApiError::NotFound("Song not found".into()))
                 .into_response();
         }
-        Err(response) => return response,
+        Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
     };
 
     // Check that user has stream permission
@@ -240,13 +239,13 @@ pub async fn download(
     };
 
     // Look up song in database
-    let song = match repo_result_or_response(auth.format, auth.music().get_song(song_id)) {
+    let song = match auth.music().get_song(song_id) {
         Ok(Some(song)) => song,
         Ok(None) => {
             return error_response(auth.format, &ApiError::NotFound("Song not found".into()))
                 .into_response();
         }
-        Err(response) => return response,
+        Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
     };
 
     // Check that user has download permission

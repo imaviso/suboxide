@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 use crate::api::auth::SubsonicAuth;
 use crate::api::error::ApiError;
-use crate::api::handlers::repo_error_response;
+
 use crate::api::response::{SubsonicResponse, error_response};
 use crate::db::{RemoteCommand, RemoteSession, RemoteState};
 use crate::models::music::{
@@ -56,7 +56,9 @@ pub async fn create_remote_session(
     ) {
         Ok(session) => SubsonicResponse::remote_session(auth.format, map_session(&session, true))
             .into_response(),
-        Err(error) => repo_error_response(auth.format, error),
+        Err(error) => {
+            error_response(auth.format, &ApiError::Generic(error.to_string())).into_response()
+        }
     }
 }
 
@@ -99,7 +101,9 @@ pub async fn join_remote_session(
         }
         Ok(None) => error_response(auth.format, &ApiError::NotFound("Remote session".into()))
             .into_response(),
-        Err(error) => repo_error_response(auth.format, error),
+        Err(error) => {
+            error_response(auth.format, &ApiError::Generic(error.to_string())).into_response()
+        }
     }
 }
 
@@ -140,7 +144,9 @@ pub async fn get_remote_session(
         }
         Ok(None) => error_response(auth.format, &ApiError::NotFound("Remote session".into()))
             .into_response(),
-        Err(error) => repo_error_response(auth.format, error),
+        Err(error) => {
+            error_response(auth.format, &ApiError::Generic(error.to_string())).into_response()
+        }
     }
 }
 
@@ -164,7 +170,9 @@ pub async fn close_remote_session(
         Ok(true) => SubsonicResponse::empty(auth.format).into_response(),
         Ok(false) => error_response(auth.format, &ApiError::NotFound("Remote session".into()))
             .into_response(),
-        Err(error) => repo_error_response(auth.format, error),
+        Err(error) => {
+            error_response(auth.format, &ApiError::Generic(error.to_string())).into_response()
+        }
     }
 }
 
@@ -211,7 +219,9 @@ pub async fn send_remote_command(
         params.payload.as_deref(),
     ) {
         Ok(_) => SubsonicResponse::empty(auth.format).into_response(),
-        Err(error) => repo_error_response(auth.format, error),
+        Err(error) => {
+            error_response(auth.format, &ApiError::Generic(error.to_string())).into_response()
+        }
     }
 }
 
@@ -260,7 +270,9 @@ pub async fn get_remote_commands(
             };
             SubsonicResponse::remote_commands(auth.format, response).into_response()
         }
-        Err(error) => repo_error_response(auth.format, error),
+        Err(error) => {
+            error_response(auth.format, &ApiError::Generic(error.to_string())).into_response()
+        }
     }
 }
 
@@ -308,7 +320,9 @@ pub async fn update_remote_state(
         .update_remote_state(auth.user.id, session_id, device_id, state_json)
     {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
-        Err(error) => repo_error_response(auth.format, error),
+        Err(error) => {
+            error_response(auth.format, &ApiError::Generic(error.to_string())).into_response()
+        }
     }
 }
 
@@ -343,7 +357,9 @@ pub async fn get_remote_state(
         Ok(None) => {
             error_response(auth.format, &ApiError::NotFound("Remote state".into())).into_response()
         }
-        Err(error) => repo_error_response(auth.format, error),
+        Err(error) => {
+            error_response(auth.format, &ApiError::Generic(error.to_string())).into_response()
+        }
     }
 }
 

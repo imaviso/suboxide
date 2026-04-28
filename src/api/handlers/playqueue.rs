@@ -3,8 +3,8 @@ use axum::response::IntoResponse;
 use serde::Deserialize;
 
 use crate::api::auth::SubsonicAuth;
-use crate::api::handlers::repo_result_or_response;
-use crate::api::response::SubsonicResponse;
+use crate::api::error::ApiError;
+use crate::api::response::{SubsonicResponse, error_response};
 use crate::models::music::{
     ChildResponse, PlayQueueByIndexResponse, PlayQueueResponse, format_subsonic_datetime,
 };
@@ -16,16 +16,18 @@ pub async fn get_play_queue(auth: SubsonicAuth) -> impl IntoResponse {
     let user_id = auth.user.id;
     let username = &auth.user.username;
 
-    match repo_result_or_response(auth.format, auth.music().get_play_queue(user_id, username)) {
+    match auth.music().get_play_queue(user_id, username) {
         Ok(Some(play_queue)) => {
             let song_ids: Vec<i32> = play_queue.songs.iter().map(|s| s.id).collect();
-            let starred_map = match repo_result_or_response(
-                auth.format,
-                auth.music()
-                    .get_starred_at_for_songs_batch(user_id, &song_ids),
-            ) {
+            let starred_map = match auth
+                .music()
+                .get_starred_at_for_songs_batch(user_id, &song_ids)
+            {
                 Ok(v) => v,
-                Err(response) => return response,
+                Err(e) => {
+                    return error_response(auth.format, &ApiError::Generic(e.to_string()))
+                        .into_response();
+                }
             };
 
             let song_responses: Vec<ChildResponse> = play_queue
@@ -60,7 +62,7 @@ pub async fn get_play_queue(auth: SubsonicAuth) -> impl IntoResponse {
 
             SubsonicResponse::play_queue(auth.format, response).into_response()
         }
-        Err(response) => response,
+        Err(e) => error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
     }
 }
 
@@ -98,18 +100,15 @@ pub async fn save_play_queue(
         Some(auth.params.c.as_str())
     };
 
-    match repo_result_or_response(
-        auth.format,
-        auth.music().save_play_queue(
-            user_id,
-            &song_ids,
-            params.current,
-            params.position,
-            changed_by,
-        ),
+    match auth.music().save_play_queue(
+        user_id,
+        &song_ids,
+        params.current,
+        params.position,
+        changed_by,
     ) {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
-        Err(response) => response,
+        Err(e) => error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
     }
 }
 
@@ -121,16 +120,18 @@ pub async fn get_play_queue_by_index(auth: SubsonicAuth) -> impl IntoResponse {
     let user_id = auth.user.id;
     let username = &auth.user.username;
 
-    match repo_result_or_response(auth.format, auth.music().get_play_queue(user_id, username)) {
+    match auth.music().get_play_queue(user_id, username) {
         Ok(Some(play_queue)) => {
             let song_ids: Vec<i32> = play_queue.songs.iter().map(|s| s.id).collect();
-            let starred_map = match repo_result_or_response(
-                auth.format,
-                auth.music()
-                    .get_starred_at_for_songs_batch(user_id, &song_ids),
-            ) {
+            let starred_map = match auth
+                .music()
+                .get_starred_at_for_songs_batch(user_id, &song_ids)
+            {
                 Ok(v) => v,
-                Err(response) => return response,
+                Err(e) => {
+                    return error_response(auth.format, &ApiError::Generic(e.to_string()))
+                        .into_response();
+                }
             };
 
             let song_responses: Vec<ChildResponse> = play_queue
@@ -173,7 +174,7 @@ pub async fn get_play_queue_by_index(auth: SubsonicAuth) -> impl IntoResponse {
 
             SubsonicResponse::play_queue_by_index(auth.format, response).into_response()
         }
-        Err(response) => response,
+        Err(e) => error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
     }
 }
 
@@ -217,17 +218,14 @@ pub async fn save_play_queue_by_index(
         Some(auth.params.c.as_str())
     };
 
-    match repo_result_or_response(
-        auth.format,
-        auth.music().save_play_queue(
-            user_id,
-            &song_ids,
-            current_song_id,
-            params.position,
-            changed_by,
-        ),
+    match auth.music().save_play_queue(
+        user_id,
+        &song_ids,
+        current_song_id,
+        params.position,
+        changed_by,
     ) {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
-        Err(response) => response,
+        Err(e) => error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
     }
 }

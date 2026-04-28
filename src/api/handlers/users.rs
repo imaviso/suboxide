@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use crate::api::auth::{AuthParams, SubsonicAuth};
 use crate::api::error::ApiError;
-use crate::api::handlers::repo_error_response;
+
 use crate::api::response::{SubsonicResponse, error_response};
 use crate::models::user::{UserResponse, UserRoles, UsersResponse};
 
@@ -44,7 +44,9 @@ pub async fn get_user(
         }
         Ok(None) => error_response(auth.format, &ApiError::NotFound("User not found".into()))
             .into_response(),
-        Err(error) => repo_error_response(auth.format, error),
+        Err(error) => {
+            error_response(auth.format, &ApiError::Generic(error.to_string())).into_response()
+        }
     }
 }
 
@@ -59,7 +61,10 @@ pub async fn get_users(auth: SubsonicAuth) -> impl IntoResponse {
 
     let users = match auth.users().get_all_users() {
         Ok(users) => users,
-        Err(error) => return repo_error_response(auth.format, error),
+        Err(error) => {
+            return error_response(auth.format, &ApiError::Generic(error.to_string()))
+                .into_response();
+        }
     };
     let user_responses: Vec<UserResponse> = users.iter().map(UserResponse::from).collect();
 
@@ -111,7 +116,9 @@ pub async fn delete_user(
         Ok(true) => SubsonicResponse::empty(auth.format).into_response(),
         Ok(false) => error_response(auth.format, &ApiError::NotFound("User not found".into()))
             .into_response(),
-        Err(error) => repo_error_response(auth.format, error),
+        Err(error) => {
+            error_response(auth.format, &ApiError::Generic(error.to_string())).into_response()
+        }
     }
 }
 
@@ -162,7 +169,9 @@ pub async fn change_password(
 
     match auth.users().change_password(username, &decoded_password) {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
-        Err(error) => repo_error_response(auth.format, error),
+        Err(error) => {
+            error_response(auth.format, &ApiError::Generic(error.to_string())).into_response()
+        }
     }
 }
 
@@ -264,7 +273,9 @@ pub async fn create_user(
         .create_user(username, &decoded_password, email, &roles)
     {
         Ok(_) => SubsonicResponse::empty(auth.format).into_response(),
-        Err(error) => repo_error_response(auth.format, error),
+        Err(error) => {
+            error_response(auth.format, &ApiError::Generic(error.to_string())).into_response()
+        }
     }
 }
 
@@ -354,6 +365,8 @@ pub async fn update_user(
         params.max_bit_rate,
     ) {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
-        Err(error) => repo_error_response(auth.format, error),
+        Err(error) => {
+            error_response(auth.format, &ApiError::Generic(error.to_string())).into_response()
+        }
     }
 }

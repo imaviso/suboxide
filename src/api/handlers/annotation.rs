@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use crate::api::auth::SubsonicAuth;
 use crate::api::error::ApiError;
-use crate::api::handlers::{repo_error_response, repo_result_or_response};
+
 use crate::api::response::{SubsonicResponse, error_response};
 use crate::api::services::saturating_i64_to_i32;
 use crate::models::music::{
@@ -40,17 +40,20 @@ pub async fn star(
 
     for artist_id in &params.artist_id {
         if let Err(error) = auth.music().star_artist(user_id, *artist_id) {
-            return repo_error_response(auth.format, error);
+            return error_response(auth.format, &ApiError::Generic(error.to_string()))
+                .into_response();
         }
     }
     for album_id in &params.album_id {
         if let Err(error) = auth.music().star_album(user_id, *album_id) {
-            return repo_error_response(auth.format, error);
+            return error_response(auth.format, &ApiError::Generic(error.to_string()))
+                .into_response();
         }
     }
     for song_id in &params.song_id {
         if let Err(error) = auth.music().star_song(user_id, *song_id) {
-            return repo_error_response(auth.format, error);
+            return error_response(auth.format, &ApiError::Generic(error.to_string()))
+                .into_response();
         }
     }
 
@@ -69,17 +72,20 @@ pub async fn unstar(
 
     for artist_id in &params.artist_id {
         if let Err(error) = auth.music().unstar_artist(user_id, *artist_id) {
-            return repo_error_response(auth.format, error);
+            return error_response(auth.format, &ApiError::Generic(error.to_string()))
+                .into_response();
         }
     }
     for album_id in &params.album_id {
         if let Err(error) = auth.music().unstar_album(user_id, *album_id) {
-            return repo_error_response(auth.format, error);
+            return error_response(auth.format, &ApiError::Generic(error.to_string()))
+                .into_response();
         }
     }
     for song_id in &params.song_id {
         if let Err(error) = auth.music().unstar_song(user_id, *song_id) {
-            return repo_error_response(auth.format, error);
+            return error_response(auth.format, &ApiError::Generic(error.to_string()))
+                .into_response();
         }
     }
 
@@ -93,18 +99,18 @@ pub async fn unstar(
 pub async fn get_starred2(auth: SubsonicAuth) -> impl IntoResponse {
     let user_id = auth.user.id;
 
-    let starred_artists =
-        match repo_result_or_response(auth.format, auth.music().get_starred_artists(user_id)) {
-            Ok(v) => v,
-            Err(response) => return response,
-        };
-    let artist_ids: Vec<i32> = starred_artists.iter().map(|(a, _)| a.id).collect();
-    let album_counts = match repo_result_or_response(
-        auth.format,
-        auth.music().get_artist_album_counts_batch(&artist_ids),
-    ) {
+    let starred_artists = match auth.music().get_starred_artists(user_id) {
         Ok(v) => v,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
+    };
+    let artist_ids: Vec<i32> = starred_artists.iter().map(|(a, _)| a.id).collect();
+    let album_counts = match auth.music().get_artist_album_counts_batch(&artist_ids) {
+        Ok(v) => v,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
     let artists: Vec<StarredArtistID3Response> = starred_artists
@@ -119,11 +125,12 @@ pub async fn get_starred2(auth: SubsonicAuth) -> impl IntoResponse {
         })
         .collect();
 
-    let starred_albums =
-        match repo_result_or_response(auth.format, auth.music().get_starred_albums(user_id)) {
-            Ok(v) => v,
-            Err(response) => return response,
-        };
+    let starred_albums = match auth.music().get_starred_albums(user_id) {
+        Ok(v) => v,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
+    };
     let albums: Vec<StarredAlbumID3Response> = starred_albums
         .iter()
         .map(|(album, starred_at)| {
@@ -131,11 +138,12 @@ pub async fn get_starred2(auth: SubsonicAuth) -> impl IntoResponse {
         })
         .collect();
 
-    let starred_songs =
-        match repo_result_or_response(auth.format, auth.music().get_starred_songs(user_id)) {
-            Ok(v) => v,
-            Err(response) => return response,
-        };
+    let starred_songs = match auth.music().get_starred_songs(user_id) {
+        Ok(v) => v,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
+    };
     let songs: Vec<StarredChildResponse> = starred_songs
         .iter()
         .map(|(song, starred_at)| StarredChildResponse::from_song_and_starred(song, starred_at))
@@ -189,13 +197,15 @@ pub async fn scrobble(
         let time = params.time.get(i).copied();
 
         if let Err(error) = auth.music().scrobble(user_id, *song_id, time, submission) {
-            return repo_error_response(auth.format, error);
+            return error_response(auth.format, &ApiError::Generic(error.to_string()))
+                .into_response();
         }
 
         if !submission
             && let Err(error) = auth.music().set_now_playing(user_id, *song_id, player_id)
         {
-            return repo_error_response(auth.format, error);
+            return error_response(auth.format, &ApiError::Generic(error.to_string()))
+                .into_response();
         }
     }
 
@@ -206,9 +216,11 @@ pub async fn scrobble(
 ///
 /// Returns what is currently being played by all users.
 pub async fn get_now_playing(auth: SubsonicAuth) -> impl IntoResponse {
-    let entries = match repo_result_or_response(auth.format, auth.music().get_now_playing()) {
+    let entries = match auth.music().get_now_playing() {
         Ok(v) => v,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
     let entry_responses: Vec<NowPlayingEntryResponse> = entries
@@ -286,6 +298,8 @@ pub async fn set_rating(
 
     match auth.music().set_song_rating(user_id, id, rating) {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
-        Err(error) => repo_error_response(auth.format, error),
+        Err(error) => {
+            error_response(auth.format, &ApiError::Generic(error.to_string())).into_response()
+        }
     }
 }

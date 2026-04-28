@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use axum::response::IntoResponse;
 
 use crate::api::auth::SubsonicAuth;
-use crate::api::handlers::repo_result_or_response;
-use crate::api::response::SubsonicResponse;
+use crate::api::error::ApiError;
+use crate::api::response::{SubsonicResponse, error_response};
 use crate::models::music::{
     ArtistID3Response, ArtistResponse, ArtistsID3Response, IndexID3Response, IndexResponse,
     IndexesResponse, MusicFolderResponse,
@@ -30,9 +30,11 @@ fn saturating_i64_to_i32(value: i64) -> i32 {
 ///
 /// Returns all configured top-level music folders.
 pub async fn get_music_folders(auth: SubsonicAuth) -> impl IntoResponse {
-    let folders = match repo_result_or_response(auth.format, auth.music().get_music_folders()) {
+    let folders = match auth.music().get_music_folders() {
         Ok(folders) => folders,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
     let responses: Vec<MusicFolderResponse> =
         folders.iter().map(MusicFolderResponse::from).collect();
@@ -44,21 +46,24 @@ pub async fn get_music_folders(auth: SubsonicAuth) -> impl IntoResponse {
 /// Returns an indexed structure of all artists.
 /// This is used by older clients that use the folder-based browsing model.
 pub async fn get_indexes(auth: SubsonicAuth) -> impl IntoResponse {
-    let artists = match repo_result_or_response(auth.format, auth.music().get_artists()) {
+    let artists = match auth.music().get_artists() {
         Ok(artists) => artists,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
     let user_id = auth.user.id;
 
     // Get starred status for all artists in a single batch query
     let artist_ids: Vec<i32> = artists.iter().map(|a| a.id).collect();
-    let starred_map = match repo_result_or_response(
-        auth.format,
-        auth.music()
-            .get_starred_at_for_artists_batch(user_id, &artist_ids),
-    ) {
+    let starred_map = match auth
+        .music()
+        .get_starred_at_for_artists_batch(user_id, &artist_ids)
+    {
         Ok(starred_map) => starred_map,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
     // Group artists by first letter
@@ -97,11 +102,10 @@ pub async fn get_indexes(auth: SubsonicAuth) -> impl IntoResponse {
         .collect();
 
     // Get last modified time (using current timestamp for now)
-    let last_modified =
-        match repo_result_or_response(auth.format, auth.music().get_artists_last_modified()) {
-            Ok(value) => value.map_or(0, |dt| dt.and_utc().timestamp_millis()),
-            Err(response) => return response,
-        };
+    let last_modified = match auth.music().get_artists_last_modified() {
+        Ok(value) => value.map_or(0, |dt| dt.and_utc().timestamp_millis()),
+        Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+    };
 
     let response = IndexesResponse {
         ignored_articles: "The El La Los Las Le Les".to_string(),
@@ -117,30 +121,32 @@ pub async fn get_indexes(auth: SubsonicAuth) -> impl IntoResponse {
 /// Similar to getIndexes, but returns artists using ID3 tags.
 /// This is the preferred endpoint for modern clients.
 pub async fn get_artists(auth: SubsonicAuth) -> impl IntoResponse {
-    let artists = match repo_result_or_response(auth.format, auth.music().get_artists()) {
+    let artists = match auth.music().get_artists() {
         Ok(artists) => artists,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
     let user_id = auth.user.id;
 
     // Get album counts for all artists in a single batch query
     let artist_ids: Vec<i32> = artists.iter().map(|a| a.id).collect();
-    let album_counts = match repo_result_or_response(
-        auth.format,
-        auth.music().get_artist_album_counts_batch(&artist_ids),
-    ) {
+    let album_counts = match auth.music().get_artist_album_counts_batch(&artist_ids) {
         Ok(album_counts) => album_counts,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
     // Get starred status for all artists in a single batch query
-    let starred_map = match repo_result_or_response(
-        auth.format,
-        auth.music()
-            .get_starred_at_for_artists_batch(user_id, &artist_ids),
-    ) {
+    let starred_map = match auth
+        .music()
+        .get_starred_at_for_artists_batch(user_id, &artist_ids)
+    {
         Ok(starred_map) => starred_map,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
     // Group artists by first letter

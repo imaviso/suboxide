@@ -5,7 +5,6 @@ use axum::response::IntoResponse;
 use crate::api::auth::SubsonicAuth;
 use crate::api::error::ApiError;
 use crate::api::handlers::browsing::IdParams;
-use crate::api::handlers::repo_result_or_response;
 use crate::api::response::{SubsonicResponse, error_response};
 use crate::models::music::{
     AlbumID3Response, AlbumWithSongsID3Response, ArtistWithAlbumsID3Response, ChildResponse,
@@ -23,38 +22,41 @@ pub async fn get_album(
             .into_response();
     };
 
-    let album = match repo_result_or_response(auth.format, auth.music().get_album(album_id)) {
+    let album = match auth.music().get_album(album_id) {
         Ok(Some(album)) => album,
         Ok(None) => {
             return error_response(auth.format, &ApiError::NotFound("Album".into()))
                 .into_response();
         }
-        Err(response) => return response,
+        Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
     };
 
-    let album_starred_at = match repo_result_or_response(
-        auth.format,
-        auth.music()
-            .get_starred_at_for_album(auth.user.id, album_id),
-    ) {
+    let album_starred_at = match auth
+        .music()
+        .get_starred_at_for_album(auth.user.id, album_id)
+    {
         Ok(starred_at) => starred_at,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
-    let songs =
-        match repo_result_or_response(auth.format, auth.music().get_songs_by_album(album_id)) {
-            Ok(songs) => songs,
-            Err(response) => return response,
-        };
+    let songs = match auth.music().get_songs_by_album(album_id) {
+        Ok(songs) => songs,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
+    };
 
     let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
-    let starred_songs = match repo_result_or_response(
-        auth.format,
-        auth.music()
-            .get_starred_at_for_songs_batch(auth.user.id, &song_ids),
-    ) {
+    let starred_songs = match auth
+        .music()
+        .get_starred_at_for_songs_batch(auth.user.id, &song_ids)
+    {
         Ok(starred) => starred,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
     let song_responses: Vec<ChildResponse> = songs
@@ -85,37 +87,40 @@ pub async fn get_artist(
             .into_response();
     };
 
-    let artist = match repo_result_or_response(auth.format, auth.music().get_artist(artist_id)) {
+    let artist = match auth.music().get_artist(artist_id) {
         Ok(Some(artist)) => artist,
         Ok(None) => {
             return error_response(auth.format, &ApiError::NotFound("Artist".into()))
                 .into_response();
         }
-        Err(response) => return response,
+        Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
     };
 
-    let artist_starred_at = match repo_result_or_response(
-        auth.format,
-        auth.music()
-            .get_starred_at_for_artist(auth.user.id, artist_id),
-    ) {
+    let artist_starred_at = match auth
+        .music()
+        .get_starred_at_for_artist(auth.user.id, artist_id)
+    {
         Ok(starred_at) => starred_at,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
-    let albums =
-        match repo_result_or_response(auth.format, auth.music().get_albums_by_artist(artist_id)) {
-            Ok(albums) => albums,
-            Err(response) => return response,
-        };
+    let albums = match auth.music().get_albums_by_artist(artist_id) {
+        Ok(albums) => albums,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
+    };
     let album_ids: Vec<i32> = albums.iter().map(|a| a.id).collect();
-    let starred_map = match repo_result_or_response(
-        auth.format,
-        auth.music()
-            .get_starred_at_for_albums_batch(auth.user.id, &album_ids),
-    ) {
+    let starred_map = match auth
+        .music()
+        .get_starred_at_for_albums_batch(auth.user.id, &album_ids)
+    {
         Ok(starred) => starred,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
     let album_responses: Vec<AlbumID3Response> = albums
@@ -146,20 +151,19 @@ pub async fn get_song(
             .into_response();
     };
 
-    let song = match repo_result_or_response(auth.format, auth.music().get_song(song_id)) {
+    let song = match auth.music().get_song(song_id) {
         Ok(Some(song)) => song,
         Ok(None) => {
             return error_response(auth.format, &ApiError::NotFound("Song".into())).into_response();
         }
-        Err(response) => return response,
+        Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
     };
 
-    let starred_at = match repo_result_or_response(
-        auth.format,
-        auth.music().get_starred_at_for_song(auth.user.id, song_id),
-    ) {
+    let starred_at = match auth.music().get_starred_at_for_song(auth.user.id, song_id) {
         Ok(starred_at) => starred_at,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
     let response = ChildResponse::from_song_with_starred(&song, starred_at.as_ref());
     SubsonicResponse::song(auth.format, response).into_response()

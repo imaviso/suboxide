@@ -4,8 +4,8 @@ use axum::response::IntoResponse;
 use serde::Deserialize;
 
 use crate::api::auth::SubsonicAuth;
-use crate::api::handlers::repo_result_or_response;
-use crate::api::response::SubsonicResponse;
+use crate::api::error::ApiError;
+use crate::api::response::{SubsonicResponse, error_response};
 use crate::models::music::{
     AlbumID3Response, ArtistID3Response, ArtistResponse, ChildResponse, SearchMatch,
     SearchResult2Response, SearchResult3Response, SearchResultResponse, format_subsonic_datetime,
@@ -61,27 +61,26 @@ pub async fn search3(
     let song_count = params.song_count.unwrap_or(20).clamp(0, 500);
     let song_offset = params.song_offset.unwrap_or(0).max(0);
 
-    let artists = match repo_result_or_response(
-        auth.format,
-        auth.music()
-            .search_artists(query, artist_offset, artist_count),
-    ) {
+    let artists = match auth
+        .music()
+        .search_artists(query, artist_offset, artist_count)
+    {
         Ok(v) => v,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
-    let albums = match repo_result_or_response(
-        auth.format,
-        auth.music().search_albums(query, album_offset, album_count),
-    ) {
+    let albums = match auth.music().search_albums(query, album_offset, album_count) {
         Ok(v) => v,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
-    let songs = match repo_result_or_response(
-        auth.format,
-        auth.music().search_songs(query, song_offset, song_count),
-    ) {
+    let songs = match auth.music().search_songs(query, song_offset, song_count) {
         Ok(v) => v,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
     let user_id = auth.user.id;
@@ -89,36 +88,38 @@ pub async fn search3(
     let album_ids: Vec<i32> = albums.iter().map(|a| a.id).collect();
     let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
 
-    let artist_album_counts = match repo_result_or_response(
-        auth.format,
-        auth.music().get_artist_album_counts_batch(&artist_ids),
-    ) {
+    let artist_album_counts = match auth.music().get_artist_album_counts_batch(&artist_ids) {
         Ok(v) => v,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
-    let starred_artists = match repo_result_or_response(
-        auth.format,
-        auth.music()
-            .get_starred_at_for_artists_batch(user_id, &artist_ids),
-    ) {
+    let starred_artists = match auth
+        .music()
+        .get_starred_at_for_artists_batch(user_id, &artist_ids)
+    {
         Ok(v) => v,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
-    let starred_albums = match repo_result_or_response(
-        auth.format,
-        auth.music()
-            .get_starred_at_for_albums_batch(user_id, &album_ids),
-    ) {
+    let starred_albums = match auth
+        .music()
+        .get_starred_at_for_albums_batch(user_id, &album_ids)
+    {
         Ok(v) => v,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
-    let starred_songs = match repo_result_or_response(
-        auth.format,
-        auth.music()
-            .get_starred_at_for_songs_batch(user_id, &song_ids),
-    ) {
+    let starred_songs = match auth
+        .music()
+        .get_starred_at_for_songs_batch(user_id, &song_ids)
+    {
         Ok(v) => v,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
     // Convert to response types with starred status from batch results
@@ -206,27 +207,26 @@ pub async fn search2(
     let song_count = params.song_count.unwrap_or(20).clamp(0, 500);
     let song_offset = params.song_offset.unwrap_or(0).max(0);
 
-    let artists = match repo_result_or_response(
-        auth.format,
-        auth.music()
-            .search_artists(query, artist_offset, artist_count),
-    ) {
+    let artists = match auth
+        .music()
+        .search_artists(query, artist_offset, artist_count)
+    {
         Ok(v) => v,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
-    let albums = match repo_result_or_response(
-        auth.format,
-        auth.music().search_albums(query, album_offset, album_count),
-    ) {
+    let albums = match auth.music().search_albums(query, album_offset, album_count) {
         Ok(v) => v,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
-    let songs = match repo_result_or_response(
-        auth.format,
-        auth.music().search_songs(query, song_offset, song_count),
-    ) {
+    let songs = match auth.music().search_songs(query, song_offset, song_count) {
         Ok(v) => v,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
     let user_id = auth.user.id;
@@ -234,29 +234,32 @@ pub async fn search2(
     let album_ids: Vec<i32> = albums.iter().map(|a| a.id).collect();
     let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
 
-    let starred_artists = match repo_result_or_response(
-        auth.format,
-        auth.music()
-            .get_starred_at_for_artists_batch(user_id, &artist_ids),
-    ) {
+    let starred_artists = match auth
+        .music()
+        .get_starred_at_for_artists_batch(user_id, &artist_ids)
+    {
         Ok(v) => v,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
-    let starred_albums = match repo_result_or_response(
-        auth.format,
-        auth.music()
-            .get_starred_at_for_albums_batch(user_id, &album_ids),
-    ) {
+    let starred_albums = match auth
+        .music()
+        .get_starred_at_for_albums_batch(user_id, &album_ids)
+    {
         Ok(v) => v,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
-    let starred_songs = match repo_result_or_response(
-        auth.format,
-        auth.music()
-            .get_starred_at_for_songs_batch(user_id, &song_ids),
-    ) {
+    let starred_songs = match auth
+        .music()
+        .get_starred_at_for_songs_batch(user_id, &song_ids)
+    {
         Ok(v) => v,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
     // Convert to non-ID3 response types
@@ -336,12 +339,12 @@ pub async fn search(
         .unwrap_or("")
         .trim();
 
-    let songs =
-        match repo_result_or_response(auth.format, auth.music().search_songs(query, offset, count))
-        {
-            Ok(v) => v,
-            Err(response) => return response,
-        };
+    let songs = match auth.music().search_songs(query, offset, count) {
+        Ok(v) => v,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
+    };
 
     let matches: Vec<SearchMatch> = songs.iter().map(SearchMatch::from).collect();
     #[expect(

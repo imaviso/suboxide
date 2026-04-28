@@ -4,7 +4,6 @@ use serde::Deserialize;
 
 use crate::api::auth::SubsonicAuth;
 use crate::api::error::ApiError;
-use crate::api::handlers::repo_result_or_response;
 use crate::api::response::{SubsonicResponse, error_response};
 use crate::models::music::{
     ChildResponse, PlaylistResponse, PlaylistWithSongsResponse, PlaylistsResponse,
@@ -30,19 +29,19 @@ pub async fn get_playlists(
     let user_id = auth.user.id;
     let username = &auth.user.username;
 
-    let playlists =
-        match repo_result_or_response(auth.format, auth.music().get_playlists(user_id, username)) {
-            Ok(v) => v,
-            Err(response) => return response,
-        };
+    let playlists = match auth.music().get_playlists(user_id, username) {
+        Ok(v) => v,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
+    };
 
     let playlist_ids: Vec<i32> = playlists.iter().map(|p| p.id).collect();
-    let cover_arts = match repo_result_or_response(
-        auth.format,
-        auth.music().get_playlist_cover_arts_batch(&playlist_ids),
-    ) {
+    let cover_arts = match auth.music().get_playlist_cover_arts_batch(&playlist_ids) {
         Ok(v) => v,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
     let playlist_responses: Vec<PlaylistResponse> = playlists
@@ -98,35 +97,36 @@ pub async fn get_playlist(
         .into_response();
     };
 
-    let playlist =
-        match repo_result_or_response(auth.format, auth.music().get_playlist(playlist_id)) {
-            Ok(Some(p)) => p,
-            Ok(None) => {
-                return error_response(auth.format, &ApiError::NotFound("Playlist".into()))
-                    .into_response();
-            }
-            Err(response) => return response,
-        };
+    let playlist = match auth.music().get_playlist(playlist_id) {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            return error_response(auth.format, &ApiError::NotFound("Playlist".into()))
+                .into_response();
+        }
+        Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+    };
 
     if playlist.owner != auth.user.username && !playlist.public {
         return error_response(auth.format, &ApiError::NotAuthorized).into_response();
     }
 
-    let songs =
-        match repo_result_or_response(auth.format, auth.music().get_playlist_songs(playlist_id)) {
-            Ok(v) => v,
-            Err(response) => return response,
-        };
+    let songs = match auth.music().get_playlist_songs(playlist_id) {
+        Ok(v) => v,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
+    };
     let user_id = auth.user.id;
 
     let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
-    let starred_map = match repo_result_or_response(
-        auth.format,
-        auth.music()
-            .get_starred_at_for_songs_batch(user_id, &song_ids),
-    ) {
+    let starred_map = match auth
+        .music()
+        .get_starred_at_for_songs_batch(user_id, &song_ids)
+    {
         Ok(v) => v,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
     let song_responses: Vec<ChildResponse> = songs
@@ -195,56 +195,51 @@ pub async fn create_playlist(
                 .into_response();
         };
 
-        match repo_result_or_response(
-            auth.format,
-            auth.music().is_playlist_owner(user_id, playlist_id),
-        ) {
+        match auth.music().is_playlist_owner(user_id, playlist_id) {
             Ok(true) => {}
             Ok(false) => {
                 return error_response(auth.format, &ApiError::NotAuthorized).into_response();
             }
-            Err(response) => return response,
+            Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
         }
 
-        if let Err(response) = repo_result_or_response(
-            auth.format,
-            auth.music().update_playlist(
-                playlist_id,
-                params.name.as_deref(),
-                None,
-                None,
-                &song_ids,
-                &[],
-            ),
+        if let Err(e) = auth.music().update_playlist(
+            playlist_id,
+            params.name.as_deref(),
+            None,
+            None,
+            &song_ids,
+            &[],
         ) {
-            return response;
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
         }
 
-        let playlist =
-            match repo_result_or_response(auth.format, auth.music().get_playlist(playlist_id)) {
-                Ok(Some(p)) => p,
-                Ok(None) => {
-                    return error_response(auth.format, &ApiError::NotFound("Playlist".into()))
-                        .into_response();
-                }
-                Err(response) => return response,
-            };
-        let songs = match repo_result_or_response(
-            auth.format,
-            auth.music().get_playlist_songs(playlist_id),
-        ) {
+        let playlist = match auth.music().get_playlist(playlist_id) {
+            Ok(Some(p)) => p,
+            Ok(None) => {
+                return error_response(auth.format, &ApiError::NotFound("Playlist".into()))
+                    .into_response();
+            }
+            Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+        };
+        let songs = match auth.music().get_playlist_songs(playlist_id) {
             Ok(v) => v,
-            Err(response) => return response,
+            Err(e) => {
+                return error_response(auth.format, &ApiError::Generic(e.to_string()))
+                    .into_response();
+            }
         };
 
         let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
-        let starred_map = match repo_result_or_response(
-            auth.format,
-            auth.music()
-                .get_starred_at_for_songs_batch(user_id, &song_ids),
-        ) {
+        let starred_map = match auth
+            .music()
+            .get_starred_at_for_songs_batch(user_id, &song_ids)
+        {
             Ok(v) => v,
-            Err(response) => return response,
+            Err(e) => {
+                return error_response(auth.format, &ApiError::Generic(e.to_string()))
+                    .into_response();
+            }
         };
 
         let song_responses: Vec<ChildResponse> = songs
@@ -282,28 +277,29 @@ pub async fn create_playlist(
         }
     };
 
-    let playlist = match repo_result_or_response(
-        auth.format,
-        auth.music().create_playlist(user_id, name, None, &song_ids),
-    ) {
+    let playlist = match auth.music().create_playlist(user_id, name, None, &song_ids) {
         Ok(p) => p,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
-    let songs =
-        match repo_result_or_response(auth.format, auth.music().get_playlist_songs(playlist.id)) {
-            Ok(v) => v,
-            Err(response) => return response,
-        };
+    let songs = match auth.music().get_playlist_songs(playlist.id) {
+        Ok(v) => v,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
+    };
 
     let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
-    let starred_map = match repo_result_or_response(
-        auth.format,
-        auth.music()
-            .get_starred_at_for_songs_batch(user_id, &song_ids),
-    ) {
+    let starred_map = match auth
+        .music()
+        .get_starred_at_for_songs_batch(user_id, &song_ids)
+    {
         Ok(v) => v,
-        Err(response) => return response,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
     let song_responses: Vec<ChildResponse> = songs
@@ -386,28 +382,22 @@ pub async fn update_playlist(
         .into_response();
     };
 
-    match repo_result_or_response(
-        auth.format,
-        auth.music().is_playlist_owner(user_id, playlist_id),
-    ) {
+    match auth.music().is_playlist_owner(user_id, playlist_id) {
         Ok(true) => {}
         Ok(false) => return error_response(auth.format, &ApiError::NotAuthorized).into_response(),
-        Err(response) => return response,
+        Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
     }
 
-    match repo_result_or_response(
-        auth.format,
-        auth.music().update_playlist(
-            playlist_id,
-            params.name.as_deref(),
-            params.comment.as_deref(),
-            params.public,
-            &params.song_id_to_add,
-            &params.song_index_to_remove,
-        ),
+    match auth.music().update_playlist(
+        playlist_id,
+        params.name.as_deref(),
+        params.comment.as_deref(),
+        params.public,
+        &params.song_id_to_add,
+        &params.song_index_to_remove,
     ) {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
-        Err(response) => response,
+        Err(e) => error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
     }
 }
 
@@ -440,20 +430,17 @@ pub async fn delete_playlist(
 
     let user_id = auth.user.id;
 
-    match repo_result_or_response(
-        auth.format,
-        auth.music().is_playlist_owner(user_id, playlist_id),
-    ) {
+    match auth.music().is_playlist_owner(user_id, playlist_id) {
         Ok(true) => {}
         Ok(false) => return error_response(auth.format, &ApiError::NotAuthorized).into_response(),
-        Err(response) => return response,
+        Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
     }
 
-    match repo_result_or_response(auth.format, auth.music().delete_playlist(playlist_id)) {
+    match auth.music().delete_playlist(playlist_id) {
         Ok(true) => SubsonicResponse::empty(auth.format).into_response(),
         Ok(false) => {
             error_response(auth.format, &ApiError::NotFound("Playlist".into())).into_response()
         }
-        Err(response) => response,
+        Err(e) => error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
     }
 }
