@@ -40,13 +40,82 @@ impl ScanStateHandle {
     pub fn get(&self) -> &ScanState {
         &self.0
     }
-}
 
-impl std::ops::Deref for ScanStateHandle {
-    type Target = ScanState;
+    /// Check if a scan is currently in progress.
+    #[must_use]
+    pub fn is_scanning(&self) -> bool {
+        self.0.is_scanning()
+    }
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
+    /// Get the current item count.
+    #[must_use]
+    pub fn get_count(&self) -> u64 {
+        self.0.get_count()
+    }
+
+    /// Get the total item count (0 if unknown).
+    #[must_use]
+    pub fn get_total(&self) -> u64 {
+        self.0.get_total()
+    }
+
+    /// Get the current scan phase.
+    #[must_use]
+    pub fn get_phase(&self) -> ScanPhase {
+        self.0.get_phase()
+    }
+
+    /// Get the current folder being scanned.
+    #[must_use]
+    pub fn get_current_folder(&self) -> Option<String> {
+        self.0.get_current_folder()
+    }
+
+    /// Try to start a scan. Returns false if a scan is already in progress.
+    #[must_use]
+    pub fn try_start(&self) -> bool {
+        self.0.try_start()
+    }
+
+    /// Mark the scan as complete.
+    pub fn finish(&self) {
+        self.0.finish();
+    }
+
+    /// Reset the count to 0.
+    pub fn reset_count(&self) {
+        self.0.reset_count();
+    }
+
+    /// Reset all progress state for a new scan.
+    pub fn reset(&self) {
+        self.0.reset();
+    }
+
+    /// Increment the count by 1 and return the new value.
+    #[must_use]
+    pub fn increment_count(&self) -> u64 {
+        self.0.increment_count()
+    }
+
+    /// Set the count to a specific value.
+    pub fn set_count(&self, value: u64) {
+        self.0.set_count(value);
+    }
+
+    /// Set the total item count.
+    pub fn set_total(&self, value: u64) {
+        self.0.set_total(value);
+    }
+
+    /// Set the current scan phase.
+    pub fn set_phase(&self, phase: ScanPhase) {
+        self.0.set_phase(phase);
+    }
+
+    /// Set the current folder being scanned.
+    pub fn set_current_folder(&self, folder: Option<String>) {
+        self.0.set_current_folder(folder);
     }
 }
 

@@ -42,7 +42,7 @@ pub async fn get_artist_info2(
     // Get the artist
     let response = match repo_result_or_response(
         auth.format,
-        auth.state().get_artist_info_with_cache(artist_id),
+        auth.music().get_artist_info_with_cache(artist_id),
     ) {
         Ok(response) => response,
         Err(response) => return response,
@@ -73,7 +73,7 @@ pub async fn get_album_info2(
     };
 
     // Get the album
-    let album = match repo_result_or_response(auth.format, auth.state().get_album(album_id)) {
+    let album = match repo_result_or_response(auth.format, auth.music().get_album(album_id)) {
         Ok(Some(album)) => album,
         Ok(None) => {
             return error_response(auth.format, &ApiError::NotFound("Album".into()))
@@ -103,7 +103,7 @@ pub async fn get_artist_info(
     // Get the artist info with cache
     let response = match repo_result_or_response(
         auth.format,
-        auth.state().get_artist_info_non_id3_with_cache(artist_id),
+        auth.music().get_artist_info_non_id3_with_cache(artist_id),
     ) {
         Ok(response) => response,
         Err(response) => return response,
@@ -125,7 +125,7 @@ pub async fn get_album_info(
     };
 
     // Get the album
-    let album = match repo_result_or_response(auth.format, auth.state().get_album(album_id)) {
+    let album = match repo_result_or_response(auth.format, auth.music().get_album(album_id)) {
         Ok(Some(album)) => album,
         Ok(None) => {
             return error_response(auth.format, &ApiError::NotFound("Album".into()))
@@ -164,14 +164,14 @@ pub async fn get_lyrics(
     if !artist.is_empty() && !title.is_empty() {
         let maybe_song = match repo_result_or_response(
             auth.format,
-            auth.state().find_song_by_artist_and_title(artist, title),
+            auth.music().find_song_by_artist_and_title(artist, title),
         ) {
             Ok(song) => song,
             Err(response) => return response,
         };
         if let Some(song) = maybe_song {
             let extracted =
-                match repo_result_or_response(auth.format, auth.state().get_song_lyrics(song.id)) {
+                match repo_result_or_response(auth.format, auth.music().get_song_lyrics(song.id)) {
                     Ok(extracted) => extracted,
                     Err(response) => return response,
                 };
@@ -204,7 +204,7 @@ pub async fn get_lyrics_by_song_id(
     };
 
     // Get the song (also verifies it exists)
-    let song = match repo_result_or_response(auth.format, auth.state().get_song(song_id)) {
+    let song = match repo_result_or_response(auth.format, auth.music().get_song(song_id)) {
         Ok(Some(song)) => song,
         Ok(None) => {
             return error_response(auth.format, &ApiError::NotFound("Song not found".into()))
@@ -215,7 +215,7 @@ pub async fn get_lyrics_by_song_id(
 
     // Extract lyrics from the audio file
     let extracted =
-        match repo_result_or_response(auth.format, auth.state().get_song_lyrics(song_id)) {
+        match repo_result_or_response(auth.format, auth.music().get_song_lyrics(song_id)) {
             Ok(extracted) => extracted,
             Err(response) => return response,
         };

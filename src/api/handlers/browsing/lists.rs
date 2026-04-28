@@ -59,16 +59,16 @@ pub async fn get_album_list2(
 
     let user_id = auth.user.id;
     let albums_result = match list_type {
-        "random" => auth.state().get_albums_random(size),
-        "newest" => auth.state().get_albums_newest(offset, size),
-        "frequent" => auth.state().get_albums_frequent(offset, size),
-        "recent" => auth.state().get_albums_recent(offset, size),
-        "alphabeticalByName" => auth.state().get_albums_alphabetical_by_name(offset, size),
-        "alphabeticalByArtist" => auth.state().get_albums_alphabetical_by_artist(offset, size),
+        "random" => auth.music().get_albums_random(size),
+        "newest" => auth.music().get_albums_newest(offset, size),
+        "frequent" => auth.music().get_albums_frequent(offset, size),
+        "recent" => auth.music().get_albums_recent(offset, size),
+        "alphabeticalByName" => auth.music().get_albums_alphabetical_by_name(offset, size),
+        "alphabeticalByArtist" => auth.music().get_albums_alphabetical_by_artist(offset, size),
         "byYear" => {
             let from_year = params.from_year.unwrap_or(0);
             let to_year = params.to_year.unwrap_or(9999);
-            auth.state()
+            auth.music()
                 .get_albums_by_year(from_year, to_year, offset, size)
         }
         "byGenre" => {
@@ -76,10 +76,10 @@ pub async fn get_album_list2(
                 return error_response(auth.format, &ApiError::MissingParameter("genre".into()))
                     .into_response();
             };
-            auth.state().get_albums_by_genre(genre, offset, size)
+            auth.music().get_albums_by_genre(genre, offset, size)
         }
-        "starred" => auth.state().get_albums_starred(user_id, offset, size),
-        "highest" => auth.state().get_albums_highest(user_id, offset, size),
+        "starred" => auth.music().get_albums_starred(user_id, offset, size),
+        "highest" => auth.music().get_albums_highest(user_id, offset, size),
         _ => {
             return error_response(
                 auth.format,
@@ -98,7 +98,7 @@ pub async fn get_album_list2(
     let album_ids: Vec<i32> = albums.iter().map(|a| a.id).collect();
     let starred_map = match repo_result_or_response(
         auth.format,
-        auth.state()
+        auth.music()
             .get_starred_at_for_albums_batch(user_id, &album_ids),
     ) {
         Ok(v) => v,
@@ -133,16 +133,16 @@ pub async fn get_album_list(
 
     let user_id = auth.user.id;
     let albums_result = match list_type {
-        "random" => auth.state().get_albums_random(size),
-        "newest" => auth.state().get_albums_newest(offset, size),
-        "frequent" => auth.state().get_albums_frequent(offset, size),
-        "recent" => auth.state().get_albums_recent(offset, size),
-        "alphabeticalByName" => auth.state().get_albums_alphabetical_by_name(offset, size),
-        "alphabeticalByArtist" => auth.state().get_albums_alphabetical_by_artist(offset, size),
+        "random" => auth.music().get_albums_random(size),
+        "newest" => auth.music().get_albums_newest(offset, size),
+        "frequent" => auth.music().get_albums_frequent(offset, size),
+        "recent" => auth.music().get_albums_recent(offset, size),
+        "alphabeticalByName" => auth.music().get_albums_alphabetical_by_name(offset, size),
+        "alphabeticalByArtist" => auth.music().get_albums_alphabetical_by_artist(offset, size),
         "byYear" => {
             let from_year = params.from_year.unwrap_or(0);
             let to_year = params.to_year.unwrap_or(9999);
-            auth.state()
+            auth.music()
                 .get_albums_by_year(from_year, to_year, offset, size)
         }
         "byGenre" => {
@@ -150,10 +150,10 @@ pub async fn get_album_list(
                 return error_response(auth.format, &ApiError::MissingParameter("genre".into()))
                     .into_response();
             };
-            auth.state().get_albums_by_genre(genre, offset, size)
+            auth.music().get_albums_by_genre(genre, offset, size)
         }
-        "starred" => auth.state().get_albums_starred(user_id, offset, size),
-        "highest" => auth.state().get_albums_highest(user_id, offset, size),
+        "starred" => auth.music().get_albums_starred(user_id, offset, size),
+        "highest" => auth.music().get_albums_highest(user_id, offset, size),
         _ => {
             return error_response(
                 auth.format,
@@ -172,7 +172,7 @@ pub async fn get_album_list(
     let album_ids: Vec<i32> = albums.iter().map(|a| a.id).collect();
     let starred_map = match repo_result_or_response(
         auth.format,
-        auth.state()
+        auth.music()
             .get_starred_at_for_albums_batch(user_id, &album_ids),
     ) {
         Ok(v) => v,
@@ -203,7 +203,7 @@ pub async fn get_album_list(
 ///
 /// Returns all genres.
 pub async fn get_genres(auth: SubsonicAuth) -> impl IntoResponse {
-    let genres = match repo_result_or_response(auth.format, auth.state().get_genres()) {
+    let genres = match repo_result_or_response(auth.format, auth.music().get_genres()) {
         Ok(v) => v,
         Err(response) => return response,
     };
@@ -254,7 +254,7 @@ pub async fn get_random_songs(
 
     let songs = match repo_result_or_response(
         auth.format,
-        auth.state().get_random_songs(
+        auth.music().get_random_songs(
             size,
             params.genre.as_deref(),
             params.from_year,
@@ -270,7 +270,7 @@ pub async fn get_random_songs(
     let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
     let starred_songs = match repo_result_or_response(
         auth.format,
-        auth.state()
+        auth.music()
             .get_starred_at_for_songs_batch(user_id, &song_ids),
     ) {
         Ok(v) => v,
@@ -325,7 +325,7 @@ pub async fn get_songs_by_genre(
 
     let songs = match repo_result_or_response(
         auth.format,
-        auth.state()
+        auth.music()
             .get_songs_by_genre(genre, count, offset, params.music_folder_id),
     ) {
         Ok(v) => v,
@@ -336,7 +336,7 @@ pub async fn get_songs_by_genre(
     let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
     let starred_songs = match repo_result_or_response(
         auth.format,
-        auth.state()
+        auth.music()
             .get_starred_at_for_songs_batch(user_id, &song_ids),
     ) {
         Ok(v) => v,
@@ -390,7 +390,7 @@ pub async fn get_top_songs(
     // Get top songs by artist name (ordered by play count)
     let songs = match repo_result_or_response(
         auth.format,
-        auth.state()
+        auth.music()
             .get_top_songs_by_artist_name(artist_name, count),
     ) {
         Ok(v) => v,
@@ -401,7 +401,7 @@ pub async fn get_top_songs(
     let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
     let starred_songs = match repo_result_or_response(
         auth.format,
-        auth.state()
+        auth.music()
             .get_starred_at_for_songs_batch(user_id, &song_ids),
     ) {
         Ok(v) => v,
@@ -451,12 +451,12 @@ pub async fn get_similar_songs2(
     let user_id = auth.user.id;
 
     // Try to get similar songs - first check if it's a song
-    let songs = match repo_result_or_response(auth.format, auth.state().get_song(id)) {
+    let songs = match repo_result_or_response(auth.format, auth.music().get_song(id)) {
         Ok(Some(song)) => {
             if let Some(artist_id) = song.artist_id {
                 match repo_result_or_response(
                     auth.format,
-                    auth.state()
+                    auth.music()
                         .get_similar_songs_by_artist(artist_id, id, count),
                 ) {
                     Ok(v) => v,
@@ -465,7 +465,7 @@ pub async fn get_similar_songs2(
             } else if let Some(ref genre) = song.genre {
                 match repo_result_or_response(
                     auth.format,
-                    auth.state().get_songs_by_genre(genre, count, 0, None),
+                    auth.music().get_songs_by_genre(genre, count, 0, None),
                 ) {
                     Ok(v) => v,
                     Err(response) => return response,
@@ -474,12 +474,12 @@ pub async fn get_similar_songs2(
                 Vec::new()
             }
         }
-        Ok(None) => match repo_result_or_response(auth.format, auth.state().get_album(id)) {
+        Ok(None) => match repo_result_or_response(auth.format, auth.music().get_album(id)) {
             Ok(Some(album)) => {
                 if let Some(artist_id) = album.artist_id {
                     match repo_result_or_response(
                         auth.format,
-                        auth.state()
+                        auth.music()
                             .get_similar_songs_by_artist(artist_id, -1, count),
                     ) {
                         Ok(v) => v,
@@ -489,11 +489,11 @@ pub async fn get_similar_songs2(
                     Vec::new()
                 }
             }
-            Ok(None) => match repo_result_or_response(auth.format, auth.state().get_artist(id)) {
+            Ok(None) => match repo_result_or_response(auth.format, auth.music().get_artist(id)) {
                 Ok(Some(_)) => {
                     match repo_result_or_response(
                         auth.format,
-                        auth.state().get_similar_songs_by_artist(id, -1, count),
+                        auth.music().get_similar_songs_by_artist(id, -1, count),
                     ) {
                         Ok(v) => v,
                         Err(response) => return response,
@@ -514,7 +514,7 @@ pub async fn get_similar_songs2(
     let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
     let starred_songs = match repo_result_or_response(
         auth.format,
-        auth.state()
+        auth.music()
             .get_starred_at_for_songs_batch(user_id, &song_ids),
     ) {
         Ok(v) => v,
@@ -553,12 +553,12 @@ pub async fn get_similar_songs(
     let user_id = auth.user.id;
 
     // Try to get similar songs
-    let songs = match repo_result_or_response(auth.format, auth.state().get_song(id)) {
+    let songs = match repo_result_or_response(auth.format, auth.music().get_song(id)) {
         Ok(Some(song)) => {
             if let Some(artist_id) = song.artist_id {
                 match repo_result_or_response(
                     auth.format,
-                    auth.state()
+                    auth.music()
                         .get_similar_songs_by_artist(artist_id, id, count),
                 ) {
                     Ok(v) => v,
@@ -567,7 +567,7 @@ pub async fn get_similar_songs(
             } else if let Some(ref genre) = song.genre {
                 match repo_result_or_response(
                     auth.format,
-                    auth.state().get_songs_by_genre(genre, count, 0, None),
+                    auth.music().get_songs_by_genre(genre, count, 0, None),
                 ) {
                     Ok(v) => v,
                     Err(response) => return response,
@@ -576,12 +576,12 @@ pub async fn get_similar_songs(
                 Vec::new()
             }
         }
-        Ok(None) => match repo_result_or_response(auth.format, auth.state().get_album(id)) {
+        Ok(None) => match repo_result_or_response(auth.format, auth.music().get_album(id)) {
             Ok(Some(album)) => {
                 if let Some(artist_id) = album.artist_id {
                     match repo_result_or_response(
                         auth.format,
-                        auth.state()
+                        auth.music()
                             .get_similar_songs_by_artist(artist_id, -1, count),
                     ) {
                         Ok(v) => v,
@@ -591,11 +591,11 @@ pub async fn get_similar_songs(
                     Vec::new()
                 }
             }
-            Ok(None) => match repo_result_or_response(auth.format, auth.state().get_artist(id)) {
+            Ok(None) => match repo_result_or_response(auth.format, auth.music().get_artist(id)) {
                 Ok(Some(_)) => {
                     match repo_result_or_response(
                         auth.format,
-                        auth.state().get_similar_songs_by_artist(id, -1, count),
+                        auth.music().get_similar_songs_by_artist(id, -1, count),
                     ) {
                         Ok(v) => v,
                         Err(response) => return response,
@@ -616,7 +616,7 @@ pub async fn get_similar_songs(
     let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
     let starred_songs = match repo_result_or_response(
         auth.format,
-        auth.state()
+        auth.music()
             .get_starred_at_for_songs_batch(user_id, &song_ids),
     ) {
         Ok(v) => v,
@@ -646,17 +646,17 @@ pub async fn get_starred(auth: SubsonicAuth) -> impl IntoResponse {
 
     // Get starred items
     let starred_artists =
-        match repo_result_or_response(auth.format, auth.state().get_starred_artists(user_id)) {
+        match repo_result_or_response(auth.format, auth.music().get_starred_artists(user_id)) {
             Ok(v) => v,
             Err(response) => return response,
         };
     let starred_albums =
-        match repo_result_or_response(auth.format, auth.state().get_starred_albums(user_id)) {
+        match repo_result_or_response(auth.format, auth.music().get_starred_albums(user_id)) {
             Ok(v) => v,
             Err(response) => return response,
         };
     let starred_songs =
-        match repo_result_or_response(auth.format, auth.state().get_starred_songs(user_id)) {
+        match repo_result_or_response(auth.format, auth.music().get_starred_songs(user_id)) {
             Ok(v) => v,
             Err(response) => return response,
         };

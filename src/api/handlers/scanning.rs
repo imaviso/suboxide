@@ -8,7 +8,7 @@ use crate::scanner::Scanner;
 
 /// Build a `ScanStatusData` from the current scan state.
 fn build_scan_status_data(auth: &SubsonicAuth) -> ScanStatusData {
-    let scan_state = auth.state().get_scan_state();
+    let scan_state = auth.scan_state();
     ScanStatusData {
         scanning: scan_state.is_scanning(),
         count: scan_state.get_count(),
@@ -25,14 +25,14 @@ fn build_scan_status_data(auth: &SubsonicAuth) -> ScanStatusData {
 ///
 /// Returns: scanStatus with scanning=true/false and count of items scanned.
 pub async fn start_scan(auth: SubsonicAuth) -> impl IntoResponse {
-    let scan_state = auth.state().get_scan_state();
+    let scan_state = auth.scan_state().clone();
 
     // Try to start a new scan - returns false if one is already running
     if scan_state.try_start() {
         // Reset progress state for this new scan.
         scan_state.reset();
 
-        let pool = auth.state().get_db_pool();
+        let pool = auth.pool().clone();
         let scan_state_for_scanner = scan_state.clone();
         let scan_state_for_finish = scan_state;
 
@@ -41,7 +41,7 @@ pub async fn start_scan(auth: SubsonicAuth) -> impl IntoResponse {
             // Run the scan in a blocking task since it's CPU-intensive
             let result = tokio::task::spawn_blocking(move || {
                 let scanner = Scanner::new(pool);
-                scanner.scan_all_with_state(Some(&scan_state_for_scanner))
+                scanner.scan_all_with_state(Some(scan_state_for_scanner.get()))
             })
             .await;
 

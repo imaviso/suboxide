@@ -63,7 +63,7 @@ pub async fn search3(
 
     let artists = match repo_result_or_response(
         auth.format,
-        auth.state()
+        auth.music()
             .search_artists(query, artist_offset, artist_count),
     ) {
         Ok(v) => v,
@@ -71,14 +71,14 @@ pub async fn search3(
     };
     let albums = match repo_result_or_response(
         auth.format,
-        auth.state().search_albums(query, album_offset, album_count),
+        auth.music().search_albums(query, album_offset, album_count),
     ) {
         Ok(v) => v,
         Err(response) => return response,
     };
     let songs = match repo_result_or_response(
         auth.format,
-        auth.state().search_songs(query, song_offset, song_count),
+        auth.music().search_songs(query, song_offset, song_count),
     ) {
         Ok(v) => v,
         Err(response) => return response,
@@ -91,14 +91,14 @@ pub async fn search3(
 
     let artist_album_counts = match repo_result_or_response(
         auth.format,
-        auth.state().get_artist_album_counts_batch(&artist_ids),
+        auth.music().get_artist_album_counts_batch(&artist_ids),
     ) {
         Ok(v) => v,
         Err(response) => return response,
     };
     let starred_artists = match repo_result_or_response(
         auth.format,
-        auth.state()
+        auth.music()
             .get_starred_at_for_artists_batch(user_id, &artist_ids),
     ) {
         Ok(v) => v,
@@ -106,7 +106,7 @@ pub async fn search3(
     };
     let starred_albums = match repo_result_or_response(
         auth.format,
-        auth.state()
+        auth.music()
             .get_starred_at_for_albums_batch(user_id, &album_ids),
     ) {
         Ok(v) => v,
@@ -114,7 +114,7 @@ pub async fn search3(
     };
     let starred_songs = match repo_result_or_response(
         auth.format,
-        auth.state()
+        auth.music()
             .get_starred_at_for_songs_batch(user_id, &song_ids),
     ) {
         Ok(v) => v,
@@ -208,7 +208,7 @@ pub async fn search2(
 
     let artists = match repo_result_or_response(
         auth.format,
-        auth.state()
+        auth.music()
             .search_artists(query, artist_offset, artist_count),
     ) {
         Ok(v) => v,
@@ -216,14 +216,14 @@ pub async fn search2(
     };
     let albums = match repo_result_or_response(
         auth.format,
-        auth.state().search_albums(query, album_offset, album_count),
+        auth.music().search_albums(query, album_offset, album_count),
     ) {
         Ok(v) => v,
         Err(response) => return response,
     };
     let songs = match repo_result_or_response(
         auth.format,
-        auth.state().search_songs(query, song_offset, song_count),
+        auth.music().search_songs(query, song_offset, song_count),
     ) {
         Ok(v) => v,
         Err(response) => return response,
@@ -236,7 +236,7 @@ pub async fn search2(
 
     let starred_artists = match repo_result_or_response(
         auth.format,
-        auth.state()
+        auth.music()
             .get_starred_at_for_artists_batch(user_id, &artist_ids),
     ) {
         Ok(v) => v,
@@ -244,7 +244,7 @@ pub async fn search2(
     };
     let starred_albums = match repo_result_or_response(
         auth.format,
-        auth.state()
+        auth.music()
             .get_starred_at_for_albums_batch(user_id, &album_ids),
     ) {
         Ok(v) => v,
@@ -252,7 +252,7 @@ pub async fn search2(
     };
     let starred_songs = match repo_result_or_response(
         auth.format,
-        auth.state()
+        auth.music()
             .get_starred_at_for_songs_batch(user_id, &song_ids),
     ) {
         Ok(v) => v,
@@ -337,7 +337,7 @@ pub async fn search(
         .trim();
 
     let songs =
-        match repo_result_or_response(auth.format, auth.state().search_songs(query, offset, count))
+        match repo_result_or_response(auth.format, auth.music().search_songs(query, offset, count))
         {
             Ok(v) => v,
             Err(response) => return response,

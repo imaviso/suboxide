@@ -1,32 +1,13 @@
 //! Play queue API handlers (getPlayQueue, savePlayQueue, getPlayQueueByIndex, savePlayQueueByIndex)
-use axum::extract::RawQuery;
 use axum::response::IntoResponse;
+use serde::Deserialize;
 
 use crate::api::auth::SubsonicAuth;
-use crate::api::error::ApiError;
 use crate::api::handlers::repo_result_or_response;
-use crate::api::response::{SubsonicResponse, error_response};
+use crate::api::response::SubsonicResponse;
 use crate::models::music::{
     ChildResponse, PlayQueueByIndexResponse, PlayQueueResponse, format_subsonic_datetime,
 };
-
-/// Parse repeated query parameters from a query string.
-/// Handles both single values and repeated parameters like `?id=1&id=2`.
-fn parse_repeated_param(query: &str, param_name: &str) -> Vec<String> {
-    let mut values = Vec::new();
-    for part in query.split('&') {
-        if let Some((key, value)) = part.split_once('=')
-            && key == param_name
-        {
-            // URL decode the value
-            values.push(
-                urlencoding::decode(value)
-                    .map_or_else(|_| value.to_string(), std::borrow::Cow::into_owned),
-            );
-        }
-    }
-    values
-}
 
 /// GET/POST /rest/getPlayQueue[.view]
 ///
@@ -35,12 +16,12 @@ pub async fn get_play_queue(auth: SubsonicAuth) -> impl IntoResponse {
     let user_id = auth.user.id;
     let username = &auth.user.username;
 
-    match repo_result_or_response(auth.format, auth.state().get_play_queue(user_id, username)) {
+    match repo_result_or_response(auth.format, auth.music().get_play_queue(user_id, username)) {
         Ok(Some(play_queue)) => {
             let song_ids: Vec<i32> = play_queue.songs.iter().map(|s| s.id).collect();
             let starred_map = match repo_result_or_response(
                 auth.format,
-                auth.state()
+                auth.music()
                     .get_starred_at_for_songs_batch(user_id, &song_ids),
             ) {
                 Ok(v) => v,
@@ -83,6 +64,19 @@ pub async fn get_play_queue(auth: SubsonicAuth) -> impl IntoResponse {
     }
 }
 
+/// Query parameters for savePlayQueue.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct SavePlayQueueParams {
+    /// IDs of songs in the play queue (can be repeated).
+    #[serde(rename = "id")]
+    song_id: Vec<i32>,
+    /// The ID of the currently playing song.
+    current: Option<i32>,
+    /// Position in milliseconds within the currently playing song.
+    position: Option<i64>,
+}
+
 /// GET/POST /rest/savePlayQueue[.view]
 ///
 /// Saves the current play queue for the user.
@@ -91,57 +85,12 @@ pub async fn get_play_queue(auth: SubsonicAuth) -> impl IntoResponse {
 /// - `id`: ID of a song in the play queue (can be repeated to define the entire queue)
 /// - `current`: The ID of the currently playing song
 /// - `position`: Position in milliseconds within the currently playing song
-pub async fn save_play_queue(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoResponse {
-    let query = query.unwrap_or_default();
+pub async fn save_play_queue(
+    axum::extract::Query(params): axum::extract::Query<SavePlayQueueParams>,
+    auth: SubsonicAuth,
+) -> impl IntoResponse {
     let user_id = auth.user.id;
-
-    let song_id_strs = parse_repeated_param(&query, "id");
-    let song_ids = match crate::api::handlers::parse_i32_list(auth.format, &song_id_strs, "id") {
-        Ok(ids) => ids,
-        Err(response) => return response,
-    };
-
-    let current_song_id = match parse_repeated_param(&query, "current").as_slice() {
-        [] => None,
-        [id] => match id.parse::<i32>() {
-            Ok(v) => Some(v),
-            Err(_) => {
-                return error_response(
-                    auth.format,
-                    &ApiError::Generic(format!("Invalid current: {id}")),
-                )
-                .into_response();
-            }
-        },
-        _ => {
-            return error_response(
-                auth.format,
-                &ApiError::Generic("Multiple current values provided".into()),
-            )
-            .into_response();
-        }
-    };
-
-    let position = match parse_repeated_param(&query, "position").as_slice() {
-        [] => None,
-        [p] => match p.parse::<i64>() {
-            Ok(v) => Some(v),
-            Err(_) => {
-                return error_response(
-                    auth.format,
-                    &ApiError::Generic(format!("Invalid position: {p}")),
-                )
-                .into_response();
-            }
-        },
-        _ => {
-            return error_response(
-                auth.format,
-                &ApiError::Generic("Multiple position values provided".into()),
-            )
-            .into_response();
-        }
-    };
+    let song_ids = params.song_id;
 
     let changed_by = if auth.params.c.is_empty() {
         None
@@ -151,8 +100,13 @@ pub async fn save_play_queue(RawQuery(query): RawQuery, auth: SubsonicAuth) -> i
 
     match repo_result_or_response(
         auth.format,
-        auth.state()
-            .save_play_queue(user_id, &song_ids, current_song_id, position, changed_by),
+        auth.music().save_play_queue(
+            user_id,
+            &song_ids,
+            params.current,
+            params.position,
+            changed_by,
+        ),
     ) {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
         Err(response) => response,
@@ -167,12 +121,12 @@ pub async fn get_play_queue_by_index(auth: SubsonicAuth) -> impl IntoResponse {
     let user_id = auth.user.id;
     let username = &auth.user.username;
 
-    match repo_result_or_response(auth.format, auth.state().get_play_queue(user_id, username)) {
+    match repo_result_or_response(auth.format, auth.music().get_play_queue(user_id, username)) {
         Ok(Some(play_queue)) => {
             let song_ids: Vec<i32> = play_queue.songs.iter().map(|s| s.id).collect();
             let starred_map = match repo_result_or_response(
                 auth.format,
-                auth.state()
+                auth.music()
                     .get_starred_at_for_songs_batch(user_id, &song_ids),
             ) {
                 Ok(v) => v,
@@ -223,6 +177,20 @@ pub async fn get_play_queue_by_index(auth: SubsonicAuth) -> impl IntoResponse {
     }
 }
 
+/// Query parameters for savePlayQueueByIndex.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct SavePlayQueueByIndexParams {
+    /// IDs of songs in the play queue (can be repeated).
+    #[serde(rename = "id")]
+    song_id: Vec<i32>,
+    /// The index of the currently playing song (0-based).
+    #[serde(rename = "currentIndex")]
+    current_index: Option<usize>,
+    /// Position in milliseconds within the currently playing song.
+    position: Option<i64>,
+}
+
 /// GET/POST /rest/savePlayQueueByIndex[.view]
 ///
 /// Saves the current play queue for the user using queue index instead of song ID.
@@ -233,61 +201,15 @@ pub async fn get_play_queue_by_index(auth: SubsonicAuth) -> impl IntoResponse {
 /// - `currentIndex`: The index of the currently playing song (0-based)
 /// - `position`: Position in milliseconds within the currently playing song
 pub async fn save_play_queue_by_index(
-    RawQuery(query): RawQuery,
+    axum::extract::Query(params): axum::extract::Query<SavePlayQueueByIndexParams>,
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
-    let query = query.unwrap_or_default();
     let user_id = auth.user.id;
+    let song_ids = params.song_id;
 
-    let song_id_strs = parse_repeated_param(&query, "id");
-    let song_ids = match crate::api::handlers::parse_i32_list(auth.format, &song_id_strs, "id") {
-        Ok(ids) => ids,
-        Err(response) => return response,
-    };
-
-    let current_index = match parse_repeated_param(&query, "currentIndex").as_slice() {
-        [] => None,
-        [idx] => match idx.parse::<usize>() {
-            Ok(v) => Some(v),
-            Err(_) => {
-                return error_response(
-                    auth.format,
-                    &ApiError::Generic(format!("Invalid currentIndex: {idx}")),
-                )
-                .into_response();
-            }
-        },
-        _ => {
-            return error_response(
-                auth.format,
-                &ApiError::Generic("Multiple currentIndex values provided".into()),
-            )
-            .into_response();
-        }
-    };
-
-    let current_song_id = current_index.and_then(|idx| song_ids.get(idx).copied());
-
-    let position = match parse_repeated_param(&query, "position").as_slice() {
-        [] => None,
-        [p] => match p.parse::<i64>() {
-            Ok(v) => Some(v),
-            Err(_) => {
-                return error_response(
-                    auth.format,
-                    &ApiError::Generic(format!("Invalid position: {p}")),
-                )
-                .into_response();
-            }
-        },
-        _ => {
-            return error_response(
-                auth.format,
-                &ApiError::Generic("Multiple position values provided".into()),
-            )
-            .into_response();
-        }
-    };
+    let current_song_id = params
+        .current_index
+        .and_then(|idx| song_ids.get(idx).copied());
 
     let changed_by = if auth.params.c.is_empty() {
         None
@@ -297,8 +219,13 @@ pub async fn save_play_queue_by_index(
 
     match repo_result_or_response(
         auth.format,
-        auth.state()
-            .save_play_queue(user_id, &song_ids, current_song_id, position, changed_by),
+        auth.music().save_play_queue(
+            user_id,
+            &song_ids,
+            current_song_id,
+            params.position,
+            changed_by,
+        ),
     ) {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
         Err(response) => response,

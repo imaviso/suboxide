@@ -23,7 +23,7 @@ pub async fn get_album(
             .into_response();
     };
 
-    let album = match repo_result_or_response(auth.format, auth.state().get_album(album_id)) {
+    let album = match repo_result_or_response(auth.format, auth.music().get_album(album_id)) {
         Ok(Some(album)) => album,
         Ok(None) => {
             return error_response(auth.format, &ApiError::NotFound("Album".into()))
@@ -34,7 +34,7 @@ pub async fn get_album(
 
     let album_starred_at = match repo_result_or_response(
         auth.format,
-        auth.state()
+        auth.music()
             .get_starred_at_for_album(auth.user.id, album_id),
     ) {
         Ok(starred_at) => starred_at,
@@ -42,7 +42,7 @@ pub async fn get_album(
     };
 
     let songs =
-        match repo_result_or_response(auth.format, auth.state().get_songs_by_album(album_id)) {
+        match repo_result_or_response(auth.format, auth.music().get_songs_by_album(album_id)) {
             Ok(songs) => songs,
             Err(response) => return response,
         };
@@ -50,7 +50,7 @@ pub async fn get_album(
     let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
     let starred_songs = match repo_result_or_response(
         auth.format,
-        auth.state()
+        auth.music()
             .get_starred_at_for_songs_batch(auth.user.id, &song_ids),
     ) {
         Ok(starred) => starred,
@@ -85,7 +85,7 @@ pub async fn get_artist(
             .into_response();
     };
 
-    let artist = match repo_result_or_response(auth.format, auth.state().get_artist(artist_id)) {
+    let artist = match repo_result_or_response(auth.format, auth.music().get_artist(artist_id)) {
         Ok(Some(artist)) => artist,
         Ok(None) => {
             return error_response(auth.format, &ApiError::NotFound("Artist".into()))
@@ -96,7 +96,7 @@ pub async fn get_artist(
 
     let artist_starred_at = match repo_result_or_response(
         auth.format,
-        auth.state()
+        auth.music()
             .get_starred_at_for_artist(auth.user.id, artist_id),
     ) {
         Ok(starred_at) => starred_at,
@@ -104,14 +104,14 @@ pub async fn get_artist(
     };
 
     let albums =
-        match repo_result_or_response(auth.format, auth.state().get_albums_by_artist(artist_id)) {
+        match repo_result_or_response(auth.format, auth.music().get_albums_by_artist(artist_id)) {
             Ok(albums) => albums,
             Err(response) => return response,
         };
     let album_ids: Vec<i32> = albums.iter().map(|a| a.id).collect();
     let starred_map = match repo_result_or_response(
         auth.format,
-        auth.state()
+        auth.music()
             .get_starred_at_for_albums_batch(auth.user.id, &album_ids),
     ) {
         Ok(starred) => starred,
@@ -146,7 +146,7 @@ pub async fn get_song(
             .into_response();
     };
 
-    let song = match repo_result_or_response(auth.format, auth.state().get_song(song_id)) {
+    let song = match repo_result_or_response(auth.format, auth.music().get_song(song_id)) {
         Ok(Some(song)) => song,
         Ok(None) => {
             return error_response(auth.format, &ApiError::NotFound("Song".into())).into_response();
@@ -156,7 +156,7 @@ pub async fn get_song(
 
     let starred_at = match repo_result_or_response(
         auth.format,
-        auth.state().get_starred_at_for_song(auth.user.id, song_id),
+        auth.music().get_starred_at_for_song(auth.user.id, song_id),
     ) {
         Ok(starred_at) => starred_at,
         Err(response) => return response,

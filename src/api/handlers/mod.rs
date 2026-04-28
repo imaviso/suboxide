@@ -86,28 +86,3 @@ where
 {
     result.map_err(|error| repo_error_response(format, error))
 }
-
-#[expect(
-    clippy::result_large_err,
-    reason = "Err variant is axum Response used for immediate early-return"
-)]
-pub(crate) fn parse_i32_list(
-    format: Format,
-    values: &[String],
-    param: &str,
-) -> Result<Vec<i32>, Response> {
-    let mut ids = Vec::with_capacity(values.len());
-    for value in values {
-        match value.parse::<i32>() {
-            Ok(id) => ids.push(id),
-            Err(_) => {
-                return Err(error_response(
-                    format,
-                    &ApiError::Generic(format!("Invalid {param}: {value}")),
-                )
-                .into_response());
-            }
-        }
-    }
-    Ok(ids)
-}

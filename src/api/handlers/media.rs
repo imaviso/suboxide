@@ -29,7 +29,7 @@ fn validate_song_path(song: &Song, auth: &SubsonicAuth) -> Result<PathBuf, &'sta
 
     // Get all music folders and verify the song is within one of them
     let music_folders = auth
-        .state()
+        .music()
         .get_music_folders()
         .map_err(|_e| "Music folder lookup failed")?;
     for folder in &music_folders {
@@ -82,6 +82,10 @@ pub struct StreamParams {
 /// - `id` (required): The ID of the song to stream.
 /// - `maxBitRate` (optional): Maximum bit rate for transcoding (not yet implemented).
 /// - `format` (optional): Preferred format for transcoding (not yet implemented).
+#[expect(
+    clippy::too_many_lines,
+    reason = "Handler coordinates auth, file I/O, and range response"
+)]
 pub async fn stream(
     headers: HeaderMap,
     axum::extract::Query(params): axum::extract::Query<StreamParams>,
@@ -94,7 +98,7 @@ pub async fn stream(
     };
 
     // Look up song in database
-    let song = match repo_result_or_response(auth.format, auth.state().get_song(song_id)) {
+    let song = match repo_result_or_response(auth.format, auth.music().get_song(song_id)) {
         Ok(Some(song)) => song,
         Ok(None) => {
             return error_response(auth.format, &ApiError::NotFound("Song not found".into()))
@@ -139,61 +143,70 @@ pub async fn stream(
     let content_type = song.content_type.clone();
 
     // Check for Range header to support seeking
-    let range_header = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
-
-    if let Some(range) = range_header {
-        // Parse range header (format: "bytes=start-end" or "bytes=start-")
-        if let Some(range_spec) = range.strip_prefix("bytes=") {
-            let parts: Vec<&str> = range_spec.split('-').collect();
-            if parts.len() == 2 {
-                let start: u64 = parts[0].parse().unwrap_or(0);
-                let end: u64 = if parts[1].is_empty() {
-                    file_size - 1
-                } else {
-                    parts[1].parse().unwrap_or(file_size - 1)
-                };
-
-                // Validate range
-                if start >= file_size {
-                    return (
-                        StatusCode::RANGE_NOT_SATISFIABLE,
-                        [(header::CONTENT_RANGE, format!("bytes */{file_size}"))],
-                    )
+    if let Some(range) = headers.get(header::RANGE).and_then(|v| v.to_str().ok())
+        && let Some(range_spec) = range.strip_prefix("bytes=")
+    {
+        let parts: Vec<&str> = range_spec.split('-').collect();
+        if parts.len() == 2 {
+            let Ok(start) = parts[0].parse::<u64>() else {
+                return error_response(
+                    auth.format,
+                    &ApiError::Generic("Invalid range start".into()),
+                )
+                .into_response();
+            };
+            let end = if parts[1].is_empty() {
+                file_size.saturating_sub(1)
+            } else {
+                match parts[1].parse::<u64>() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        return error_response(
+                            auth.format,
+                            &ApiError::Generic("Invalid range end".into()),
+                        )
                         .into_response();
+                    }
                 }
+            };
 
-                let end = end.min(file_size - 1);
-                let content_length = end - start + 1;
-
-                // Seek to start position
-                let mut file = file;
-                if file.seek(std::io::SeekFrom::Start(start)).await.is_err() {
-                    return error_response(
-                        auth.format,
-                        &ApiError::Generic("Failed to seek in file".into()),
-                    )
-                    .into_response();
-                }
-
-                // Create a limited reader for the range
-                let stream = ReaderStream::new(file.take(content_length));
-                let body = Body::from_stream(stream);
-
+            if start >= file_size {
                 return (
-                    StatusCode::PARTIAL_CONTENT,
-                    [
-                        (header::CONTENT_TYPE, content_type),
-                        (header::CONTENT_LENGTH, content_length.to_string()),
-                        (
-                            header::CONTENT_RANGE,
-                            format!("bytes {start}-{end}/{file_size}"),
-                        ),
-                        (header::ACCEPT_RANGES, "bytes".to_string()),
-                    ],
-                    body,
+                    StatusCode::RANGE_NOT_SATISFIABLE,
+                    [(header::CONTENT_RANGE, format!("bytes */{file_size}"))],
                 )
                     .into_response();
             }
+
+            let end = end.min(file_size - 1);
+            let content_length = end - start + 1;
+
+            let mut file = file;
+            if file.seek(std::io::SeekFrom::Start(start)).await.is_err() {
+                return error_response(
+                    auth.format,
+                    &ApiError::Generic("Failed to seek in file".into()),
+                )
+                .into_response();
+            }
+
+            let stream = ReaderStream::new(file.take(content_length));
+            let body = Body::from_stream(stream);
+
+            return (
+                StatusCode::PARTIAL_CONTENT,
+                [
+                    (header::CONTENT_TYPE, content_type),
+                    (header::CONTENT_LENGTH, content_length.to_string()),
+                    (
+                        header::CONTENT_RANGE,
+                        format!("bytes {start}-{end}/{file_size}"),
+                    ),
+                    (header::ACCEPT_RANGES, "bytes".to_string()),
+                ],
+                body,
+            )
+                .into_response();
         }
     }
 
@@ -227,7 +240,7 @@ pub async fn download(
     };
 
     // Look up song in database
-    let song = match repo_result_or_response(auth.format, auth.state().get_song(song_id)) {
+    let song = match repo_result_or_response(auth.format, auth.music().get_song(song_id)) {
         Ok(Some(song)) => song,
         Ok(None) => {
             return error_response(auth.format, &ApiError::NotFound("Song not found".into()))

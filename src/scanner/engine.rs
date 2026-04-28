@@ -34,7 +34,6 @@ pub struct AutoScanner {
     cover_art_dir: PathBuf,
     interval: Duration,
     scan_state: ScanStateHandle,
-    shutdown_tx: Option<watch::Sender<bool>>,
 }
 
 #[derive(Debug, Clone)]
@@ -341,15 +340,7 @@ impl Scanner {
         }
 
         // Process tracks and populate database
-        let (
-            artists_added,
-            albums_added,
-            tracks_added,
-            tracks_updated,
-            tracks_skipped,
-            tracks_failed,
-            cover_art_saved,
-        ) = self.process_tracks_with_options(
+        let processed = self.process_tracks_with_options(
             folder,
             tracks,
             &existing_songs,
@@ -357,13 +348,13 @@ impl Scanner {
             skipped_unchanged,
         )?;
 
-        result.artists_added = artists_added;
-        result.albums_added = albums_added;
-        result.tracks_added = tracks_added;
-        result.tracks_updated = tracks_updated;
-        result.tracks_skipped = tracks_skipped;
-        result.tracks_failed = tracks_failed;
-        result.cover_art_saved = cover_art_saved;
+        result.artists_added = processed.artists_added;
+        result.albums_added = processed.albums_added;
+        result.tracks_added = processed.tracks_added;
+        result.tracks_updated = processed.tracks_updated;
+        result.tracks_skipped = processed.tracks_skipped;
+        result.tracks_failed = processed.tracks_failed;
+        result.cover_art_saved = processed.cover_art_saved;
 
         Ok(result)
     }
@@ -633,11 +624,6 @@ impl Scanner {
     }
 
     /// Process scanned tracks and populate the database with options.
-    /// Returns (`artists_added`, `albums_added`, `tracks_added`, `tracks_updated`, `tracks_skipped`, `tracks_failed`, `cover_art_saved`)
-    #[expect(
-        clippy::type_complexity,
-        reason = "The tuple return keeps hot-path allocations low during scan ingestion"
-    )]
     #[expect(
         clippy::too_many_lines,
         reason = "Track ingest handles dedupe, cover art, and DB upserts in one transaction path"
@@ -649,7 +635,7 @@ impl Scanner {
         existing_songs: &HashMap<String, (i32, Option<i64>)>,
         state: Option<&ScanState>,
         initial_tracks_skipped: usize,
-    ) -> Result<(usize, usize, usize, usize, usize, usize, usize), ScanError> {
+    ) -> Result<ScanResult, ScanError> {
         use crate::db::schema::{albums, artists, songs};
         use diesel::prelude::*;
 
@@ -686,13 +672,12 @@ impl Scanner {
         // Cache for external cover art per directory (None = already checked, no cover art found)
         let mut dir_cover_art_cache: HashMap<PathBuf, Option<(Vec<u8>, String)>> = HashMap::new();
 
-        let mut artists_added = 0;
-        let mut albums_added = 0;
-        let mut tracks_added = 0;
-        let mut tracks_updated = 0;
-        let tracks_skipped = initial_tracks_skipped;
-        let tracks_failed = 0;
-        let mut cover_art_saved = 0;
+        let mut result = ScanResult {
+            tracks_found: tracks.len(),
+            tracks_skipped: initial_tracks_skipped,
+            ..ScanResult::default()
+        };
+        let mut dirty_album_ids: HashSet<i32> = HashSet::new();
 
         // Collect unique new artists and albums first (avoid duplicate inserts)
         let mut new_artists: HashSet<String> = HashSet::new();
@@ -734,7 +719,7 @@ impl Scanner {
 
             for (name, id) in new_artist_ids {
                 if !artist_cache.contains_key(&name) {
-                    artists_added += 1;
+                    result.artists_added += 1;
                 }
                 artist_cache.insert(name, id);
             }
@@ -795,7 +780,7 @@ impl Scanner {
 
                     if let Some((id, existing_cover)) = album_row {
                         if !album_cache.contains_key(&cache_key) {
-                            albums_added += 1;
+                            result.albums_added += 1;
                         }
                         album_cache.insert(cache_key, id);
                         album_cover_art_cache.insert(id, existing_cover);
@@ -839,7 +824,7 @@ impl Scanner {
                                 } else {
                                     album_cover_art_cache
                                         .insert(album_id, Some(cover_art_hash.clone()));
-                                    cover_art_saved += 1;
+                                    result.cover_art_saved += 1;
                                     Some(cover_art_hash)
                                 }
                             }
@@ -874,7 +859,7 @@ impl Scanner {
         for batch in prepared_tracks.chunks(BATCH_SIZE) {
             conn.transaction::<_, diesel::result::Error, _>(|conn| {
                 for prepared in batch {
-                    let result = if prepared.is_update {
+                    let query_result = if prepared.is_update {
                         diesel::update(songs::table.filter(songs::path.eq(&prepared.path_str)))
                             .set((
                                 songs::title.eq(&prepared.track.title),
@@ -956,10 +941,11 @@ impl Scanner {
                             .execute(conn)
                     };
 
-                    match result {
+                    match query_result {
                         Ok(_) => {}
                         Err(e) => {
-                            eprintln!("  Failed to insert {}: {}", prepared.path_str, e);
+                            result.tracks_failed += 1;
+                            tracing::warn!(path = %prepared.path_str, error = %e, "Failed to persist track");
                         }
                     }
                 }
@@ -970,9 +956,12 @@ impl Scanner {
             // Update counters and progress
             for prepared in batch {
                 if prepared.is_update {
-                    tracks_updated += 1;
+                    result.tracks_updated += 1;
                 } else {
-                    tracks_added += 1;
+                    result.tracks_added += 1;
+                }
+                if let Some(album_id) = prepared.album_id {
+                    dirty_album_ids.insert(album_id);
                 }
                 if let Some(state) = state {
                     state.increment_count();
@@ -980,35 +969,38 @@ impl Scanner {
             }
         }
 
-        // Update album song counts and durations
-        Self::update_album_stats(&mut conn)?;
+        // Update album song counts and durations for dirty albums only
+        Self::update_album_stats(&mut conn, &dirty_album_ids)?;
 
-        Ok((
-            artists_added,
-            albums_added,
-            tracks_added,
-            tracks_updated,
-            tracks_skipped,
-            tracks_failed,
-            cover_art_saved,
-        ))
+        Ok(result)
     }
 
-    /// Update album statistics (song count, duration) based on songs.
-    fn update_album_stats(conn: &mut diesel::SqliteConnection) -> Result<(), ScanError> {
+    /// Update album statistics (song count, duration) for dirty albums only.
+    fn update_album_stats(
+        conn: &mut diesel::SqliteConnection,
+        dirty_album_ids: &std::collections::HashSet<i32>,
+    ) -> Result<(), ScanError> {
         use diesel::prelude::*;
 
-        // This updates each album's song_count and duration based on its songs
-        diesel::sql_query(
-            r"
+        if dirty_album_ids.is_empty() {
+            return Ok(());
+        }
+
+        let id_list: Vec<String> = dirty_album_ids.iter().map(i32::to_string).collect();
+        let ids = id_list.join(",");
+        let sql = format!(
+            "
             UPDATE albums SET
                 song_count = (SELECT COUNT(*) FROM songs WHERE songs.album_id = albums.id),
                 duration = (SELECT COALESCE(SUM(duration), 0) FROM songs WHERE songs.album_id = albums.id),
                 updated_at = CURRENT_TIMESTAMP
-            ",
-        )
-        .execute(conn)
-        .map_err(MusicRepoError::from)?;
+            WHERE id IN ({ids})
+            "
+        );
+
+        diesel::sql_query(sql)
+            .execute(conn)
+            .map_err(MusicRepoError::from)?;
 
         Ok(())
     }
@@ -1025,7 +1017,6 @@ impl AutoScanner {
             cover_art_dir,
             interval: Duration::from_secs(DEFAULT_AUTO_SCAN_INTERVAL_SECS),
             scan_state,
-            shutdown_tx: None,
         }
     }
 
@@ -1039,20 +1030,19 @@ impl AutoScanner {
             cover_art_dir,
             interval: Duration::from_secs(interval_secs),
             scan_state,
-            shutdown_tx: None,
         }
     }
 
     /// Start the auto-scanner in the background.
     /// Returns a handle that can be used to stop the scanner.
-    pub fn start(&mut self) -> AutoScanHandle {
+    #[must_use]
+    pub fn start(self) -> AutoScanHandle {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        self.shutdown_tx = Some(shutdown_tx.clone());
 
-        let pool = self.pool.clone();
-        let cover_art_dir = self.cover_art_dir.clone();
+        let pool = self.pool;
+        let cover_art_dir = self.cover_art_dir;
         let interval = self.interval;
-        let scan_state = self.scan_state.clone();
+        let scan_state = self.scan_state;
 
         tokio::spawn(async move {
             Self::run_scan_loop(pool, cover_art_dir, interval, scan_state, shutdown_rx).await;

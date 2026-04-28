@@ -48,7 +48,7 @@ pub async fn create_remote_session(
             MAX_REMOTE_SESSION_TTL_SECONDS,
         );
 
-    match auth.state().create_remote_session(
+    match auth.remote().create_remote_session(
         auth.user.id,
         device_id,
         params.device_name.as_deref(),
@@ -87,7 +87,7 @@ pub async fn join_remote_session(
             .into_response();
     };
 
-    match auth.state().join_remote_session(
+    match auth.remote().join_remote_session(
         auth.user.id,
         code,
         device_id,
@@ -133,7 +133,7 @@ pub async fn get_remote_session(
             .into_response();
     };
 
-    match auth.state().get_remote_session(auth.user.id, session_id) {
+    match auth.remote().get_remote_session(auth.user.id, session_id) {
         Ok(Some(session)) => {
             SubsonicResponse::remote_session(auth.format, map_session(&session, true))
                 .into_response()
@@ -160,7 +160,7 @@ pub async fn close_remote_session(
             .into_response();
     };
 
-    match auth.state().close_remote_session(auth.user.id, session_id) {
+    match auth.remote().close_remote_session(auth.user.id, session_id) {
         Ok(true) => SubsonicResponse::empty(auth.format).into_response(),
         Ok(false) => error_response(auth.format, &ApiError::NotFound("Remote session".into()))
             .into_response(),
@@ -203,7 +203,7 @@ pub async fn send_remote_command(
             .into_response();
     };
 
-    match auth.state().send_remote_command(
+    match auth.remote().send_remote_command(
         auth.user.id,
         session_id,
         device_id,
@@ -251,7 +251,7 @@ pub async fn get_remote_commands(
     let limit = params.limit.unwrap_or(100).clamp(1, 500);
 
     match auth
-        .state()
+        .remote()
         .get_remote_commands(auth.user.id, session_id, since_id, limit, device_id)
     {
         Ok(commands) => {
@@ -304,7 +304,7 @@ pub async fn update_remote_state(
     };
 
     match auth
-        .state()
+        .remote()
         .update_remote_state(auth.user.id, session_id, device_id, state_json)
     {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
@@ -335,7 +335,7 @@ pub async fn get_remote_state(
             .into_response();
     };
 
-    match auth.state().get_remote_state(auth.user.id, session_id) {
+    match auth.remote().get_remote_state(auth.user.id, session_id) {
         Ok(Some(state)) => {
             let response = map_state(&state);
             SubsonicResponse::remote_state(auth.format, response).into_response()

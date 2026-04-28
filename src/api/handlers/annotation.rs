@@ -1,93 +1,55 @@
 //! Annotation-related API handlers (star, unstar, getStarred2, scrobble, getNowPlaying, setRating, etc.)
-use axum::extract::RawQuery;
-use axum::response::{IntoResponse, Response};
+use axum::response::IntoResponse;
 use serde::Deserialize;
 
-use crate::api::auth::{SubsonicAuth, saturating_i64_to_i32};
+use crate::api::auth::SubsonicAuth;
 use crate::api::error::ApiError;
 use crate::api::handlers::{repo_error_response, repo_result_or_response};
-use crate::api::response::{Format, SubsonicResponse, error_response};
+use crate::api::response::{SubsonicResponse, error_response};
+use crate::api::services::saturating_i64_to_i32;
 use crate::models::music::{
     NowPlayingEntryResponse, NowPlayingResponse, Starred2Response, StarredAlbumID3Response,
     StarredArtistID3Response, StarredChildResponse,
 };
 
-/// Parse repeated query parameters from a query string.
-/// Handles both single values and repeated parameters like `?id=1&id=2`.
-fn parse_repeated_param(query: &str, param_name: &str) -> Vec<String> {
-    let mut values = Vec::new();
-    for part in query.split('&') {
-        if let Some((key, value)) = part.split_once('=')
-            && key == param_name
-        {
-            // URL decode the value
-            values.push(
-                urlencoding::decode(value)
-                    .map_or_else(|_| value.to_string(), std::borrow::Cow::into_owned),
-            );
-        }
-    }
-    values
-}
-
+/// Query parameters for star/unstar.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
 #[expect(
-    clippy::result_large_err,
-    reason = "Err variant is axum Response used for immediate early-return"
+    clippy::struct_field_names,
+    reason = "Subsonic API parameter names all end in 'Id'"
 )]
-fn parse_i32_list(format: Format, values: &[String], param: &str) -> Result<Vec<i32>, Response> {
-    let mut ids = Vec::with_capacity(values.len());
-    for value in values {
-        match value.parse::<i32>() {
-            Ok(id) => ids.push(id),
-            Err(_) => {
-                return Err(error_response(
-                    format,
-                    &ApiError::Generic(format!("Invalid {param}: {value}")),
-                )
-                .into_response());
-            }
-        }
-    }
-    Ok(ids)
+pub struct StarParams {
+    #[serde(rename = "artistId")]
+    artist_id: Vec<i32>,
+    #[serde(rename = "albumId")]
+    album_id: Vec<i32>,
+    #[serde(rename = "id")]
+    song_id: Vec<i32>,
 }
 
 /// GET/POST /rest/star[.view]
 ///
 /// Stars one or more artists, albums, or songs.
 /// Supports multiple IDs via repeated parameters: `?id=1&id=2&albumId=3`
-pub async fn star(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoResponse {
-    let query = query.unwrap_or_default();
+pub async fn star(
+    axum::extract::Query(params): axum::extract::Query<StarParams>,
+    auth: SubsonicAuth,
+) -> impl IntoResponse {
     let user_id = auth.user.id;
 
-    let artist_id_strs = parse_repeated_param(&query, "artistId");
-    let album_id_strs = parse_repeated_param(&query, "albumId");
-    let song_id_strs = parse_repeated_param(&query, "id");
-
-    let artist_ids = match parse_i32_list(auth.format, &artist_id_strs, "artistId") {
-        Ok(ids) => ids,
-        Err(response) => return response,
-    };
-    let album_ids = match parse_i32_list(auth.format, &album_id_strs, "albumId") {
-        Ok(ids) => ids,
-        Err(response) => return response,
-    };
-    let song_ids = match parse_i32_list(auth.format, &song_id_strs, "id") {
-        Ok(ids) => ids,
-        Err(response) => return response,
-    };
-
-    for artist_id in &artist_ids {
-        if let Err(error) = auth.state().star_artist(user_id, *artist_id) {
+    for artist_id in &params.artist_id {
+        if let Err(error) = auth.music().star_artist(user_id, *artist_id) {
             return repo_error_response(auth.format, error);
         }
     }
-    for album_id in &album_ids {
-        if let Err(error) = auth.state().star_album(user_id, *album_id) {
+    for album_id in &params.album_id {
+        if let Err(error) = auth.music().star_album(user_id, *album_id) {
             return repo_error_response(auth.format, error);
         }
     }
-    for song_id in &song_ids {
-        if let Err(error) = auth.state().star_song(user_id, *song_id) {
+    for song_id in &params.song_id {
+        if let Err(error) = auth.music().star_song(user_id, *song_id) {
             return repo_error_response(auth.format, error);
         }
     }
@@ -99,39 +61,24 @@ pub async fn star(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoRes
 ///
 /// Unstars one or more artists, albums, or songs.
 /// Supports multiple IDs via repeated parameters: `?id=1&id=2&albumId=3`
-pub async fn unstar(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoResponse {
-    let query = query.unwrap_or_default();
+pub async fn unstar(
+    axum::extract::Query(params): axum::extract::Query<StarParams>,
+    auth: SubsonicAuth,
+) -> impl IntoResponse {
     let user_id = auth.user.id;
 
-    let artist_id_strs = parse_repeated_param(&query, "artistId");
-    let album_id_strs = parse_repeated_param(&query, "albumId");
-    let song_id_strs = parse_repeated_param(&query, "id");
-
-    let artist_ids = match parse_i32_list(auth.format, &artist_id_strs, "artistId") {
-        Ok(ids) => ids,
-        Err(response) => return response,
-    };
-    let album_ids = match parse_i32_list(auth.format, &album_id_strs, "albumId") {
-        Ok(ids) => ids,
-        Err(response) => return response,
-    };
-    let song_ids = match parse_i32_list(auth.format, &song_id_strs, "id") {
-        Ok(ids) => ids,
-        Err(response) => return response,
-    };
-
-    for artist_id in &artist_ids {
-        if let Err(error) = auth.state().unstar_artist(user_id, *artist_id) {
+    for artist_id in &params.artist_id {
+        if let Err(error) = auth.music().unstar_artist(user_id, *artist_id) {
             return repo_error_response(auth.format, error);
         }
     }
-    for album_id in &album_ids {
-        if let Err(error) = auth.state().unstar_album(user_id, *album_id) {
+    for album_id in &params.album_id {
+        if let Err(error) = auth.music().unstar_album(user_id, *album_id) {
             return repo_error_response(auth.format, error);
         }
     }
-    for song_id in &song_ids {
-        if let Err(error) = auth.state().unstar_song(user_id, *song_id) {
+    for song_id in &params.song_id {
+        if let Err(error) = auth.music().unstar_song(user_id, *song_id) {
             return repo_error_response(auth.format, error);
         }
     }
@@ -147,14 +94,14 @@ pub async fn get_starred2(auth: SubsonicAuth) -> impl IntoResponse {
     let user_id = auth.user.id;
 
     let starred_artists =
-        match repo_result_or_response(auth.format, auth.state().get_starred_artists(user_id)) {
+        match repo_result_or_response(auth.format, auth.music().get_starred_artists(user_id)) {
             Ok(v) => v,
             Err(response) => return response,
         };
     let artist_ids: Vec<i32> = starred_artists.iter().map(|(a, _)| a.id).collect();
     let album_counts = match repo_result_or_response(
         auth.format,
-        auth.state().get_artist_album_counts_batch(&artist_ids),
+        auth.music().get_artist_album_counts_batch(&artist_ids),
     ) {
         Ok(v) => v,
         Err(response) => return response,
@@ -173,7 +120,7 @@ pub async fn get_starred2(auth: SubsonicAuth) -> impl IntoResponse {
         .collect();
 
     let starred_albums =
-        match repo_result_or_response(auth.format, auth.state().get_starred_albums(user_id)) {
+        match repo_result_or_response(auth.format, auth.music().get_starred_albums(user_id)) {
             Ok(v) => v,
             Err(response) => return response,
         };
@@ -185,7 +132,7 @@ pub async fn get_starred2(auth: SubsonicAuth) -> impl IntoResponse {
         .collect();
 
     let starred_songs =
-        match repo_result_or_response(auth.format, auth.state().get_starred_songs(user_id)) {
+        match repo_result_or_response(auth.format, auth.music().get_starred_songs(user_id)) {
             Ok(v) => v,
             Err(response) => return response,
         };
@@ -202,6 +149,16 @@ pub async fn get_starred2(auth: SubsonicAuth) -> impl IntoResponse {
     SubsonicResponse::starred2(auth.format, response).into_response()
 }
 
+/// Query parameters for scrobble.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct ScrobbleParams {
+    #[serde(rename = "id")]
+    song_id: Vec<i32>,
+    time: Vec<i64>,
+    submission: Option<String>,
+}
+
 /// GET/POST /rest/scrobble[.view]
 ///
 /// Registers the local playback of one or more media files.
@@ -211,20 +168,15 @@ pub async fn get_starred2(auth: SubsonicAuth) -> impl IntoResponse {
 /// - `id` (required): The ID of the song being played (can be repeated)
 /// - `time` (optional): Time in milliseconds since the media started playing (can be repeated, one per id)
 /// - `submission` (optional): Whether this is a "scrobble" (true) or a "now playing" notification (false). Default true.
-pub async fn scrobble(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl IntoResponse {
-    let query = query.unwrap_or_default();
+pub async fn scrobble(
+    axum::extract::Query(params): axum::extract::Query<ScrobbleParams>,
+    auth: SubsonicAuth,
+) -> impl IntoResponse {
     let user_id = auth.user.id;
 
-    let song_id_strs = parse_repeated_param(&query, "id");
-    let times = parse_repeated_param(&query, "time");
-
-    let song_ids = match parse_i32_list(auth.format, &song_id_strs, "id") {
-        Ok(ids) => ids,
-        Err(response) => return response,
-    };
-
-    let submission = parse_repeated_param(&query, "submission")
-        .first()
+    let submission = params
+        .submission
+        .as_deref()
         .is_none_or(|s| s != "false" && s != "0");
 
     let player_id = if auth.params.c.is_empty() {
@@ -233,15 +185,15 @@ pub async fn scrobble(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl Int
         Some(auth.params.c.as_str())
     };
 
-    for (i, song_id) in song_ids.iter().enumerate() {
-        let time = times.get(i).and_then(|t| t.parse::<i64>().ok());
+    for (i, song_id) in params.song_id.iter().enumerate() {
+        let time = params.time.get(i).copied();
 
-        if let Err(error) = auth.state().scrobble(user_id, *song_id, time, submission) {
+        if let Err(error) = auth.music().scrobble(user_id, *song_id, time, submission) {
             return repo_error_response(auth.format, error);
         }
 
         if !submission
-            && let Err(error) = auth.state().set_now_playing(user_id, *song_id, player_id)
+            && let Err(error) = auth.music().set_now_playing(user_id, *song_id, player_id)
         {
             return repo_error_response(auth.format, error);
         }
@@ -254,7 +206,7 @@ pub async fn scrobble(RawQuery(query): RawQuery, auth: SubsonicAuth) -> impl Int
 ///
 /// Returns what is currently being played by all users.
 pub async fn get_now_playing(auth: SubsonicAuth) -> impl IntoResponse {
-    let entries = match repo_result_or_response(auth.format, auth.state().get_now_playing()) {
+    let entries = match repo_result_or_response(auth.format, auth.music().get_now_playing()) {
         Ok(v) => v,
         Err(response) => return response,
     };
@@ -332,7 +284,7 @@ pub async fn set_rating(
 
     let user_id = auth.user.id;
 
-    match auth.state().set_song_rating(user_id, id, rating) {
+    match auth.music().set_song_rating(user_id, id, rating) {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
         Err(error) => repo_error_response(auth.format, error),
     }

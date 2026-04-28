@@ -37,7 +37,7 @@ pub async fn get_user(
         return error_response(auth.format, &ApiError::NotAuthorized).into_response();
     }
 
-    match auth.state().get_user(username) {
+    match auth.users().get_user(username) {
         Ok(Some(user)) => {
             let response = UserResponse::from(&user);
             SubsonicResponse::user(auth.format, response).into_response()
@@ -57,7 +57,7 @@ pub async fn get_users(auth: SubsonicAuth) -> impl IntoResponse {
         return error_response(auth.format, &ApiError::NotAuthorized).into_response();
     }
 
-    let users = match auth.state().get_all_users() {
+    let users = match auth.users().get_all_users() {
         Ok(users) => users,
         Err(error) => return repo_error_response(auth.format, error),
     };
@@ -107,7 +107,7 @@ pub async fn delete_user(
         .into_response();
     }
 
-    match auth.state().delete_user(username) {
+    match auth.users().delete_user(username) {
         Ok(true) => SubsonicResponse::empty(auth.format).into_response(),
         Ok(false) => error_response(auth.format, &ApiError::NotFound("User not found".into()))
             .into_response(),
@@ -160,7 +160,7 @@ pub async fn change_password(
         return error_response(auth.format, &ApiError::WrongCredentials).into_response();
     };
 
-    match auth.state().change_password(username, &decoded_password) {
+    match auth.users().change_password(username, &decoded_password) {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
         Err(error) => repo_error_response(auth.format, error),
     }
@@ -260,7 +260,7 @@ pub async fn create_user(
     };
 
     match auth
-        .state()
+        .users()
         .create_user(username, &decoded_password, email, &roles)
     {
         Ok(_) => SubsonicResponse::empty(auth.format).into_response(),
@@ -335,7 +335,7 @@ pub async fn update_user(
         None => None,
     };
 
-    match auth.state().update_user(
+    match auth.users().update_user(
         username,
         decoded_password.as_deref(),
         params.email.as_deref(),

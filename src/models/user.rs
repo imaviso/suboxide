@@ -2,7 +2,7 @@
 
 use serde::Serialize;
 
-use crate::crypto::password::verify_password;
+use crate::crypto::password::{PasswordError, verify_password};
 
 /// User roles/permissions.
 #[derive(Debug, Clone, Default, Serialize)]
@@ -61,9 +61,12 @@ impl User {
     }
 
     /// Verify password using Argon2.
-    #[must_use]
-    pub fn verify_password(&self, password: &str) -> bool {
-        verify_password(password, &self.password_hash).unwrap_or(false)
+    ///
+    /// # Errors
+    /// Returns `Err` if the stored hash is malformed (data corruption),
+    /// not if the password is wrong.
+    pub fn verify_password(&self, password: &str) -> Result<bool, PasswordError> {
+        verify_password(password, &self.password_hash)
     }
 
     /// Verify password using Subsonic token authentication (MD5).
@@ -74,16 +77,13 @@ impl User {
     /// and requiring clients to use the password auth method instead of tokens.
     #[must_use]
     pub fn verify_token(&self, token: &str, salt: &str) -> bool {
-        // Try using subsonic_password if available, otherwise fall back to
-        // verifying against the provided token using a different approach
         self.subsonic_password.as_ref().is_some_and(|password| {
             use md5::{Digest, Md5};
             let mut hasher = Md5::new();
             hasher.update(password.as_bytes());
             hasher.update(salt.as_bytes());
-            let result = hasher.finalize();
-            let expected_token = hex::encode(result);
-            expected_token == token.to_lowercase()
+            let expected_token = hex::encode(hasher.finalize());
+            expected_token.eq_ignore_ascii_case(token)
         })
     }
 }
@@ -134,7 +134,7 @@ impl From<&User> for UserResponse {
         Self {
             username: user.username.clone(),
             email: user.email.clone(),
-            scrobbling_enabled: true, // We always enable scrobbling
+            scrobbling_enabled: user.has_lastfm(),
             admin_role: user.roles.admin_role,
             settings_role: user.roles.settings_role,
             stream_role: user.roles.stream_role,

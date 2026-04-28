@@ -14,7 +14,7 @@ use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use suboxide::api::auth::AuthStateHandle;
-use suboxide::api::{DatabaseAuthState, SubsonicRouterExt, handlers};
+use suboxide::api::{MusicService, RemoteControlService, SubsonicRouterExt, UserService, handlers};
 use suboxide::crypto::{PasswordError, hash_password};
 use suboxide::db::{
     DbConfig, DbPool, MusicFolderRepository, NewUser, UserRepoError, UserRepository, UserUpdate,
@@ -219,42 +219,28 @@ enum LastfmCommands {
 /// Application state shared across all handlers.
 #[derive(Clone, Debug)]
 pub struct AppState {
-    auth: Arc<DatabaseAuthState>,
+    pool: DbPool,
     scan_state: ScanStateHandle,
+    music: MusicService,
+    users: UserService,
+    remote: RemoteControlService,
 }
 
 impl AppState {
-    /// Create a new application state with the given database pool.
+    /// Create a new application state with the given database pool and Last.fm client.
     #[must_use]
-    pub fn new(pool: DbPool) -> Self {
+    pub fn new(pool: DbPool, lastfm_client: Option<LastFmClient>) -> Self {
         let scan_state = ScanStateHandle::new(ScanState::new());
-
-        // Read Last.fm credentials from environment
-        let api_key = std::env::var("LASTFM_API_KEY").unwrap_or_default();
-        let api_secret = std::env::var("LASTFM_API_SECRET").unwrap_or_default();
-        let lastfm_client = LastFmClient::new(api_key, api_secret);
-
-        if lastfm_client.is_some() {
-            tracing::event!(
-                name: "lastfm.integration.enabled",
-                tracing::Level::INFO,
-                "last.fm integration enabled"
-            );
-        } else {
-            tracing::event!(
-                name: "lastfm.integration.disabled",
-                tracing::Level::DEBUG,
-                "last.fm integration disabled because credentials are missing"
-            );
-        }
+        let music = MusicService::new(pool.clone(), lastfm_client);
+        let users = UserService::new(pool.clone());
+        let remote = RemoteControlService::new(pool.clone());
 
         Self {
-            auth: Arc::new(DatabaseAuthState::with_scan_state(
-                pool,
-                scan_state.clone(),
-                lastfm_client,
-            )),
+            pool,
             scan_state,
+            music,
+            users,
+            remote,
         }
     }
 
@@ -265,10 +251,39 @@ impl AppState {
     }
 }
 
-// Allow extracting auth state from AppState.
 impl FromRef<AppState> for AuthStateHandle {
     fn from_ref(state: &AppState) -> Self {
-        Self::new(Arc::clone(&state.auth))
+        Self::new(Arc::new(state.users.clone()))
+    }
+}
+
+impl FromRef<AppState> for MusicService {
+    fn from_ref(state: &AppState) -> Self {
+        state.music.clone()
+    }
+}
+
+impl FromRef<AppState> for UserService {
+    fn from_ref(state: &AppState) -> Self {
+        state.users.clone()
+    }
+}
+
+impl FromRef<AppState> for RemoteControlService {
+    fn from_ref(state: &AppState) -> Self {
+        state.remote.clone()
+    }
+}
+
+impl FromRef<AppState> for DbPool {
+    fn from_ref(state: &AppState) -> Self {
+        state.pool.clone()
+    }
+}
+
+impl FromRef<AppState> for ScanStateHandle {
+    fn from_ref(state: &AppState) -> Self {
+        state.scan_state.clone()
     }
 }
 
@@ -373,24 +388,15 @@ fn create_router(state: AppState) -> Router {
 }
 
 /// Errors that can occur during database setup.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 enum SetupError {
+    #[error("Failed to create database pool: {0}")]
     PoolCreation(String),
+    #[error("Failed to get database connection: {0}")]
     Connection(String),
+    #[error("Failed to run migrations: {0}")]
     Migration(String),
 }
-
-impl std::fmt::Display for SetupError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::PoolCreation(msg) => write!(f, "Failed to create database pool: {msg}"),
-            Self::Connection(msg) => write!(f, "Failed to get database connection: {msg}"),
-            Self::Migration(msg) => write!(f, "Failed to run migrations: {msg}"),
-        }
-    }
-}
-
-impl std::error::Error for SetupError {}
 
 fn setup_database(database_path: impl AsRef<std::path::Path>) -> Result<DbPool, SetupError> {
     let database_url = database_path
@@ -490,8 +496,8 @@ async fn main() {
                 }
             }
             UserCommands::List => {
-                let repo = UserRepository::new(pool);
-                match repo.find_all() {
+                let users = UserService::new(pool);
+                match users.get_all_users() {
                     Ok(users) => {
                         if users.is_empty() {
                             println!("No users found.");
@@ -538,6 +544,7 @@ async fn main() {
                 admin,
                 email,
             } => {
+                let _users = UserService::new(pool.clone());
                 let repo = UserRepository::new(pool);
                 let mut builder = UserUpdate::builder(&username);
 
@@ -567,7 +574,6 @@ async fn main() {
                 match repo.update_user(&update) {
                     Ok(true) => println!("Updated user details for '{username}'"),
                     Ok(false) => {
-                        // Should be caught by find_by_username, but just in case
                         tracing::error!(username = %username, "User not found during update");
                         std::process::exit(1);
                     }
@@ -594,26 +600,15 @@ async fn main() {
                 }
             }
             UserCommands::Delete { username } => {
-                let repo = UserRepository::new(pool);
-                // Need to find ID first because delete takes ID
-                match repo.find_by_username(&username) {
-                    Ok(Some(user)) => match repo.delete(user.id) {
-                        Ok(true) => println!("Deleted user '{username}'"),
-                        Ok(false) => {
-                            tracing::error!(username = %username, "User not found when deleting");
-                            std::process::exit(1);
-                        }
-                        Err(e) => {
-                            tracing::error!(error = %e, username = %username, "Failed to delete user");
-                            std::process::exit(1);
-                        }
-                    },
-                    Ok(None) => {
-                        tracing::error!(username = %username, "User not found");
+                let users = UserService::new(pool);
+                match users.delete_user(&username) {
+                    Ok(true) => println!("Deleted user '{username}'"),
+                    Ok(false) => {
+                        tracing::error!(username = %username, "User not found when deleting");
                         std::process::exit(1);
                     }
                     Err(e) => {
-                        tracing::error!(error = %e, username = %username, "Database error");
+                        tracing::error!(error = %e, username = %username, "Failed to delete user");
                         std::process::exit(1);
                     }
                 }
@@ -976,7 +971,14 @@ async fn main() {
             auto_scan,
             auto_scan_interval,
         }) => {
-            if let Err(e) = run_server(pool, cli.port, auto_scan, auto_scan_interval).await {
+            // Read Last.fm credentials before starting server
+            let api_key = std::env::var("LASTFM_API_KEY").unwrap_or_default();
+            let api_secret = std::env::var("LASTFM_API_SECRET").unwrap_or_default();
+            let lastfm_client = LastFmClient::new(api_key, api_secret);
+
+            if let Err(e) =
+                run_server(pool, cli.port, auto_scan, auto_scan_interval, lastfm_client).await
+            {
                 tracing::event!(
                     name: "server.run.failed",
                     tracing::Level::ERROR,
@@ -988,7 +990,11 @@ async fn main() {
         }
         None => {
             // Default: start server without auto-scan
-            if let Err(e) = run_server(pool, cli.port, false, 300).await {
+            let api_key = std::env::var("LASTFM_API_KEY").unwrap_or_default();
+            let api_secret = std::env::var("LASTFM_API_SECRET").unwrap_or_default();
+            let lastfm_client = LastFmClient::new(api_key, api_secret);
+
+            if let Err(e) = run_server(pool, cli.port, false, 300, lastfm_client).await {
                 tracing::event!(
                     name: "server.run.failed",
                     tracing::Level::ERROR,
@@ -1002,32 +1008,16 @@ async fn main() {
 }
 
 /// Errors that can occur during server startup.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 enum ServerError {
-    UserCheck(UserRepoError),
-    Bind(std::io::Error),
-    LocalAddr(std::io::Error),
-    Serve(std::io::Error),
-}
-
-impl std::fmt::Display for ServerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UserCheck(e) => write!(f, "Failed to check users: {e}"),
-            Self::Bind(e) => write!(f, "Failed to bind to address: {e}"),
-            Self::LocalAddr(e) => write!(f, "Failed to get local address: {e}"),
-            Self::Serve(e) => write!(f, "Server error: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for ServerError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::UserCheck(e) => Some(e),
-            Self::Bind(e) | Self::LocalAddr(e) | Self::Serve(e) => Some(e),
-        }
-    }
+    #[error("Failed to check users: {0}")]
+    UserCheck(#[source] UserRepoError),
+    #[error("Failed to bind to address: {0}")]
+    Bind(#[source] std::io::Error),
+    #[error("Failed to get local address: {0}")]
+    LocalAddr(#[source] std::io::Error),
+    #[error("Server error: {0}")]
+    Serve(#[source] std::io::Error),
 }
 
 async fn run_server(
@@ -1035,10 +1025,14 @@ async fn run_server(
     port: u16,
     auto_scan: bool,
     auto_scan_interval: u64,
+    lastfm_client: Option<LastFmClient>,
 ) -> Result<(), ServerError> {
     // Check if there are any users
-    let repo = UserRepository::new(pool.clone());
-    let has_users = repo.has_users().map_err(ServerError::UserCheck)?;
+    let users = UserService::new(pool.clone());
+    let has_users = users
+        .get_all_users()
+        .map_err(ServerError::UserCheck)?
+        .is_empty();
     if !has_users {
         tracing::event!(
             name: "server.bootstrap.no_users",
@@ -1053,13 +1047,13 @@ async fn run_server(
         );
     }
 
-    let state = AppState::new(pool.clone());
+    let state = AppState::new(pool.clone(), lastfm_client);
     let app = create_router(state.clone());
 
     // Start auto-scanner if enabled, sharing the same scan state with the API
     let _auto_scan_handle = if auto_scan {
         let scan_state = state.scan_state();
-        let mut auto_scanner = AutoScanner::with_interval(pool, scan_state, auto_scan_interval);
+        let auto_scanner = AutoScanner::with_interval(pool, scan_state, auto_scan_interval);
         tracing::event!(
             name: "scan.auto.enabled",
             tracing::Level::INFO,

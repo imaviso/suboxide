@@ -1,5 +1,4 @@
 //! Playlist-related API handlers (getPlaylists, getPlaylist, createPlaylist, updatePlaylist, deletePlaylist)
-use axum::extract::RawQuery;
 use axum::response::IntoResponse;
 use serde::Deserialize;
 
@@ -11,24 +10,6 @@ use crate::models::music::{
     ChildResponse, PlaylistResponse, PlaylistWithSongsResponse, PlaylistsResponse,
     format_subsonic_datetime,
 };
-
-/// Parse repeated query parameters from a query string.
-/// Handles both single values and repeated parameters like `?id=1&id=2`.
-fn parse_repeated_param(query: &str, param_name: &str) -> Vec<String> {
-    let mut values = Vec::new();
-    for part in query.split('&') {
-        if let Some((key, value)) = part.split_once('=')
-            && key == param_name
-        {
-            // URL decode the value
-            values.push(
-                urlencoding::decode(value)
-                    .map_or_else(|_| value.to_string(), std::borrow::Cow::into_owned),
-            );
-        }
-    }
-    values
-}
 
 /// Query parameters for getPlaylists.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -50,7 +31,7 @@ pub async fn get_playlists(
     let username = &auth.user.username;
 
     let playlists =
-        match repo_result_or_response(auth.format, auth.state().get_playlists(user_id, username)) {
+        match repo_result_or_response(auth.format, auth.music().get_playlists(user_id, username)) {
             Ok(v) => v,
             Err(response) => return response,
         };
@@ -58,7 +39,7 @@ pub async fn get_playlists(
     let playlist_ids: Vec<i32> = playlists.iter().map(|p| p.id).collect();
     let cover_arts = match repo_result_or_response(
         auth.format,
-        auth.state().get_playlist_cover_arts_batch(&playlist_ids),
+        auth.music().get_playlist_cover_arts_batch(&playlist_ids),
     ) {
         Ok(v) => v,
         Err(response) => return response,
@@ -118,7 +99,7 @@ pub async fn get_playlist(
     };
 
     let playlist =
-        match repo_result_or_response(auth.format, auth.state().get_playlist(playlist_id)) {
+        match repo_result_or_response(auth.format, auth.music().get_playlist(playlist_id)) {
             Ok(Some(p)) => p,
             Ok(None) => {
                 return error_response(auth.format, &ApiError::NotFound("Playlist".into()))
@@ -132,7 +113,7 @@ pub async fn get_playlist(
     }
 
     let songs =
-        match repo_result_or_response(auth.format, auth.state().get_playlist_songs(playlist_id)) {
+        match repo_result_or_response(auth.format, auth.music().get_playlist_songs(playlist_id)) {
             Ok(v) => v,
             Err(response) => return response,
         };
@@ -141,7 +122,7 @@ pub async fn get_playlist(
     let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
     let starred_map = match repo_result_or_response(
         auth.format,
-        auth.state()
+        auth.music()
             .get_starred_at_for_songs_batch(user_id, &song_ids),
     ) {
         Ok(v) => v,
@@ -184,6 +165,9 @@ pub struct CreatePlaylistParams {
     pub playlist_id: Option<String>,
     /// The playlist name (required if creating a new playlist).
     pub name: Option<String>,
+    /// IDs of songs to add (can be repeated).
+    #[serde(rename = "songId")]
+    pub song_id: Vec<i32>,
 }
 
 /// GET/POST /rest/createPlaylist[.view]
@@ -199,19 +183,11 @@ pub struct CreatePlaylistParams {
     reason = "Playlist creation supports create/update flows and repeated query parameters"
 )]
 pub async fn create_playlist(
-    RawQuery(query): RawQuery,
     axum::extract::Query(params): axum::extract::Query<CreatePlaylistParams>,
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
-    let query = query.unwrap_or_default();
     let user_id = auth.user.id;
-
-    let song_id_strs = parse_repeated_param(&query, "songId");
-    let song_ids = match crate::api::handlers::parse_i32_list(auth.format, &song_id_strs, "songId")
-    {
-        Ok(ids) => ids,
-        Err(response) => return response,
-    };
+    let song_ids = params.song_id;
 
     if let Some(playlist_id_str) = params.playlist_id.as_ref() {
         let Ok(playlist_id) = playlist_id_str.parse::<i32>() else {
@@ -221,7 +197,7 @@ pub async fn create_playlist(
 
         match repo_result_or_response(
             auth.format,
-            auth.state().is_playlist_owner(user_id, playlist_id),
+            auth.music().is_playlist_owner(user_id, playlist_id),
         ) {
             Ok(true) => {}
             Ok(false) => {
@@ -232,7 +208,7 @@ pub async fn create_playlist(
 
         if let Err(response) = repo_result_or_response(
             auth.format,
-            auth.state().update_playlist(
+            auth.music().update_playlist(
                 playlist_id,
                 params.name.as_deref(),
                 None,
@@ -245,7 +221,7 @@ pub async fn create_playlist(
         }
 
         let playlist =
-            match repo_result_or_response(auth.format, auth.state().get_playlist(playlist_id)) {
+            match repo_result_or_response(auth.format, auth.music().get_playlist(playlist_id)) {
                 Ok(Some(p)) => p,
                 Ok(None) => {
                     return error_response(auth.format, &ApiError::NotFound("Playlist".into()))
@@ -255,7 +231,7 @@ pub async fn create_playlist(
             };
         let songs = match repo_result_or_response(
             auth.format,
-            auth.state().get_playlist_songs(playlist_id),
+            auth.music().get_playlist_songs(playlist_id),
         ) {
             Ok(v) => v,
             Err(response) => return response,
@@ -264,7 +240,7 @@ pub async fn create_playlist(
         let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
         let starred_map = match repo_result_or_response(
             auth.format,
-            auth.state()
+            auth.music()
                 .get_starred_at_for_songs_batch(user_id, &song_ids),
         ) {
             Ok(v) => v,
@@ -308,14 +284,14 @@ pub async fn create_playlist(
 
     let playlist = match repo_result_or_response(
         auth.format,
-        auth.state().create_playlist(user_id, name, None, &song_ids),
+        auth.music().create_playlist(user_id, name, None, &song_ids),
     ) {
         Ok(p) => p,
         Err(response) => return response,
     };
 
     let songs =
-        match repo_result_or_response(auth.format, auth.state().get_playlist_songs(playlist.id)) {
+        match repo_result_or_response(auth.format, auth.music().get_playlist_songs(playlist.id)) {
             Ok(v) => v,
             Err(response) => return response,
         };
@@ -323,7 +299,7 @@ pub async fn create_playlist(
     let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
     let starred_map = match repo_result_or_response(
         auth.format,
-        auth.state()
+        auth.music()
             .get_starred_at_for_songs_batch(user_id, &song_ids),
     ) {
         Ok(v) => v,
@@ -370,6 +346,12 @@ pub struct UpdatePlaylistParams {
     pub comment: Option<String>,
     /// Whether the playlist is public.
     pub public: Option<bool>,
+    /// Song IDs to add (can be repeated).
+    #[serde(rename = "songIdToAdd")]
+    pub song_id_to_add: Vec<i32>,
+    /// Indices (0-based) of songs to remove (can be repeated).
+    #[serde(rename = "songIndexToRemove")]
+    pub song_index_to_remove: Vec<i32>,
 }
 
 /// GET/POST /rest/updatePlaylist[.view]
@@ -384,11 +366,9 @@ pub struct UpdatePlaylistParams {
 /// - `songIdToAdd`: Song ID to add (can be repeated)
 /// - `songIndexToRemove`: Index (0-based) of song to remove (can be repeated)
 pub async fn update_playlist(
-    RawQuery(query): RawQuery,
     axum::extract::Query(params): axum::extract::Query<UpdatePlaylistParams>,
     auth: SubsonicAuth,
 ) -> impl IntoResponse {
-    let query = query.unwrap_or_default();
     let user_id = auth.user.id;
 
     let Some(id_str) = params.playlist_id.as_ref() else {
@@ -408,42 +388,22 @@ pub async fn update_playlist(
 
     match repo_result_or_response(
         auth.format,
-        auth.state().is_playlist_owner(user_id, playlist_id),
+        auth.music().is_playlist_owner(user_id, playlist_id),
     ) {
         Ok(true) => {}
         Ok(false) => return error_response(auth.format, &ApiError::NotAuthorized).into_response(),
         Err(response) => return response,
     }
 
-    let songs_to_add_strs = parse_repeated_param(&query, "songIdToAdd");
-    let songs_to_add = match crate::api::handlers::parse_i32_list(
-        auth.format,
-        &songs_to_add_strs,
-        "songIdToAdd",
-    ) {
-        Ok(ids) => ids,
-        Err(response) => return response,
-    };
-
-    let indices_to_remove_strs = parse_repeated_param(&query, "songIndexToRemove");
-    let indices_to_remove = match crate::api::handlers::parse_i32_list(
-        auth.format,
-        &indices_to_remove_strs,
-        "songIndexToRemove",
-    ) {
-        Ok(ids) => ids,
-        Err(response) => return response,
-    };
-
     match repo_result_or_response(
         auth.format,
-        auth.state().update_playlist(
+        auth.music().update_playlist(
             playlist_id,
             params.name.as_deref(),
             params.comment.as_deref(),
             params.public,
-            &songs_to_add,
-            &indices_to_remove,
+            &params.song_id_to_add,
+            &params.song_index_to_remove,
         ),
     ) {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
@@ -482,14 +442,14 @@ pub async fn delete_playlist(
 
     match repo_result_or_response(
         auth.format,
-        auth.state().is_playlist_owner(user_id, playlist_id),
+        auth.music().is_playlist_owner(user_id, playlist_id),
     ) {
         Ok(true) => {}
         Ok(false) => return error_response(auth.format, &ApiError::NotAuthorized).into_response(),
         Err(response) => return response,
     }
 
-    match repo_result_or_response(auth.format, auth.state().delete_playlist(playlist_id)) {
+    match repo_result_or_response(auth.format, auth.music().delete_playlist(playlist_id)) {
         Ok(true) => SubsonicResponse::empty(auth.format).into_response(),
         Ok(false) => {
             error_response(auth.format, &ApiError::NotFound("Playlist".into())).into_response()
