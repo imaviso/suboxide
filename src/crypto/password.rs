@@ -7,19 +7,72 @@ use argon2::{
     Argon2,
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
 };
-use thiserror::Error;
+
+/// Kind of password error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PasswordErrorKind {
+    /// Failed to hash password.
+    Hash,
+    /// Failed to verify password.
+    Verify,
+    /// Invalid password hash format.
+    InvalidHash,
+}
+
+impl std::fmt::Display for PasswordErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Hash => write!(f, "failed to hash password"),
+            Self::Verify => write!(f, "failed to verify password"),
+            Self::InvalidHash => write!(f, "invalid password hash format"),
+        }
+    }
+}
 
 /// Errors that can occur during password operations.
-#[derive(Debug, Error)]
-pub enum PasswordError {
-    #[error("Failed to hash password: {0}")]
-    HashError(String),
+#[derive(Debug)]
+pub struct PasswordError {
+    kind: PasswordErrorKind,
+    message: String,
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+}
 
-    #[error("Failed to verify password: {0}")]
-    VerifyError(String),
+impl PasswordError {
+    /// Create a new password error.
+    #[must_use]
+    pub fn new(kind: PasswordErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            source: None,
+        }
+    }
 
-    #[error("Invalid password hash format: {0}")]
-    InvalidHash(String),
+    /// Returns the error kind.
+    #[must_use]
+    pub const fn kind(&self) -> PasswordErrorKind {
+        self.kind
+    }
+
+    /// Returns the error message.
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+impl std::fmt::Display for PasswordError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.kind, self.message)
+    }
+}
+
+impl std::error::Error for PasswordError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.source
+            .as_ref()
+            .map(|e| e.as_ref() as &(dyn std::error::Error + 'static))
+    }
 }
 
 /// Hash a password using Argon2id.
@@ -44,7 +97,7 @@ pub fn hash_password(password: &str) -> Result<String, PasswordError> {
     argon2
         .hash_password(password.as_bytes(), &salt)
         .map(|hash| hash.to_string())
-        .map_err(|e| PasswordError::HashError(e.to_string()))
+        .map_err(|e| PasswordError::new(PasswordErrorKind::Hash, e.to_string()))
 }
 
 /// Verify a password against a stored hash.
@@ -71,15 +124,15 @@ pub fn hash_password(password: &str) -> Result<String, PasswordError> {
 /// # }
 /// ```
 pub fn verify_password(password: &str, hash: &str) -> Result<bool, PasswordError> {
-    let parsed_hash =
-        PasswordHash::new(hash).map_err(|error| PasswordError::InvalidHash(error.to_string()))?;
+    let parsed_hash = PasswordHash::new(hash)
+        .map_err(|error| PasswordError::new(PasswordErrorKind::InvalidHash, error.to_string()))?;
 
     let argon2 = Argon2::default();
 
     match argon2.verify_password(password.as_bytes(), &parsed_hash) {
         Ok(()) => Ok(true),
         Err(argon2::password_hash::Error::Password) => Ok(false),
-        Err(e) => Err(PasswordError::VerifyError(e.to_string())),
+        Err(e) => Err(PasswordError::new(PasswordErrorKind::Verify, e.to_string())),
     }
 }
 
@@ -121,18 +174,16 @@ mod tests {
     #[test]
     fn test_invalid_hash_format() {
         let result = verify_password("password", "not_a_valid_hash");
-        assert!(matches!(result, Err(PasswordError::InvalidHash(_))));
+        assert_eq!(result.unwrap_err().kind(), PasswordErrorKind::InvalidHash);
     }
 
     #[test]
     fn invalid_hash_error_includes_parse_context() {
         let result = verify_password("password", "not_a_valid_hash");
 
-        let Err(PasswordError::InvalidHash(message)) = result else {
-            panic!("invalid hash should return InvalidHash");
-        };
-
-        assert!(!message.is_empty());
-        assert_ne!(message, "not_a_valid_hash");
+        let err = result.expect_err("invalid hash should return error");
+        assert_eq!(err.kind(), PasswordErrorKind::InvalidHash);
+        assert!(!err.message().is_empty());
+        assert_ne!(err.message(), "not_a_valid_hash");
     }
 }
