@@ -368,7 +368,10 @@ pub async fn update_user(
     };
 
     match auth.users().update_user(&update) {
-        Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
+        Ok(true) => SubsonicResponse::empty(auth.format).into_response(),
+        Ok(false) => {
+            error_response(auth.format, &ApiError::NotFound("User".into())).into_response()
+        }
         Err(error) => {
             error_response(auth.format, &ApiError::Generic(error.to_string())).into_response()
         }

@@ -227,6 +227,7 @@ impl Scanner {
                 }
                 Err(e) => {
                     eprintln!("Error scanning folder {}: {}", folder.name, e);
+                    return Err(e);
                 }
             }
         }
@@ -238,7 +239,9 @@ impl Scanner {
         }
 
         if let Err(e) = self.cleanup_orphans() {
-            eprintln!("Warning: Failed to cleanup orphaned records: {e}");
+            return Err(ScanError::Cleanup(format!(
+                "Failed to cleanup orphaned records: {e}"
+            )));
         }
 
         Ok(total_result)

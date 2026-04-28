@@ -22,10 +22,8 @@
 //! - Or a combination of both (query params take precedence)
 
 use axum::{
-    Form,
     body::Body,
     extract::{FromRef, FromRequest, Query, Request},
-    http::Method,
     response::{IntoResponse, Response},
 };
 use serde::Deserialize;
@@ -248,32 +246,13 @@ where
         reason = "Extractor validates multiple auth flows and transports in one place"
     )]
     async fn from_request(req: Request<Body>, state: &S) -> Result<Self, Self::Rejection> {
-        let is_post = req.method() == Method::POST;
-
         // Extract query parameters first (they exist in both GET and POST)
-        let (parts, body) = req.into_parts();
+        let (parts, _body) = req.into_parts();
         let query_params = Query::<AuthParams>::try_from_uri(&parts.uri)
             .map(|q| q.0)
             .unwrap_or_default();
 
-        // For POST requests, also extract form body parameters
-        let mut params = if is_post {
-            // Reconstruct the request to extract form data
-            let req = Request::from_parts(parts.clone(), body);
-            match Form::<AuthParams>::from_request(req, state).await {
-                Ok(Form(form_params)) => query_params.merge_with(form_params),
-                Err(e) => {
-                    tracing::warn!(error = %e, "form auth parameter parsing failed");
-                    return Err(AuthError {
-                        error: ApiError::MissingParameter("valid form body".into()),
-                        format: query_params.format(),
-                    });
-                }
-            }
-        } else {
-            query_params
-        };
-
+        let mut params = query_params;
         // Support for clients passing credentials in HTTP headers (e.g. SolidSonic)
         // Checks for X-Subsonic-Username, X-Subsonic-Token, and X-Subsonic-Salt
         #[expect(

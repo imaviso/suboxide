@@ -123,6 +123,7 @@ impl ScanStateHandle {
 ///
 /// Acquired via `ScanState::try_start` or `ScanStateHandle::try_start`.
 /// Resets counters on creation and marks the scan as finished on drop.
+#[must_use = "dropping ScanGuard finishes the scan"]
 #[derive(Debug)]
 pub struct ScanGuard<'a> {
     inner: ScanGuardInner<'a>,

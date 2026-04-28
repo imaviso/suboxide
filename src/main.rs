@@ -215,28 +215,27 @@ enum LastfmCommands {
 #[derive(Debug, thiserror::Error)]
 enum SetupError {
     #[error("Failed to create database pool: {0}")]
-    PoolCreation(String),
-    #[error("Failed to get database connection: {0}")]
-    Connection(String),
+    PoolCreation(#[source] suboxide::db::DbPoolError),
+    #[error("Failed to connect: {0}")]
+    Connection(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("Invalid database path")]
+    InvalidPath,
     #[error("Failed to run migrations: {0}")]
-    Migration(String),
+    Migration(#[source] diesel::result::Error),
 }
 
 fn setup_database(database_path: impl AsRef<std::path::Path>) -> Result<DbPool, SetupError> {
     let database_url = database_path
         .as_ref()
         .to_str()
-        .ok_or_else(|| SetupError::PoolCreation("Invalid UTF-8 in database path".to_string()))?;
+        .ok_or(SetupError::InvalidPath)?;
     let config = DbConfig::new(database_url);
-    let pool = config
-        .build_pool()
-        .map_err(|e| SetupError::PoolCreation(e.to_string()))?;
+    let pool = config.build_pool().map_err(SetupError::PoolCreation)?;
 
-    // Run migrations
     let mut conn = pool
         .get()
-        .map_err(|e| SetupError::Connection(e.to_string()))?;
-    run_migrations(&mut conn).map_err(|e| SetupError::Migration(e.to_string()))?;
+        .map_err(|e| SetupError::Connection(Box::new(e)))?;
+    run_migrations(&mut conn).map_err(SetupError::Migration)?;
 
     Ok(pool)
 }
@@ -738,11 +737,10 @@ async fn run_server(
     lastfm_client: Option<LastFmClient>,
 ) -> Result<(), ServerError> {
     // Check if there are any users
-    let has_users = UserRepository::new(pool.clone())
+    let users = UserRepository::new(pool.clone())
         .find_all()
-        .map_err(ServerError::UserCheck)?
-        .is_empty();
-    if !has_users {
+        .map_err(ServerError::UserCheck)?;
+    if users.is_empty() {
         tracing::event!(
             name: "server.bootstrap.no_users",
             tracing::Level::WARN,

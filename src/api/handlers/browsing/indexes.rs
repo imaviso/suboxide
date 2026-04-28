@@ -12,19 +12,7 @@ use crate::models::music::{
     IndexesResponse, MusicFolderResponse,
 };
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "Subsonic album counts are bounded to signed 32-bit fields"
-)]
-fn saturating_i64_to_i32(value: i64) -> i32 {
-    if value > i64::from(i32::MAX) {
-        i32::MAX
-    } else if value < i64::from(i32::MIN) {
-        i32::MIN
-    } else {
-        value as i32
-    }
-}
+use crate::api::services::saturating_i64_to_i32;
 
 /// GET/POST /rest/getMusicFolders[.view]
 ///

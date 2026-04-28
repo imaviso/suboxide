@@ -23,6 +23,9 @@ pub enum ScanError {
     #[error("Scan already in progress")]
     AlreadyScanning,
 
+    #[error("Cleanup failed: {0}")]
+    Cleanup(String),
+
     #[error("Failed to read metadata for {path}: {message}")]
     Metadata { path: PathBuf, message: String },
 }

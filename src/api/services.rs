@@ -1025,8 +1025,20 @@ impl Users {
         let password_hash = hash_password(new_password)
             .map_err(|error| UserRepoError::new(UserRepoErrorKind::Database, error.to_string()))?;
 
-        UserRepository::new(self.pool.clone()).update_password(user.id, &password_hash)?;
-        UserRepository::new(self.pool.clone()).update_subsonic_password(user.id, new_password)?;
+        if !UserRepository::new(self.pool.clone()).update_password(user.id, &password_hash)? {
+            return Err(UserRepoError::new(
+                UserRepoErrorKind::NotFound,
+                format!("user '{username}' not found"),
+            ));
+        }
+        if !UserRepository::new(self.pool.clone())
+            .update_subsonic_password(user.id, new_password)?
+        {
+            return Err(UserRepoError::new(
+                UserRepoErrorKind::NotFound,
+                format!("user '{username}' not found"),
+            ));
+        }
 
         Ok(())
     }
@@ -1062,10 +1074,8 @@ impl Users {
         UserRepository::new(self.pool.clone()).create(&new_user)
     }
 
-    pub(in crate::api) fn update_user(&self, update: &UserUpdate) -> Result<(), UserRepoError> {
-        UserRepository::new(self.pool.clone())
-            .update_user(update)
-            .map(|_| ())
+    pub(in crate::api) fn update_user(&self, update: &UserUpdate) -> Result<bool, UserRepoError> {
+        UserRepository::new(self.pool.clone()).update_user(update)
     }
 }
 
