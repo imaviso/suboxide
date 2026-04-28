@@ -43,6 +43,11 @@ struct DiscoveredFile {
     file_modified_at: Option<i64>,
 }
 
+enum AutoScanOutcome {
+    Completed(ScanResult),
+    SkippedAlreadyRunning,
+}
+
 impl Scanner {
     /// Create a new scanner.
     #[must_use]
@@ -1096,7 +1101,7 @@ impl AutoScanner {
                         tracing::Level::DEBUG,
                         "auto-scan skipped because a scan is already running"
                     );
-                    return Ok(ScanResult::default());
+                    return Ok(AutoScanOutcome::SkippedAlreadyRunning);
                 };
                 tracing::event!(
                     name: "scan.auto.started_cycle",
@@ -1104,12 +1109,14 @@ impl AutoScanner {
                     scan.mode = "incremental",
                     "auto-scan cycle started"
                 );
-                scanner.scan_all_with_options(Some(scan_state_clone.get()), ScanMode::Incremental)
+                scanner
+                    .scan_all_with_options(Some(scan_state_clone.get()), ScanMode::Incremental)
+                    .map(AutoScanOutcome::Completed)
             })
             .await;
 
             match result {
-                Ok(Ok(stats)) => {
+                Ok(Ok(AutoScanOutcome::Completed(stats))) => {
                     tracing::event!(
                         name: "scan.auto.completed",
                         tracing::Level::INFO,
@@ -1122,6 +1129,7 @@ impl AutoScanner {
                         "auto-scan completed"
                     );
                 }
+                Ok(Ok(AutoScanOutcome::SkippedAlreadyRunning)) => {}
                 Ok(Err(ScanError::NoMusicFolders)) => {
                     tracing::event!(
                         name: "scan.auto.skipped_no_folders",

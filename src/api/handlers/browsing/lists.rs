@@ -6,10 +6,11 @@ use serde::Deserialize;
 use crate::api::auth::SubsonicAuth;
 use crate::api::error::ApiError;
 use crate::api::response::{SubsonicResponse, error_response};
+use crate::api::services::MusicLibrary;
 use crate::models::music::{
     AlbumID3Response, AlbumList2Response, AlbumListResponse, ArtistResponse, ChildResponse,
     GenreResponse, GenresResponse, RandomSongsResponse, SimilarSongs2Response,
-    SimilarSongsResponse, SongsByGenreResponse, StarredResponse, TopSongsResponse,
+    SimilarSongsResponse, Song, SongsByGenreResponse, StarredResponse, TopSongsResponse,
     format_subsonic_datetime,
 };
 
@@ -18,6 +19,51 @@ fn album_list_type_for_request(list_type: Option<&str>) -> &str {
         None | Some("" | "all") => "alphabeticalByName",
         Some(list_type) => list_type,
     }
+}
+
+fn similar_songs_for_id(music: &MusicLibrary, id: i32, count: i64) -> Result<Vec<Song>, ApiError> {
+    if let Some(song) = music
+        .get_song(id)
+        .map_err(|error| ApiError::Generic(error.to_string()))?
+    {
+        if let Some(artist_id) = song.artist_id {
+            return music
+                .get_similar_songs_by_artist(artist_id, id, count)
+                .map_err(|error| ApiError::Generic(error.to_string()));
+        }
+        if let Some(genre) = song.genre {
+            return music
+                .get_songs_by_genre(&genre, count, 0, None)
+                .map_err(|error| ApiError::Generic(error.to_string()));
+        }
+        return Ok(Vec::new());
+    }
+
+    if let Some(album) = music
+        .get_album(id)
+        .map_err(|error| ApiError::Generic(error.to_string()))?
+    {
+        return album.artist_id.map_or_else(
+            || Ok(Vec::new()),
+            |artist_id| {
+                music
+                    .get_similar_songs_by_artist(artist_id, -1, count)
+                    .map_err(|error| ApiError::Generic(error.to_string()))
+            },
+        );
+    }
+
+    if music
+        .get_artist(id)
+        .map_err(|error| ApiError::Generic(error.to_string()))?
+        .is_some()
+    {
+        return music
+            .get_similar_songs_by_artist(id, -1, count)
+            .map_err(|error| ApiError::Generic(error.to_string()));
+    }
+
+    Err(ApiError::NotFound("Item".into()))
 }
 
 /// Query parameters for getAlbumList2.
@@ -461,74 +507,9 @@ pub async fn get_similar_songs2(
     let count = params.count.unwrap_or(50).clamp(1, 500);
     let user_id = auth.user.id;
 
-    // Try to get similar songs - first check if it's a song
-    let songs = match auth.music().get_song(id) {
-        Ok(Some(song)) => {
-            if let Some(artist_id) = song.artist_id {
-                match auth
-                    .music()
-                    .get_similar_songs_by_artist(artist_id, id, count)
-                {
-                    Ok(v) => v,
-                    Err(e) => {
-                        return error_response(auth.format, &ApiError::Generic(e.to_string()))
-                            .into_response();
-                    }
-                }
-            } else if let Some(ref genre) = song.genre {
-                match auth.music().get_songs_by_genre(genre, count, 0, None) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        return error_response(auth.format, &ApiError::Generic(e.to_string()))
-                            .into_response();
-                    }
-                }
-            } else {
-                Vec::new()
-            }
-        }
-        Ok(None) => match auth.music().get_album(id) {
-            Ok(Some(album)) => {
-                if let Some(artist_id) = album.artist_id {
-                    match auth
-                        .music()
-                        .get_similar_songs_by_artist(artist_id, -1, count)
-                    {
-                        Ok(v) => v,
-                        Err(e) => {
-                            return error_response(auth.format, &ApiError::Generic(e.to_string()))
-                                .into_response();
-                        }
-                    }
-                } else {
-                    Vec::new()
-                }
-            }
-            Ok(None) => match auth.music().get_artist(id) {
-                Ok(Some(_)) => match auth.music().get_similar_songs_by_artist(id, -1, count) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        return error_response(auth.format, &ApiError::Generic(e.to_string()))
-                            .into_response();
-                    }
-                },
-                Ok(None) => {
-                    return error_response(auth.format, &ApiError::NotFound("Item".into()))
-                        .into_response();
-                }
-                Err(e) => {
-                    return error_response(auth.format, &ApiError::Generic(e.to_string()))
-                        .into_response();
-                }
-            },
-            Err(e) => {
-                return error_response(auth.format, &ApiError::Generic(e.to_string()))
-                    .into_response();
-            }
-        },
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
+    let songs = match similar_songs_for_id(auth.music(), id, count) {
+        Ok(songs) => songs,
+        Err(error) => return error_response(auth.format, &error).into_response(),
     };
 
     // Batch fetch starred status for all songs
@@ -574,74 +555,9 @@ pub async fn get_similar_songs(
     let count = params.count.unwrap_or(50).clamp(1, 500);
     let user_id = auth.user.id;
 
-    // Try to get similar songs
-    let songs = match auth.music().get_song(id) {
-        Ok(Some(song)) => {
-            if let Some(artist_id) = song.artist_id {
-                match auth
-                    .music()
-                    .get_similar_songs_by_artist(artist_id, id, count)
-                {
-                    Ok(v) => v,
-                    Err(e) => {
-                        return error_response(auth.format, &ApiError::Generic(e.to_string()))
-                            .into_response();
-                    }
-                }
-            } else if let Some(ref genre) = song.genre {
-                match auth.music().get_songs_by_genre(genre, count, 0, None) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        return error_response(auth.format, &ApiError::Generic(e.to_string()))
-                            .into_response();
-                    }
-                }
-            } else {
-                Vec::new()
-            }
-        }
-        Ok(None) => match auth.music().get_album(id) {
-            Ok(Some(album)) => {
-                if let Some(artist_id) = album.artist_id {
-                    match auth
-                        .music()
-                        .get_similar_songs_by_artist(artist_id, -1, count)
-                    {
-                        Ok(v) => v,
-                        Err(e) => {
-                            return error_response(auth.format, &ApiError::Generic(e.to_string()))
-                                .into_response();
-                        }
-                    }
-                } else {
-                    Vec::new()
-                }
-            }
-            Ok(None) => match auth.music().get_artist(id) {
-                Ok(Some(_)) => match auth.music().get_similar_songs_by_artist(id, -1, count) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        return error_response(auth.format, &ApiError::Generic(e.to_string()))
-                            .into_response();
-                    }
-                },
-                Ok(None) => {
-                    return error_response(auth.format, &ApiError::NotFound("Item".into()))
-                        .into_response();
-                }
-                Err(e) => {
-                    return error_response(auth.format, &ApiError::Generic(e.to_string()))
-                        .into_response();
-                }
-            },
-            Err(e) => {
-                return error_response(auth.format, &ApiError::Generic(e.to_string()))
-                    .into_response();
-            }
-        },
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
+    let songs = match similar_songs_for_id(auth.music(), id, count) {
+        Ok(songs) => songs,
+        Err(error) => return error_response(auth.format, &error).into_response(),
     };
 
     // Batch fetch starred status for all songs

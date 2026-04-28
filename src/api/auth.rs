@@ -34,7 +34,7 @@ use serde::Deserialize;
 
 use super::error::ApiError;
 use super::response::{Format, error_response};
-use super::services::{MusicService, RemoteControlService, UserService};
+use super::services::{MusicLibrary, RemoteSessions, Users};
 use crate::db::{DbPool, UserRepoError};
 use crate::models::User;
 use crate::scanner::ScanStateHandle;
@@ -47,7 +47,7 @@ pub trait AuthState: Send + Sync + 'static {
     fn find_user_by_api_key(&self, api_key: &str) -> Result<Option<User>, UserRepoError>;
 }
 
-impl AuthState for UserService {
+impl AuthState for Users {
     fn find_user(&self, username: &str) -> Result<Option<User>, UserRepoError> {
         Self::find_user(self, username)
     }
@@ -59,12 +59,12 @@ impl AuthState for UserService {
 
 /// Shared authentication state handle.
 #[derive(Clone)]
-pub struct AuthStateHandle(Arc<UserService>);
+pub struct AuthStateHandle(Arc<Users>);
 
 impl AuthStateHandle {
     /// Create a shared state handle.
     #[must_use]
-    pub fn new(state: UserService) -> Self {
+    pub fn new(state: Users) -> Self {
         Self(Arc::new(state))
     }
 }
@@ -78,7 +78,7 @@ impl std::fmt::Debug for AuthStateHandle {
 }
 
 impl std::ops::Deref for AuthStateHandle {
-    type Target = UserService;
+    type Target = Users;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -201,9 +201,9 @@ pub struct SubsonicAuth {
     pub format: Format,
     /// Common Subsonic authentication parameters.
     pub params: AuthParams,
-    music: MusicService,
-    users: UserService,
-    remote: RemoteControlService,
+    music: MusicLibrary,
+    users: Users,
+    remote: RemoteSessions,
     scan_state: ScanStateHandle,
     pool: DbPool,
 }
@@ -211,19 +211,19 @@ pub struct SubsonicAuth {
 impl SubsonicAuth {
     /// Return the music service.
     #[must_use]
-    pub const fn music(&self) -> &MusicService {
+    pub const fn music(&self) -> &MusicLibrary {
         &self.music
     }
 
     /// Return the user service.
     #[must_use]
-    pub const fn users(&self) -> &UserService {
+    pub const fn users(&self) -> &Users {
         &self.users
     }
 
     /// Return the remote control service.
     #[must_use]
-    pub const fn remote(&self) -> &RemoteControlService {
+    pub const fn remote(&self) -> &RemoteSessions {
         &self.remote
     }
 
@@ -267,9 +267,9 @@ impl<S> FromRequest<S> for SubsonicAuth
 where
     S: Send + Sync,
     AuthStateHandle: FromRef<S>,
-    MusicService: FromRef<S>,
-    UserService: FromRef<S>,
-    RemoteControlService: FromRef<S>,
+    MusicLibrary: FromRef<S>,
+    Users: FromRef<S>,
+    RemoteSessions: FromRef<S>,
     ScanStateHandle: FromRef<S>,
     DbPool: FromRef<S>,
 {
@@ -382,9 +382,9 @@ where
                 user,
                 format,
                 params,
-                music: MusicService::from_ref(state),
-                users: UserService::from_ref(state),
-                remote: RemoteControlService::from_ref(state),
+                music: MusicLibrary::from_ref(state),
+                users: Users::from_ref(state),
+                remote: RemoteSessions::from_ref(state),
                 scan_state: ScanStateHandle::from_ref(state),
                 pool: DbPool::from_ref(state),
             })
@@ -435,9 +435,9 @@ where
                     user,
                     format,
                     params,
-                    music: MusicService::from_ref(state),
-                    users: UserService::from_ref(state),
-                    remote: RemoteControlService::from_ref(state),
+                    music: MusicLibrary::from_ref(state),
+                    users: Users::from_ref(state),
+                    remote: RemoteSessions::from_ref(state),
                     scan_state: ScanStateHandle::from_ref(state),
                     pool: DbPool::from_ref(state),
                 })

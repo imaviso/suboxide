@@ -4,7 +4,7 @@ use axum::response::IntoResponse;
 
 use crate::api::auth::SubsonicAuth;
 use crate::api::response::{ScanStatusData, SubsonicResponse};
-use crate::scanner::{ScanResult, Scanner};
+use crate::scanner::Scanner;
 
 /// Build a `ScanStatusData` from the current scan state.
 fn build_scan_status_data(auth: &SubsonicAuth) -> ScanStatusData {
@@ -27,16 +27,16 @@ fn build_scan_status_data(auth: &SubsonicAuth) -> ScanStatusData {
 pub async fn start_scan(auth: SubsonicAuth) -> impl IntoResponse {
     let scan_state = auth.scan_state().clone();
     let pool = auth.pool().clone();
+    let Some(guard) = scan_state.try_start() else {
+        let data = build_scan_status_data(&auth);
+        return SubsonicResponse::scan_status(auth.format, data);
+    };
 
     // Spawn background task to run the scan.
-    // The actual start check (try_start) happens inside spawn_blocking so the
-    // ScanGuard lives for the full scan duration.
     tokio::spawn(async move {
         let result = tokio::task::spawn_blocking(move || {
             let scanner = Scanner::new(pool);
-            let Some(_guard) = scan_state.try_start() else {
-                return Ok(ScanResult::default());
-            };
+            let _guard = guard;
             scanner.scan_all_with_state(Some(scan_state.get()))
         })
         .await;

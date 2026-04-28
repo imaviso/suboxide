@@ -13,7 +13,7 @@ use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use suboxide::api::auth::AuthStateHandle;
-use suboxide::api::{MusicService, RemoteControlService, SubsonicRouterExt, UserService, handlers};
+use suboxide::api::{MusicLibrary, RemoteSessions, SubsonicRouterExt, Users, handlers};
 use suboxide::crypto::{PasswordError, hash_password};
 use suboxide::db::{
     DbConfig, DbPool, MusicFolderRepository, MusicRepoError, NewUser, UserRepoError,
@@ -220,9 +220,9 @@ enum LastfmCommands {
 pub struct AppState {
     pool: DbPool,
     scan_state: ScanStateHandle,
-    music: MusicService,
-    users: UserService,
-    remote: RemoteControlService,
+    music: MusicLibrary,
+    users: Users,
+    remote: RemoteSessions,
 }
 
 impl AppState {
@@ -230,9 +230,9 @@ impl AppState {
     #[must_use]
     pub fn new(pool: DbPool, lastfm_client: Option<LastFmClient>) -> Self {
         let scan_state = ScanStateHandle::new(ScanState::new());
-        let music = MusicService::new(pool.clone(), lastfm_client);
-        let users = UserService::new(pool.clone());
-        let remote = RemoteControlService::new(pool.clone());
+        let music = MusicLibrary::new(pool.clone(), lastfm_client);
+        let users = Users::new(pool.clone());
+        let remote = RemoteSessions::new(pool.clone());
 
         Self {
             pool,
@@ -256,19 +256,19 @@ impl FromRef<AppState> for AuthStateHandle {
     }
 }
 
-impl FromRef<AppState> for MusicService {
+impl FromRef<AppState> for MusicLibrary {
     fn from_ref(state: &AppState) -> Self {
         state.music.clone()
     }
 }
 
-impl FromRef<AppState> for UserService {
+impl FromRef<AppState> for Users {
     fn from_ref(state: &AppState) -> Self {
         state.users.clone()
     }
 }
 
-impl FromRef<AppState> for RemoteControlService {
+impl FromRef<AppState> for RemoteSessions {
     fn from_ref(state: &AppState) -> Self {
         state.remote.clone()
     }
@@ -463,7 +463,7 @@ fn run_user_command(pool: &DbPool, cmd: UserCommands) -> Result<(), UserCommandE
             create_user(pool, &username, &password, admin)?;
         }
         UserCommands::List => {
-            let users = UserService::new(pool.clone());
+            let users = Users::new(pool.clone());
             let users = users.get_all_users()?;
             if users.is_empty() {
                 println!("No users found.");
@@ -534,7 +534,7 @@ fn run_user_command(pool: &DbPool, cmd: UserCommands) -> Result<(), UserCommandE
             }
         }
         UserCommands::Delete { username } => {
-            let users = UserService::new(pool.clone());
+            let users = Users::new(pool.clone());
             if users.delete_user(&username)? {
                 println!("Deleted user '{username}'");
             } else {
@@ -917,7 +917,7 @@ async fn run_server(
     lastfm_client: Option<LastFmClient>,
 ) -> Result<(), ServerError> {
     // Check if there are any users
-    let users = UserService::new(pool.clone());
+    let users = Users::new(pool.clone());
     let has_users = users
         .get_all_users()
         .map_err(ServerError::UserCheck)?

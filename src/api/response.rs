@@ -1862,7 +1862,19 @@ impl SubsonicResponse {
         match serde_json::to_string(&response) {
             Ok(json) => {
                 // Transform JSON keys: remove @ prefix and convert $text to $value
-                let transformed = transform_json_keys(&json);
+                let transformed = match transform_json_keys(&json) {
+                    Ok(transformed) => transformed,
+                    Err(error) => {
+                        tracing::event!(
+                            name: "api.response.transform_json.failed",
+                            tracing::Level::ERROR,
+                            error = %error,
+                            "json response transform failed"
+                        );
+                        return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+                            .into_response();
+                    }
+                };
                 (
                     StatusCode::OK,
                     [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
@@ -1886,15 +1898,11 @@ impl SubsonicResponse {
 /// Transform JSON keys to match Subsonic API expectations:
 /// - Remove @ prefix from attribute keys
 /// - Convert $text to value (for genre text content)
-fn transform_json_keys(json: &str) -> String {
+fn transform_json_keys(json: &str) -> Result<String, serde_json::Error> {
     // Parse as Value, transform, and re-serialize
-    serde_json::from_str::<serde_json::Value>(json).map_or_else(
-        |_| json.to_string(),
-        |value| {
-            let transformed = transform_value(value);
-            serde_json::to_string(&transformed).unwrap_or_else(|_| json.to_string())
-        },
-    )
+    let value = serde_json::from_str::<serde_json::Value>(json)?;
+    let transformed = transform_value(value);
+    serde_json::to_string(&transformed)
 }
 
 fn transform_value(value: serde_json::Value) -> serde_json::Value {
@@ -1973,7 +1981,7 @@ mod tests {
     fn transform_json_keys_recurses_through_objects_and_arrays() {
         let json = r#"{"@id":"root","child":[{"@name":"genre","$text":"Jazz"}]}"#;
 
-        let transformed = super::transform_json_keys(json);
+        let transformed = super::transform_json_keys(json).expect("valid JSON should transform");
 
         assert_eq!(
             transformed,
@@ -1982,9 +1990,9 @@ mod tests {
     }
 
     #[test]
-    fn transform_json_keys_leaves_invalid_json_unchanged() {
+    fn transform_json_keys_rejects_invalid_json() {
         let invalid = "not json";
 
-        assert_eq!(super::transform_json_keys(invalid), invalid);
+        assert!(super::transform_json_keys(invalid).is_err());
     }
 }

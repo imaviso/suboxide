@@ -16,4 +16,4 @@ pub use response::{Format, SubsonicResponse};
 #[doc(inline)]
 pub use router::SubsonicRouterExt;
 #[doc(inline)]
-pub use services::{MusicService, RemoteControlService, UserService};
+pub use services::{MusicLibrary, RemoteSessions, Users};

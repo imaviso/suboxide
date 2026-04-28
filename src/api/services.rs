@@ -19,6 +19,74 @@ use crate::models::user::UserRoles;
 use crate::paths::resolve_cover_art_dir;
 use crate::scanner::lyrics::{ExtractedLyrics, extract_lyrics};
 
+const LASTFM_PLACEHOLDER_IMAGE_MARKER: &str = "2a96cbd8b46e442fc41c2b86b821562f";
+
+#[derive(Debug, thiserror::Error)]
+enum ArtistImageError {
+    #[error("failed to create cover-art directory: {0}")]
+    CreateDirectory(std::io::Error),
+    #[error("failed to download artist image: {0}")]
+    Download(reqwest::Error),
+    #[error("artist image request returned {0}")]
+    HttpStatus(reqwest::StatusCode),
+    #[error("failed to read artist image bytes: {0}")]
+    ReadBytes(reqwest::Error),
+    #[error("failed to create artist image file: {0}")]
+    CreateFile(std::io::Error),
+    #[error("failed to write artist image file: {0}")]
+    WriteFile(std::io::Error),
+}
+
+fn is_lastfm_placeholder_image(url: &str) -> bool {
+    url.contains(LASTFM_PLACEHOLDER_IMAGE_MARKER)
+}
+
+async fn download_artist_image(
+    artist_id: i32,
+    image_url: &str,
+) -> Result<String, ArtistImageError> {
+    use tokio::io::AsyncWriteExt;
+
+    let cover_art_dir = resolve_cover_art_dir();
+    tokio::fs::create_dir_all(&cover_art_dir)
+        .await
+        .map_err(ArtistImageError::CreateDirectory)?;
+
+    let extension = if image_url.to_lowercase().ends_with(".png") {
+        "png"
+    } else if image_url.to_lowercase().ends_with(".gif") {
+        "gif"
+    } else {
+        "jpg"
+    };
+
+    let cover_art_id = format!("artist-{artist_id}");
+    let filepath = cover_art_dir.join(format!("{cover_art_id}.{extension}"));
+    if filepath.exists() {
+        return Ok(cover_art_id);
+    }
+
+    let response = reqwest::get(image_url)
+        .await
+        .map_err(ArtistImageError::Download)?;
+    if !response.status().is_success() {
+        return Err(ArtistImageError::HttpStatus(response.status()));
+    }
+
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(ArtistImageError::ReadBytes)?;
+    let mut file = tokio::fs::File::create(&filepath)
+        .await
+        .map_err(ArtistImageError::CreateFile)?;
+    file.write_all(&bytes)
+        .await
+        .map_err(ArtistImageError::WriteFile)?;
+
+    Ok(cover_art_id)
+}
+
 /// Saturating cast from `i64` to `i32`.
 #[expect(
     clippy::cast_possible_truncation,
@@ -35,15 +103,15 @@ pub fn saturating_i64_to_i32(value: i64) -> i32 {
     }
 }
 
-/// Music library and playback service.
+/// Music library and playback operations.
 #[derive(Clone, Debug)]
-pub struct MusicService {
+pub struct MusicLibrary {
     pool: DbPool,
     lastfm_client: Option<LastFmClient>,
 }
 
-impl MusicService {
-    /// Create a new music service.
+impl MusicLibrary {
+    /// Create a new music library.
     #[must_use]
     pub const fn new(pool: DbPool, lastfm_client: Option<LastFmClient>) -> Self {
         Self {
@@ -678,7 +746,6 @@ impl MusicService {
     )]
     async fn fetch_and_cache_artist_info(&self, artist_id: i32, artist_name: String) {
         use crate::lastfm::models::LastFmArtistCache;
-        use tokio::io::AsyncWriteExt;
 
         let Some(client) = self.lastfm_client.clone() else {
             return;
@@ -742,6 +809,17 @@ impl MusicService {
                     .map(|a| a.name.clone())
                     .collect();
 
+                if large.as_deref().is_some_and(is_lastfm_placeholder_image) {
+                    tracing::warn!(
+                        artist = %artist_name,
+                        url = ?large,
+                        "Discarding Last.fm placeholder image"
+                    );
+                    small = small.filter(|url| !is_lastfm_placeholder_image(url));
+                    medium = medium.filter(|url| !is_lastfm_placeholder_image(url));
+                    large = None;
+                }
+
                 let cache = LastFmArtistCache {
                     artist_id,
                     biography: bio,
@@ -760,58 +838,22 @@ impl MusicService {
                 }
 
                 if let Some(image_url) = large {
-                    if image_url.contains("2a96cbd8b46e442fc41c2b86b821562f") {
-                        tracing::warn!(
-                            artist = %artist_name,
-                            url = %image_url,
-                            "Skipping Last.fm placeholder image"
-                        );
-                        return;
-                    }
-
-                    let cover_art_dir = resolve_cover_art_dir();
-                    if !cover_art_dir.exists() {
-                        let _ = tokio::fs::create_dir_all(&cover_art_dir).await;
-                    }
-
-                    let ext = if image_url.to_lowercase().ends_with(".png") {
-                        "png"
-                    } else if image_url.to_lowercase().ends_with(".gif") {
-                        "gif"
-                    } else {
-                        "jpg"
-                    };
-
-                    let cover_art_id = format!("artist-{artist_id}");
-                    let filename = format!("{cover_art_id}.{ext}");
-                    let filepath = cover_art_dir.join(&filename);
-
-                    if !filepath.exists() {
-                        match reqwest::get(&image_url).await {
-                            Ok(resp) if resp.status().is_success() => match resp.bytes().await {
-                                Ok(bytes) => {
-                                    if let Ok(mut file) = tokio::fs::File::create(&filepath).await
-                                        && file.write_all(&bytes).await.is_ok()
-                                    {
-                                        tracing::debug!(
-                                            artist = %artist_name,
-                                            "Downloaded artist image"
-                                        );
-                                        if let Err(e) = ArtistRepository::new(pool.clone())
-                                            .update_cover_art(artist_id, Some(&cover_art_id))
-                                        {
-                                            tracing::warn!(error = %e, "Failed to update artist cover art");
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    tracing::warn!(error = %e, "Failed to get image bytes");
-                                }
-                            },
-                            Ok(_) => {}
-                            Err(e) => {
-                                tracing::warn!(error = %e, "Failed to download artist image");
+                    match download_artist_image(artist_id, &image_url).await {
+                        Ok(cover_art_id) => {
+                            tracing::debug!(artist = %artist_name, "Downloaded artist image");
+                            if let Err(e) = ArtistRepository::new(pool.clone())
+                                .update_cover_art(artist_id, Some(&cover_art_id))
+                            {
+                                tracing::warn!(error = %e, "Failed to update artist cover art");
                             }
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                error = %error,
+                                artist = %artist_name,
+                                url = %image_url,
+                                "Failed to store artist image"
+                            );
                         }
                     }
                 }
@@ -858,14 +900,14 @@ impl MusicService {
     }
 }
 
-/// User management service.
+/// User accounts.
 #[derive(Clone, Debug)]
-pub struct UserService {
+pub struct Users {
     pool: DbPool,
 }
 
-impl UserService {
-    /// Create a new user service.
+impl Users {
+    /// Create new user accounts.
     #[must_use]
     pub const fn new(pool: DbPool) -> Self {
         Self { pool }
@@ -956,14 +998,14 @@ impl UserService {
     }
 }
 
-/// Remote control service.
+/// Remote control sessions.
 #[derive(Clone, Debug)]
-pub struct RemoteControlService {
+pub struct RemoteSessions {
     pool: DbPool,
 }
 
-impl RemoteControlService {
-    /// Create a new remote control service.
+impl RemoteSessions {
+    /// Create new remote sessions.
     #[must_use]
     pub const fn new(pool: DbPool) -> Self {
         Self { pool }
