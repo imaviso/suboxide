@@ -104,7 +104,9 @@ pub async fn get_indexes(auth: SubsonicAuth) -> impl IntoResponse {
     // Get last modified time (using current timestamp for now)
     let last_modified = match auth.music().get_artists_last_modified() {
         Ok(value) => value.map_or(0, |dt| dt.and_utc().timestamp_millis()),
-        Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
     let response = IndexesResponse {

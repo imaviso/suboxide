@@ -1,7 +1,5 @@
 //! Subsonic API handlers.
 
-
-
 pub mod annotation;
 pub mod browsing;
 pub mod media;
@@ -65,5 +63,3 @@ pub use users::{
     ChangePasswordParams, CreateUserParams, DeleteUserParams, GetUserParams, UpdateUserParams,
     change_password, create_user, delete_user, get_user, get_users, update_user,
 };
-
-

@@ -516,11 +516,19 @@ pub async fn get_similar_songs2(
                     return error_response(auth.format, &ApiError::NotFound("Item".into()))
                         .into_response();
                 }
-                Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+                Err(e) => {
+                    return error_response(auth.format, &ApiError::Generic(e.to_string()))
+                        .into_response();
+                }
             },
-            Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+            Err(e) => {
+                return error_response(auth.format, &ApiError::Generic(e.to_string()))
+                    .into_response();
+            }
         },
-        Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
     // Batch fetch starred status for all songs
@@ -621,11 +629,19 @@ pub async fn get_similar_songs(
                     return error_response(auth.format, &ApiError::NotFound("Item".into()))
                         .into_response();
                 }
-                Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+                Err(e) => {
+                    return error_response(auth.format, &ApiError::Generic(e.to_string()))
+                        .into_response();
+                }
             },
-            Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+            Err(e) => {
+                return error_response(auth.format, &ApiError::Generic(e.to_string()))
+                    .into_response();
+            }
         },
-        Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
     // Batch fetch starred status for all songs

@@ -103,7 +103,9 @@ pub async fn get_playlist(
             return error_response(auth.format, &ApiError::NotFound("Playlist".into()))
                 .into_response();
         }
-        Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
     if playlist.owner != auth.user.username && !playlist.public {
@@ -200,7 +202,10 @@ pub async fn create_playlist(
             Ok(false) => {
                 return error_response(auth.format, &ApiError::NotAuthorized).into_response();
             }
-            Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+            Err(e) => {
+                return error_response(auth.format, &ApiError::Generic(e.to_string()))
+                    .into_response();
+            }
         }
 
         if let Err(e) = auth.music().update_playlist(
@@ -220,7 +225,10 @@ pub async fn create_playlist(
                 return error_response(auth.format, &ApiError::NotFound("Playlist".into()))
                     .into_response();
             }
-            Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+            Err(e) => {
+                return error_response(auth.format, &ApiError::Generic(e.to_string()))
+                    .into_response();
+            }
         };
         let songs = match auth.music().get_playlist_songs(playlist_id) {
             Ok(v) => v,
@@ -385,7 +393,9 @@ pub async fn update_playlist(
     match auth.music().is_playlist_owner(user_id, playlist_id) {
         Ok(true) => {}
         Ok(false) => return error_response(auth.format, &ApiError::NotAuthorized).into_response(),
-        Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     }
 
     match auth.music().update_playlist(
@@ -433,7 +443,9 @@ pub async fn delete_playlist(
     match auth.music().is_playlist_owner(user_id, playlist_id) {
         Ok(true) => {}
         Ok(false) => return error_response(auth.format, &ApiError::NotAuthorized).into_response(),
-        Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     }
 
     match auth.music().delete_playlist(playlist_id) {

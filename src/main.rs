@@ -1,7 +1,6 @@
 //! Subsonic API compatible server.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use axum::{Router, extract::FromRef};
 use mimalloc::MiMalloc;
@@ -17,12 +16,12 @@ use suboxide::api::auth::AuthStateHandle;
 use suboxide::api::{MusicService, RemoteControlService, SubsonicRouterExt, UserService, handlers};
 use suboxide::crypto::{PasswordError, hash_password};
 use suboxide::db::{
-    DbConfig, DbPool, MusicFolderRepository, NewUser, UserRepoError, UserRepository, UserUpdate,
-    run_migrations,
+    DbConfig, DbPool, MusicFolderRepository, MusicRepoError, NewUser, UserRepoError,
+    UserRepository, UserUpdate, run_migrations,
 };
-use suboxide::lastfm::LastFmClient;
+use suboxide::lastfm::{LastFmClient, LastFmError};
 use suboxide::models::music::NewMusicFolder;
-use suboxide::scanner::{AutoScanner, ScanMode, ScanState, ScanStateHandle, Scanner};
+use suboxide::scanner::{AutoScanner, ScanError, ScanMode, ScanState, ScanStateHandle, Scanner};
 
 /// Subsonic-compatible music streaming server.
 #[derive(Parser)]
@@ -253,7 +252,7 @@ impl AppState {
 
 impl FromRef<AppState> for AuthStateHandle {
     fn from_ref(state: &AppState) -> Self {
-        Self::new(Arc::new(state.users.clone()))
+        Self::new(state.users.clone())
     }
 }
 
@@ -417,20 +416,12 @@ fn setup_database(database_path: impl AsRef<std::path::Path>) -> Result<DbPool, 
     Ok(pool)
 }
 
-#[derive(Debug, thiserror::Error)]
-enum CreateUserError {
-    #[error(transparent)]
-    Password(#[from] PasswordError),
-    #[error(transparent)]
-    Repository(#[from] UserRepoError),
-}
-
 fn create_user(
     pool: &DbPool,
     username: &str,
     password: &str,
     admin: bool,
-) -> Result<(), CreateUserError> {
+) -> Result<(), UserCommandError> {
     let password_hash = hash_password(password)?;
     let repo = UserRepository::new(pool.clone());
 
@@ -452,11 +443,357 @@ fn create_user(
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+enum UserCommandError {
+    #[error("User '{0}' not found")]
+    NotFound(String),
+    #[error(transparent)]
+    Password(#[from] PasswordError),
+    #[error(transparent)]
+    Repository(#[from] UserRepoError),
+}
+
+fn run_user_command(pool: &DbPool, cmd: UserCommands) -> Result<(), UserCommandError> {
+    match cmd {
+        UserCommands::Create {
+            username,
+            password,
+            admin,
+        } => {
+            create_user(pool, &username, &password, admin)?;
+        }
+        UserCommands::List => {
+            let users = UserService::new(pool.clone());
+            let users = users.get_all_users()?;
+            if users.is_empty() {
+                println!("No users found.");
+            } else {
+                println!("Users:");
+                for user in users {
+                    let roles: Vec<&str> = [
+                        (user.roles.admin_role, "admin"),
+                        (user.roles.settings_role, "settings"),
+                        (user.roles.stream_role, "stream"),
+                        (user.roles.download_role, "download"),
+                        (user.roles.upload_role, "upload"),
+                        (user.roles.jukebox_role, "jukebox"),
+                        (user.roles.playlist_role, "playlist"),
+                        (user.roles.cover_art_role, "cover_art"),
+                        (user.roles.comment_role, "comment"),
+                        (user.roles.podcast_role, "podcast"),
+                        (user.roles.share_role, "share"),
+                        (user.roles.video_conversion_role, "video"),
+                    ]
+                    .iter()
+                    .filter(|(enabled, _)| *enabled)
+                    .map(|(_, name)| *name)
+                    .collect();
+
+                    println!(
+                        "  [{}] {} (roles: {})",
+                        user.id,
+                        user.username,
+                        roles.join(", ")
+                    );
+                }
+            }
+        }
+        UserCommands::Update {
+            username,
+            password,
+            admin,
+            email,
+        } => {
+            let repo = UserRepository::new(pool.clone());
+            let mut builder = UserUpdate::builder(&username);
+
+            if let Some(email) = email {
+                builder = builder.email(email);
+            }
+            if let Some(admin) = admin {
+                builder = builder.admin_role(admin);
+            }
+
+            let update = builder.build();
+
+            let user_id = match repo.find_by_username(&username)? {
+                Some(user) => user.id,
+                None => return Err(UserCommandError::NotFound(username.clone())),
+            };
+
+            if repo.update_user(&update)? {
+                println!("Updated user details for '{username}'");
+            } else {
+                return Err(UserCommandError::NotFound(username));
+            }
+
+            if let Some(password) = password {
+                let hash = hash_password(&password)?;
+                repo.update_password(user_id, &hash)?;
+                println!("Updated password for '{username}'");
+            }
+        }
+        UserCommands::Delete { username } => {
+            let users = UserService::new(pool.clone());
+            if users.delete_user(&username)? {
+                println!("Deleted user '{username}'");
+            } else {
+                return Err(UserCommandError::NotFound(username));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, thiserror::Error)]
+enum ApiKeyCommandError {
+    #[error("User '{0}' not found")]
+    NotFound(String),
+    #[error(transparent)]
+    Repository(#[from] UserRepoError),
+}
+
+fn run_api_key_command(pool: &DbPool, cmd: ApiKeyCommands) -> Result<(), ApiKeyCommandError> {
+    let repo = UserRepository::new(pool.clone());
+    match cmd {
+        ApiKeyCommands::Generate { username } => {
+            let Some(user) = repo.find_by_username(&username)? else {
+                return Err(ApiKeyCommandError::NotFound(username));
+            };
+            let api_key = repo.generate_api_key(user.id)?;
+            println!("Generated API key for user '{}':", user.username);
+            println!("{api_key}");
+        }
+        ApiKeyCommands::Revoke { username } => {
+            let Some(user) = repo.find_by_username(&username)? else {
+                return Err(ApiKeyCommandError::NotFound(username));
+            };
+            if repo.revoke_api_key(user.id)? {
+                println!("Revoked API key for user '{username}'");
+            } else {
+                return Err(ApiKeyCommandError::NotFound(username));
+            }
+        }
+        ApiKeyCommands::Show { username } => {
+            let Some(user) = repo.find_by_username(&username)? else {
+                return Err(ApiKeyCommandError::NotFound(username));
+            };
+            if let Some(api_key) = user.api_key {
+                println!("API key for user '{username}':");
+                println!("{api_key}");
+            } else {
+                println!("User '{username}' has no API key. Generate one with:");
+                println!("  suboxide api-key generate --username {username}");
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, thiserror::Error)]
+enum FolderCommandError {
+    #[error("Music folder not found")]
+    NotFound,
+    #[error(transparent)]
+    Repository(#[from] MusicRepoError),
+}
+
+fn run_folder_command(pool: &DbPool, cmd: FolderCommands) -> Result<(), FolderCommandError> {
+    let repo = MusicFolderRepository::new(pool.clone());
+    match cmd {
+        FolderCommands::Add { name, path } => {
+            let path_str = path.to_string_lossy().into_owned();
+            let new_folder = NewMusicFolder::new(&name, &path_str);
+            let folder = repo.create(&new_folder)?;
+            println!("Added music folder '{}' (id: {})", folder.name, folder.id);
+            println!("  Path: {}", folder.path);
+        }
+        FolderCommands::List => {
+            let folders = repo.find_all()?;
+            if folders.is_empty() {
+                println!("No music folders configured. Add one with:");
+                println!("  suboxide folder add --name \"Music\" --path /path/to/music");
+            } else {
+                println!("Music folders:");
+                for folder in folders {
+                    let status = if folder.enabled {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    };
+                    println!(
+                        "  [{}] {} - {} ({})",
+                        folder.id, folder.name, folder.path, status
+                    );
+                }
+            }
+        }
+        FolderCommands::Remove { id } => {
+            if repo.delete(id)? {
+                println!("Removed music folder with id {id}");
+            } else {
+                return Err(FolderCommandError::NotFound);
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, thiserror::Error)]
+enum LastfmCommandError {
+    #[error("User '{0}' not found")]
+    UserNotFound(String),
+    #[error(transparent)]
+    UserRepo(#[from] UserRepoError),
+    #[error(transparent)]
+    LastFm(#[from] LastFmError),
+    #[error(
+        "Last.fm is not configured. Set LASTFM_API_KEY and LASTFM_API_SECRET environment variables."
+    )]
+    NotConfigured,
+    #[error("Operation cancelled")]
+    Cancelled,
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+}
+
+async fn run_lastfm_command(pool: &DbPool, cmd: LastfmCommands) -> Result<(), LastfmCommandError> {
+    let repo = UserRepository::new(pool.clone());
+    match cmd {
+        LastfmCommands::Set {
+            username,
+            session_key,
+        } => {
+            let Some(user) = repo.find_by_username(&username)? else {
+                return Err(LastfmCommandError::UserNotFound(username));
+            };
+            if repo.set_lastfm_session_key(user.id, Some(&session_key))? {
+                println!("Set Last.fm session key for user '{}'", user.username);
+            } else {
+                return Err(LastfmCommandError::UserNotFound(user.username));
+            }
+        }
+        LastfmCommands::Unlink { username } => {
+            let Some(user) = repo.find_by_username(&username)? else {
+                return Err(LastfmCommandError::UserNotFound(username));
+            };
+            if repo.set_lastfm_session_key(user.id, None)? {
+                println!("Cleared Last.fm session key for user '{username}'");
+            } else {
+                return Err(LastfmCommandError::UserNotFound(username));
+            }
+        }
+        LastfmCommands::Link { username, token } => {
+            let api_key = std::env::var("LASTFM_API_KEY").unwrap_or_default();
+            let api_secret = std::env::var("LASTFM_API_SECRET").unwrap_or_default();
+
+            let client = LastFmClient::new(api_key.clone(), api_secret)
+                .ok_or(LastfmCommandError::NotConfigured)?;
+
+            let Some(user) = repo.find_by_username(&username)? else {
+                return Err(LastfmCommandError::UserNotFound(username.clone()));
+            };
+
+            let token = if let Some(t) = token {
+                t
+            } else {
+                println!("To link your Last.fm account, please visit:");
+                println!(
+                    "http://www.last.fm/api/auth/?api_key={}&cb=http://localhost:8080/callback",
+                    client.api_key()
+                );
+                println!(
+                    "\nAfter approving access, you will be redirected to a URL (or see a token)."
+                );
+                println!("Please paste the 'token' parameter from the URL here:");
+
+                let mut input = String::new();
+                std::io::stdin().read_line(&mut input)?;
+                let trimmed = input.trim();
+
+                if trimmed.is_empty() {
+                    return Err(LastfmCommandError::Cancelled);
+                }
+                trimmed.to_string()
+            };
+
+            println!("Exchanging token for session...");
+            let session = client.get_session(&token).await?;
+            println!(
+                "Successfully authenticated as Last.fm user: {}",
+                session.name
+            );
+            let _ = repo.set_lastfm_session_key(user.id, Some(&session.key))?;
+            println!("Last.fm session linked successfully!");
+        }
+        LastfmCommands::Debug { artist } => {
+            let api_key = std::env::var("LASTFM_API_KEY").unwrap_or_default();
+            let api_secret = std::env::var("LASTFM_API_SECRET").unwrap_or_default();
+
+            let client =
+                LastFmClient::new(api_key, api_secret).ok_or(LastfmCommandError::NotConfigured)?;
+
+            println!("Querying Last.fm for artist: '{artist}'");
+            match client.get_artist_info(&artist).await? {
+                Some(info) => {
+                    println!("Found artist: {}", info.name);
+                    println!("URL: {:?}", info.url);
+                    println!("MBID: {:?}", info.musicbrainz_id);
+                    println!("Images:");
+                    for img in &info.image {
+                        println!("  - [{}] {}", img.size, img.url);
+                        if img.url.contains("2a96cbd8b46e442fc41c2b86b821562f") {
+                            println!(
+                                "    ^ WARNING: This hash is known to be a placeholder star image!"
+                            );
+                        }
+                    }
+                }
+                None => println!("Artist not found on Last.fm"),
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, thiserror::Error)]
+enum ScanCommandError {
+    #[error(transparent)]
+    Scan(#[from] ScanError),
+}
+
+fn run_scan_command(
+    pool: &DbPool,
+    folder: Option<i32>,
+    full: bool,
+) -> Result<(), ScanCommandError> {
+    let scanner = Scanner::new(pool.clone());
+    let mode = if full {
+        ScanMode::Full
+    } else {
+        ScanMode::Incremental
+    };
+
+    let result = folder.map_or_else(
+        || scanner.scan_all_with_options(None, mode),
+        |folder_id| scanner.scan_folder_by_id_with_mode(folder_id, mode),
+    );
+
+    let stats = result?;
+    println!("\nScan complete:");
+    println!("  Tracks found:     {}", stats.tracks_found);
+    println!("  Tracks added:     {}", stats.tracks_added);
+    println!("  Tracks updated:   {}", stats.tracks_updated);
+    println!("  Tracks skipped:   {}", stats.tracks_skipped);
+    println!("  Tracks removed:   {}", stats.tracks_removed);
+    println!("  Tracks failed:    {}", stats.tracks_failed);
+    println!("  Artists added:    {}", stats.artists_added);
+    println!("  Albums added:     {}", stats.albums_added);
+    println!("  Cover art saved:  {}", stats.cover_art_saved);
+    Ok(())
+}
+
 #[tokio::main]
-#[expect(
-    clippy::too_many_lines,
-    reason = "CLI command handling is intentionally centralized in one entrypoint"
-)]
 async fn main() {
     let cli = Cli::parse();
 
@@ -484,487 +821,39 @@ async fn main() {
     };
 
     match cli.command {
-        Some(Commands::User(user_command)) => match user_command {
-            UserCommands::Create {
-                username,
-                password,
-                admin,
-            } => {
-                if let Err(e) = create_user(&pool, &username, &password, admin) {
-                    tracing::error!(error = %e, username = %username, "failed to create user");
-                    std::process::exit(1);
-                }
+        Some(Commands::User(cmd)) => {
+            if let Err(e) = run_user_command(&pool, cmd) {
+                tracing::error!(error = %e, "User command failed");
+                std::process::exit(1);
             }
-            UserCommands::List => {
-                let users = UserService::new(pool);
-                match users.get_all_users() {
-                    Ok(users) => {
-                        if users.is_empty() {
-                            println!("No users found.");
-                        } else {
-                            println!("Users:");
-                            for user in users {
-                                let roles: Vec<&str> = [
-                                    (user.roles.admin_role, "admin"),
-                                    (user.roles.settings_role, "settings"),
-                                    (user.roles.stream_role, "stream"),
-                                    (user.roles.download_role, "download"),
-                                    (user.roles.upload_role, "upload"),
-                                    (user.roles.jukebox_role, "jukebox"),
-                                    (user.roles.playlist_role, "playlist"),
-                                    (user.roles.cover_art_role, "cover_art"),
-                                    (user.roles.comment_role, "comment"),
-                                    (user.roles.podcast_role, "podcast"),
-                                    (user.roles.share_role, "share"),
-                                    (user.roles.video_conversion_role, "video"),
-                                ]
-                                .iter()
-                                .filter(|(enabled, _)| *enabled)
-                                .map(|(_, name)| *name)
-                                .collect();
-
-                                println!(
-                                    "  [{}] {} (roles: {})",
-                                    user.id,
-                                    user.username,
-                                    roles.join(", ")
-                                );
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, "Failed to list users");
-                        std::process::exit(1);
-                    }
-                }
+        }
+        Some(Commands::ApiKey(cmd)) => {
+            if let Err(e) = run_api_key_command(&pool, cmd) {
+                tracing::error!(error = %e, "API key command failed");
+                std::process::exit(1);
             }
-            UserCommands::Update {
-                username,
-                password,
-                admin,
-                email,
-            } => {
-                let _users = UserService::new(pool.clone());
-                let repo = UserRepository::new(pool);
-                let mut builder = UserUpdate::builder(&username);
-
-                if let Some(email) = email {
-                    builder = builder.email(email);
-                }
-                if let Some(admin) = admin {
-                    builder = builder.admin_role(admin);
-                }
-
-                let update = builder.build();
-
-                // Check if user exists first to get ID for password update
-                let user_id = match repo.find_by_username(&username) {
-                    Ok(Some(user)) => user.id,
-                    Ok(None) => {
-                        tracing::error!(username = %username, "User not found");
-                        std::process::exit(1);
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, username = %username, "Database error");
-                        std::process::exit(1);
-                    }
-                };
-
-                // Update fields
-                match repo.update_user(&update) {
-                    Ok(true) => println!("Updated user details for '{username}'"),
-                    Ok(false) => {
-                        tracing::error!(username = %username, "User not found during update");
-                        std::process::exit(1);
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, username = %username, "Failed to update user");
-                        std::process::exit(1);
-                    }
-                }
-
-                // Update password if provided
-                if let Some(password) = password {
-                    match hash_password(&password) {
-                        Ok(hash) => match repo.update_password(user_id, &hash) {
-                            Ok(true) => println!("Updated password for '{username}'"),
-                            Ok(false) => {
-                                tracing::error!("Failed to update password (user missing?)");
-                            }
-                            Err(e) => {
-                                tracing::error!(error = %e, "Failed to update password in DB");
-                            }
-                        },
-                        Err(e) => tracing::error!(error = %e, "Failed to hash password"),
-                    }
-                }
+        }
+        Some(Commands::Folder(cmd)) => {
+            if let Err(e) = run_folder_command(&pool, cmd) {
+                tracing::error!(error = %e, "Folder command failed");
+                std::process::exit(1);
             }
-            UserCommands::Delete { username } => {
-                let users = UserService::new(pool);
-                match users.delete_user(&username) {
-                    Ok(true) => println!("Deleted user '{username}'"),
-                    Ok(false) => {
-                        tracing::error!(username = %username, "User not found when deleting");
-                        std::process::exit(1);
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, username = %username, "Failed to delete user");
-                        std::process::exit(1);
-                    }
-                }
+        }
+        Some(Commands::Lastfm(cmd)) => {
+            if let Err(e) = run_lastfm_command(&pool, cmd).await {
+                tracing::error!(error = %e, "Last.fm command failed");
+                std::process::exit(1);
             }
-        },
-        Some(Commands::ApiKey(api_key_command)) => match api_key_command {
-            ApiKeyCommands::Generate { username } => {
-                let repo = UserRepository::new(pool);
-                match repo.find_by_username(&username) {
-                    Ok(Some(user)) => match repo.generate_api_key(user.id) {
-                        Ok(api_key) => {
-                            println!("Generated API key for user '{username}':");
-                            println!("{api_key}");
-                        }
-                        Err(e) => {
-                            tracing::error!(error = %e, username = %username, "Failed to generate API key");
-                            std::process::exit(1);
-                        }
-                    },
-                    Ok(None) => {
-                        tracing::error!(username = %username, "User not found");
-                        std::process::exit(1);
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, username = %username, "Database error while finding user");
-                        std::process::exit(1);
-                    }
-                }
-            }
-            ApiKeyCommands::Revoke { username } => {
-                let repo = UserRepository::new(pool);
-                match repo.find_by_username(&username) {
-                    Ok(Some(user)) => match repo.revoke_api_key(user.id) {
-                        Ok(true) => {
-                            println!("Revoked API key for user '{username}'");
-                        }
-                        Ok(false) => {
-                            tracing::error!(username = %username, "User not found when revoking API key");
-                            std::process::exit(1);
-                        }
-                        Err(e) => {
-                            tracing::error!(error = %e, username = %username, "Failed to revoke API key");
-                            std::process::exit(1);
-                        }
-                    },
-                    Ok(None) => {
-                        tracing::error!(username = %username, "User not found");
-                        std::process::exit(1);
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, username = %username, "Database error");
-                        std::process::exit(1);
-                    }
-                }
-            }
-            ApiKeyCommands::Show { username } => {
-                let repo = UserRepository::new(pool);
-                match repo.find_by_username(&username) {
-                    Ok(Some(user)) => {
-                        if let Some(api_key) = user.api_key {
-                            println!("API key for user '{username}':");
-                            println!("{api_key}");
-                        } else {
-                            println!("User '{username}' has no API key. Generate one with:");
-                            println!("  suboxide api-key generate --username {username}");
-                        }
-                    }
-                    Ok(None) => {
-                        tracing::error!(username = %username, "User not found");
-                        std::process::exit(1);
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, username = %username, "Database error");
-                        std::process::exit(1);
-                    }
-                }
-            }
-        },
-        Some(Commands::Folder(folder_command)) => match folder_command {
-            FolderCommands::Add { name, path } => {
-                let path_str = path.to_string_lossy().into_owned();
-                let repo = MusicFolderRepository::new(pool);
-                let new_folder = NewMusicFolder::new(&name, &path_str);
-                match repo.create(&new_folder) {
-                    Ok(folder) => {
-                        println!("Added music folder '{}' (id: {})", folder.name, folder.id);
-                        println!("  Path: {}", folder.path);
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, folder_name = %name, "Failed to add music folder");
-                        std::process::exit(1);
-                    }
-                }
-            }
-            FolderCommands::List => {
-                let repo = MusicFolderRepository::new(pool);
-                match repo.find_all() {
-                    Ok(folders) => {
-                        if folders.is_empty() {
-                            println!("No music folders configured. Add one with:");
-                            println!(
-                                "  suboxide folder add --name \"Music\" --path /path/to/music"
-                            );
-                        } else {
-                            println!("Music folders:");
-                            for folder in folders {
-                                let status = if folder.enabled {
-                                    "enabled"
-                                } else {
-                                    "disabled"
-                                };
-                                println!(
-                                    "  [{}] {} - {} ({})",
-                                    folder.id, folder.name, folder.path, status
-                                );
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, "Failed to list music folders");
-                        std::process::exit(1);
-                    }
-                }
-            }
-            FolderCommands::Remove { id } => {
-                let repo = MusicFolderRepository::new(pool);
-                match repo.delete(id) {
-                    Ok(true) => {
-                        println!("Removed music folder with id {id}");
-                    }
-                    Ok(false) => {
-                        tracing::error!(folder_id = id, "Music folder not found");
-                        std::process::exit(1);
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, folder_id = id, "Failed to remove music folder");
-                        std::process::exit(1);
-                    }
-                }
-            }
-        },
-        Some(Commands::Lastfm(lastfm_command)) => match lastfm_command {
-            LastfmCommands::Set {
-                username,
-                session_key,
-            } => {
-                let repo = UserRepository::new(pool);
-                match repo.find_by_username(&username) {
-                    Ok(Some(user)) => {
-                        match repo.set_lastfm_session_key(user.id, Some(&session_key)) {
-                            Ok(true) => {
-                                println!("Set Last.fm session key for user '{username}'");
-                            }
-                            Ok(false) => {
-                                tracing::error!(
-                                    username = %username,
-                                    "User not found when setting Last.fm key"
-                                );
-                                std::process::exit(1);
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    error = %e,
-                                    username = %username,
-                                    "Failed to set Last.fm session key"
-                                );
-                                std::process::exit(1);
-                            }
-                        }
-                    }
-                    Ok(None) => {
-                        tracing::error!(username = %username, "User not found");
-                        std::process::exit(1);
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, username = %username, "Database error");
-                        std::process::exit(1);
-                    }
-                }
-            }
-            LastfmCommands::Unlink { username } => {
-                let repo = UserRepository::new(pool);
-                match repo.find_by_username(&username) {
-                    Ok(Some(user)) => match repo.set_lastfm_session_key(user.id, None) {
-                        Ok(true) => {
-                            println!("Cleared Last.fm session key for user '{username}'");
-                        }
-                        Ok(false) => {
-                            tracing::error!(
-                                username = %username,
-                                "User not found when clearing Last.fm key"
-                            );
-                            std::process::exit(1);
-                        }
-                        Err(e) => {
-                            tracing::error!(
-                                error = %e,
-                                username = %username,
-                                "Failed to clear Last.fm session key"
-                            );
-                            std::process::exit(1);
-                        }
-                    },
-                    Ok(None) => {
-                        tracing::error!(username = %username, "User not found");
-                        std::process::exit(1);
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, username = %username, "Database error");
-                        std::process::exit(1);
-                    }
-                }
-            }
-            LastfmCommands::Link { username, token } => {
-                // Check if Last.fm is configured
-                let api_key = std::env::var("LASTFM_API_KEY").unwrap_or_default();
-                let api_secret = std::env::var("LASTFM_API_SECRET").unwrap_or_default();
-
-                let Some(client) = LastFmClient::new(api_key.clone(), api_secret) else {
-                    eprintln!("Error: Last.fm integration is not configured.");
-                    eprintln!(
-                        "Please set LASTFM_API_KEY and LASTFM_API_SECRET environment variables."
-                    );
-                    std::process::exit(1);
-                };
-
-                // Find user first
-                let repo = UserRepository::new(pool);
-                let user = match repo.find_by_username(&username) {
-                    Ok(Some(user)) => user,
-                    Ok(None) => {
-                        eprintln!("Error: User '{username}' not found.");
-                        std::process::exit(1);
-                    }
-                    Err(e) => {
-                        eprintln!("Error finding user: {e}");
-                        std::process::exit(1);
-                    }
-                };
-
-                let token = token.unwrap_or_else(|| {
-                    println!("To link your Last.fm account, please visit:");
-                    println!(
-                        "http://www.last.fm/api/auth/?api_key={}&cb=http://localhost:8080/callback",
-                        client.api_key()
-                    );
-                    println!(
-                        "\nAfter approving access, you will be redirected to a URL (or see a token)."
-                    );
-                    println!("Please paste the 'token' parameter from the URL here:");
-
-                    let mut input = String::new();
-                    if std::io::stdin().read_line(&mut input).is_err() {
-                        eprintln!("Error reading input");
-                        std::process::exit(1);
-                    }
-                    let trimmed = input.trim();
-
-                    if trimmed.is_empty() {
-                        eprintln!("Operation cancelled.");
-                        std::process::exit(1);
-                    }
-                    trimmed.to_string()
-                });
-
-                println!("Exchanging token for session...");
-                match client.get_session(&token).await {
-                    Ok(session) => {
-                        println!(
-                            "Successfully authenticated as Last.fm user: {}",
-                            session.name
-                        );
-                        match repo.set_lastfm_session_key(user.id, Some(&session.key)) {
-                            Ok(_) => println!("Last.fm session linked successfully!"),
-                            Err(e) => eprintln!("Failed to save session key: {e}"),
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to get session from Last.fm: {e}");
-                        std::process::exit(1);
-                    }
-                }
-            }
-            LastfmCommands::Debug { artist } => {
-                let api_key = std::env::var("LASTFM_API_KEY").unwrap_or_default();
-                let api_secret = std::env::var("LASTFM_API_SECRET").unwrap_or_default();
-
-                let Some(client) = LastFmClient::new(api_key, api_secret) else {
-                    eprintln!("Error: Last.fm integration is not configured.");
-                    eprintln!(
-                        "Please set LASTFM_API_KEY and LASTFM_API_SECRET environment variables."
-                    );
-                    std::process::exit(1);
-                };
-
-                println!("Querying Last.fm for artist: '{artist}'");
-                match client.get_artist_info(&artist).await {
-                    Ok(Some(info)) => {
-                        println!("Found artist: {}", info.name);
-                        println!("URL: {:?}", info.url);
-                        println!("MBID: {:?}", info.musicbrainz_id);
-                        println!("Images:");
-                        for img in &info.image {
-                            println!("  - [{}] {}", img.size, img.url);
-                            if img.url.contains("2a96cbd8b46e442fc41c2b86b821562f") {
-                                println!(
-                                    "    ^ WARNING: This hash is known to be a placeholder star image!"
-                                );
-                            }
-                        }
-                    }
-                    Ok(None) => {
-                        println!("Artist not found on Last.fm");
-                    }
-                    Err(e) => {
-                        eprintln!("Error querying Last.fm: {e}");
-                        std::process::exit(1);
-                    }
-                }
-            }
-        },
+        }
         Some(Commands::Scan { folder, full }) => {
-            let scanner = Scanner::new(pool);
-            let mode = if full {
-                ScanMode::Full
-            } else {
-                ScanMode::Incremental
-            };
-
-            let result = folder.map_or_else(
-                || scanner.scan_all_with_options(None, mode),
-                |folder_id| scanner.scan_folder_by_id_with_mode(folder_id, mode),
-            );
-
-            match result {
-                Ok(stats) => {
-                    println!("\nScan complete:");
-                    println!("  Tracks found:     {}", stats.tracks_found);
-                    println!("  Tracks added:     {}", stats.tracks_added);
-                    println!("  Tracks updated:   {}", stats.tracks_updated);
-                    println!("  Tracks skipped:   {}", stats.tracks_skipped);
-                    println!("  Tracks removed:   {}", stats.tracks_removed);
-                    println!("  Tracks failed:    {}", stats.tracks_failed);
-                    println!("  Artists added:    {}", stats.artists_added);
-                    println!("  Albums added:     {}", stats.albums_added);
-                    println!("  Cover art saved:  {}", stats.cover_art_saved);
-                }
-                Err(e) => {
-                    tracing::event!(
-                        name: "scan.command.failed",
-                        tracing::Level::ERROR,
-                        error = %e,
-                        "scan command failed"
-                    );
-                    std::process::exit(1);
-                }
+            if let Err(e) = run_scan_command(&pool, folder, full) {
+                tracing::event!(
+                    name: "scan.command.failed",
+                    tracing::Level::ERROR,
+                    error = %e,
+                    "scan command failed"
+                );
+                std::process::exit(1);
             }
         }
         Some(Commands::Serve {

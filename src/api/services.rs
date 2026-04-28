@@ -618,17 +618,10 @@ impl MusicService {
     // Artist info with Last.fm cache
     // ========================================================================
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "Coordinates cache read/write and async Last.fm enrichment"
-    )]
     pub fn get_artist_info_with_cache(
         &self,
         artist_id: i32,
     ) -> Result<ArtistInfo2Response, MusicRepoError> {
-        use crate::lastfm::models::LastFmArtistCache;
-        use tokio::io::AsyncWriteExt;
-
         let Some(artist) = self.get_artist(artist_id)? else {
             return Ok(ArtistInfo2Response::empty());
         };
@@ -661,161 +654,13 @@ impl MusicService {
                 }
             }
             Ok(None) => {
-                if let Some(client) = &self.lastfm_client {
-                    let client = client.clone();
+                if self.lastfm_client.is_some() {
+                    let service = self.clone();
                     let artist_name = artist.name;
-                    let artist_id_copy = artist_id;
-                    let pool = self.pool.clone();
-
                     tokio::spawn(async move {
-                        match client.get_artist_info(&artist_name).await {
-                            Ok(Some(lastfm_artist)) => {
-                                let (mut small, mut medium, mut large) =
-                                    extract_image_urls(&lastfm_artist.image);
-
-                                if let Some(ref page_url) = lastfm_artist.url {
-                                    tracing::debug!(
-                                        artist = %artist_name,
-                                        url = %page_url,
-                                        "Attempting to scrape artist image from page"
-                                    );
-                                    match client.fetch_artist_image_from_page(page_url).await {
-                                        Ok(Some(scraped_url)) => {
-                                            tracing::debug!(
-                                                artist = %artist_name,
-                                                url = %scraped_url,
-                                                "Successfully scraped artist image"
-                                            );
-                                            large = Some(scraped_url);
-                                            if small.is_none() {
-                                                small = large.clone();
-                                            }
-                                            if medium.is_none() {
-                                                medium = large.clone();
-                                            }
-                                        }
-                                        Ok(None) => {
-                                            tracing::debug!(
-                                                artist = %artist_name,
-                                                "No image found on scraped page"
-                                            );
-                                        }
-                                        Err(e) => {
-                                            tracing::warn!(
-                                                error = %e,
-                                                artist = %artist_name,
-                                                "Failed to scrape artist page"
-                                            );
-                                        }
-                                    }
-                                }
-
-                                tracing::debug!(
-                                    artist = %artist_name,
-                                    small = ?small,
-                                    medium = ?medium,
-                                    large = ?large,
-                                    "Final Last.fm image URLs"
-                                );
-                                let bio = extract_biography(&lastfm_artist.bio);
-
-                                let similar_names: Vec<String> = lastfm_artist
-                                    .similar
-                                    .artist
-                                    .iter()
-                                    .map(|a| a.name.clone())
-                                    .collect();
-
-                                let cache = LastFmArtistCache {
-                                    artist_id: artist_id_copy,
-                                    biography: bio,
-                                    last_fm_url: lastfm_artist.url,
-                                    small_image_url: small,
-                                    medium_image_url: medium,
-                                    large_image_url: large.clone(),
-                                    similar_artists: similar_names,
-                                    updated_at: chrono::Local::now().naive_local(),
-                                };
-
-                                if let Err(e) =
-                                    ArtistInfoCacheRepository::new(pool.clone()).save_cache(&cache)
-                                {
-                                    tracing::warn!(error = %e, "Failed to save artist cache");
-                                } else {
-                                    tracing::debug!(artist = %artist_name, "Cached Last.fm artist info");
-                                }
-
-                                if let Some(image_url) = large {
-                                    if image_url.contains("2a96cbd8b46e442fc41c2b86b821562f") {
-                                        tracing::warn!(
-                                            artist = %artist_name,
-                                            url = %image_url,
-                                            "Skipping Last.fm placeholder image"
-                                        );
-                                        return;
-                                    }
-
-                                    let cover_art_dir = resolve_cover_art_dir();
-                                    if !cover_art_dir.exists() {
-                                        let _ = tokio::fs::create_dir_all(&cover_art_dir).await;
-                                    }
-
-                                    let ext = if image_url.to_lowercase().ends_with(".png") {
-                                        "png"
-                                    } else if image_url.to_lowercase().ends_with(".gif") {
-                                        "gif"
-                                    } else {
-                                        "jpg"
-                                    };
-
-                                    let cover_art_id = format!("artist-{artist_id_copy}");
-                                    let filename = format!("{cover_art_id}.{ext}");
-                                    let filepath = cover_art_dir.join(&filename);
-
-                                    if !filepath.exists() {
-                                        match reqwest::get(&image_url).await {
-                                            Ok(resp) if resp.status().is_success() => {
-                                                match resp.bytes().await {
-                                                    Ok(bytes) => {
-                                                        if let Ok(mut file) =
-                                                            tokio::fs::File::create(&filepath).await
-                                                            && file.write_all(&bytes).await.is_ok()
-                                                        {
-                                                            tracing::debug!(
-                                                                artist = %artist_name,
-                                                                "Downloaded artist image"
-                                                            );
-                                                            if let Err(e) =
-                                                                ArtistRepository::new(pool.clone())
-                                                                    .update_cover_art(
-                                                                        artist_id_copy,
-                                                                        Some(&cover_art_id),
-                                                                    )
-                                                            {
-                                                                tracing::warn!(error = %e, "Failed to update artist cover art");
-                                                            }
-                                                        }
-                                                    }
-                                                    Err(e) => {
-                                                        tracing::warn!(error = %e, "Failed to get image bytes");
-                                                    }
-                                                }
-                                            }
-                                            Ok(_) => {}
-                                            Err(e) => {
-                                                tracing::warn!(error = %e, "Failed to download artist image");
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            Ok(None) => {
-                                tracing::debug!(artist = %artist_name, "No Last.fm info found");
-                            }
-                            Err(e) => {
-                                tracing::warn!(error = %e, artist = %artist_name, "Failed to fetch Last.fm artist info");
-                            }
-                        }
+                        service
+                            .fetch_and_cache_artist_info(artist_id, artist_name)
+                            .await;
                     });
                 }
             }
@@ -825,6 +670,159 @@ impl MusicService {
         }
 
         Ok(response)
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Coordinates async Last.fm API call, image scraping, caching, and cover art download"
+    )]
+    async fn fetch_and_cache_artist_info(&self, artist_id: i32, artist_name: String) {
+        use crate::lastfm::models::LastFmArtistCache;
+        use tokio::io::AsyncWriteExt;
+
+        let Some(client) = self.lastfm_client.clone() else {
+            return;
+        };
+        let pool = self.pool.clone();
+
+        match client.get_artist_info(&artist_name).await {
+            Ok(Some(lastfm_artist)) => {
+                let (mut small, mut medium, mut large) = extract_image_urls(&lastfm_artist.image);
+
+                if let Some(ref page_url) = lastfm_artist.url {
+                    tracing::debug!(
+                        artist = %artist_name,
+                        url = %page_url,
+                        "Attempting to scrape artist image from page"
+                    );
+                    match client.fetch_artist_image_from_page(page_url).await {
+                        Ok(Some(scraped_url)) => {
+                            tracing::debug!(
+                                artist = %artist_name,
+                                url = %scraped_url,
+                                "Successfully scraped artist image"
+                            );
+                            large = Some(scraped_url);
+                            if small.is_none() {
+                                small = large.clone();
+                            }
+                            if medium.is_none() {
+                                medium = large.clone();
+                            }
+                        }
+                        Ok(None) => {
+                            tracing::debug!(
+                                artist = %artist_name,
+                                "No image found on scraped page"
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                artist = %artist_name,
+                                "Failed to scrape artist page"
+                            );
+                        }
+                    }
+                }
+
+                tracing::debug!(
+                    artist = %artist_name,
+                    small = ?small,
+                    medium = ?medium,
+                    large = ?large,
+                    "Final Last.fm image URLs"
+                );
+                let bio = extract_biography(&lastfm_artist.bio);
+
+                let similar_names: Vec<String> = lastfm_artist
+                    .similar
+                    .artist
+                    .iter()
+                    .map(|a| a.name.clone())
+                    .collect();
+
+                let cache = LastFmArtistCache {
+                    artist_id,
+                    biography: bio,
+                    last_fm_url: lastfm_artist.url,
+                    small_image_url: small,
+                    medium_image_url: medium,
+                    large_image_url: large.clone(),
+                    similar_artists: similar_names,
+                    updated_at: chrono::Local::now().naive_local(),
+                };
+
+                if let Err(e) = ArtistInfoCacheRepository::new(pool.clone()).save_cache(&cache) {
+                    tracing::warn!(error = %e, "Failed to save artist cache");
+                } else {
+                    tracing::debug!(artist = %artist_name, "Cached Last.fm artist info");
+                }
+
+                if let Some(image_url) = large {
+                    if image_url.contains("2a96cbd8b46e442fc41c2b86b821562f") {
+                        tracing::warn!(
+                            artist = %artist_name,
+                            url = %image_url,
+                            "Skipping Last.fm placeholder image"
+                        );
+                        return;
+                    }
+
+                    let cover_art_dir = resolve_cover_art_dir();
+                    if !cover_art_dir.exists() {
+                        let _ = tokio::fs::create_dir_all(&cover_art_dir).await;
+                    }
+
+                    let ext = if image_url.to_lowercase().ends_with(".png") {
+                        "png"
+                    } else if image_url.to_lowercase().ends_with(".gif") {
+                        "gif"
+                    } else {
+                        "jpg"
+                    };
+
+                    let cover_art_id = format!("artist-{artist_id}");
+                    let filename = format!("{cover_art_id}.{ext}");
+                    let filepath = cover_art_dir.join(&filename);
+
+                    if !filepath.exists() {
+                        match reqwest::get(&image_url).await {
+                            Ok(resp) if resp.status().is_success() => match resp.bytes().await {
+                                Ok(bytes) => {
+                                    if let Ok(mut file) = tokio::fs::File::create(&filepath).await
+                                        && file.write_all(&bytes).await.is_ok()
+                                    {
+                                        tracing::debug!(
+                                            artist = %artist_name,
+                                            "Downloaded artist image"
+                                        );
+                                        if let Err(e) = ArtistRepository::new(pool.clone())
+                                            .update_cover_art(artist_id, Some(&cover_art_id))
+                                        {
+                                            tracing::warn!(error = %e, "Failed to update artist cover art");
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!(error = %e, "Failed to get image bytes");
+                                }
+                            },
+                            Ok(_) => {}
+                            Err(e) => {
+                                tracing::warn!(error = %e, "Failed to download artist image");
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(None) => {
+                tracing::debug!(artist = %artist_name, "No Last.fm info found");
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, artist = %artist_name, "Failed to fetch Last.fm artist info");
+            }
+        }
     }
 
     pub fn get_artist_info_non_id3_with_cache(

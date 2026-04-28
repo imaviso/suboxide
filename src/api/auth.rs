@@ -64,8 +64,8 @@ pub struct AuthStateHandle(Arc<UserService>);
 impl AuthStateHandle {
     /// Create a shared state handle.
     #[must_use]
-    pub const fn new(state: Arc<UserService>) -> Self {
-        Self(state)
+    pub fn new(state: UserService) -> Self {
+        Self(Arc::new(state))
     }
 }
 
@@ -366,9 +366,12 @@ where
 
             let user = auth_state
                 .find_user_by_api_key(api_key)
-                .map_err(|error| AuthError {
-                    error: ApiError::Generic(error.to_string()),
-                    format,
+                .map_err(|error| {
+                    tracing::warn!(error = ?error, "user lookup by API key failed");
+                    AuthError {
+                        error: ApiError::Generic(error.to_string()),
+                        format,
+                    }
                 })?
                 .ok_or(AuthError {
                     error: ApiError::InvalidApiKey,
@@ -397,9 +400,12 @@ where
             // Find user by username
             let user = auth_state
                 .find_user(&params.u)
-                .map_err(|error| AuthError {
-                    error: ApiError::Generic(error.to_string()),
-                    format,
+                .map_err(|error| {
+                    tracing::warn!(error = ?error, "user lookup by username failed");
+                    AuthError {
+                        error: ApiError::Generic(error.to_string()),
+                        format,
+                    }
                 })?
                 .ok_or(AuthError {
                     error: ApiError::WrongCredentials,

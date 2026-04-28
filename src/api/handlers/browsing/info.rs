@@ -77,7 +77,9 @@ pub async fn get_album_info2(
             return error_response(auth.format, &ApiError::NotFound("Album".into()))
                 .into_response();
         }
-        Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
     // Create response with available data from the album
@@ -128,7 +130,9 @@ pub async fn get_album_info(
             return error_response(auth.format, &ApiError::NotFound("Album".into()))
                 .into_response();
         }
-        Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
     // Use AlbumInfoResponse which is the same for ID3 and non-ID3
@@ -209,7 +213,9 @@ pub async fn get_lyrics_by_song_id(
             return error_response(auth.format, &ApiError::NotFound("Song not found".into()))
                 .into_response();
         }
-        Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
     // Extract lyrics from the audio file

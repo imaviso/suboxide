@@ -28,7 +28,9 @@ pub async fn get_album(
             return error_response(auth.format, &ApiError::NotFound("Album".into()))
                 .into_response();
         }
-        Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
     let album_starred_at = match auth
@@ -93,7 +95,9 @@ pub async fn get_artist(
             return error_response(auth.format, &ApiError::NotFound("Artist".into()))
                 .into_response();
         }
-        Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
     let artist_starred_at = match auth
@@ -156,7 +160,9 @@ pub async fn get_song(
         Ok(None) => {
             return error_response(auth.format, &ApiError::NotFound("Song".into())).into_response();
         }
-        Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
     let starred_at = match auth.music().get_starred_at_for_song(auth.user.id, song_id) {

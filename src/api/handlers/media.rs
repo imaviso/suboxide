@@ -103,7 +103,9 @@ pub async fn stream(
             return error_response(auth.format, &ApiError::NotFound("Song not found".into()))
                 .into_response();
         }
-        Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
     // Check that user has stream permission
@@ -245,7 +247,9 @@ pub async fn download(
             return error_response(auth.format, &ApiError::NotFound("Song not found".into()))
                 .into_response();
         }
-        Err(e) => return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
     };
 
     // Check that user has download permission

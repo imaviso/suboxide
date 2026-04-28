@@ -1892,7 +1892,7 @@ fn transform_json_keys(json: &str) -> String {
         |_| json.to_string(),
         |value| {
             let transformed = transform_value(value);
-            serde_json::to_string(&transformed).expect("transformed JSON value must serialize")
+            serde_json::to_string(&transformed).unwrap_or_else(|_| json.to_string())
         },
     )
 }
