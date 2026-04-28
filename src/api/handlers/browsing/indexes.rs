@@ -9,10 +9,8 @@ use crate::api::error::ApiError;
 use crate::api::response::{SubsonicResponse, error_response};
 use crate::models::music::{
     ArtistID3Response, ArtistResponse, ArtistsID3Response, IndexID3Response, IndexResponse,
-    IndexesResponse, MusicFolderResponse,
+    IndexesResponse, MusicFolderResponse, saturating_i64_to_i32,
 };
-
-use crate::api::services::saturating_i64_to_i32;
 
 /// GET/POST /rest/getMusicFolders[.view]
 ///

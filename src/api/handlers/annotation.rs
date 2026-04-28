@@ -6,10 +6,9 @@ use crate::api::auth::SubsonicContext;
 use crate::api::error::ApiError;
 
 use crate::api::response::{SubsonicResponse, error_response};
-use crate::api::services::saturating_i64_to_i32;
 use crate::models::music::{
     NowPlayingEntryResponse, NowPlayingResponse, Starred2Response, StarredAlbumID3Response,
-    StarredArtistID3Response, StarredChildResponse,
+    StarredArtistID3Response, StarredChildResponse, saturating_i64_to_i32,
 };
 
 /// Query parameters for star/unstar.

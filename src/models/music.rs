@@ -12,6 +12,48 @@ pub fn format_subsonic_datetime(datetime: &NaiveDateTime) -> String {
     datetime.format(SUBSONIC_DATETIME_FORMAT).to_string()
 }
 
+/// Saturating cast from `i64` to `i32` for Subsonic response fields.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "Subsonic count fields are signed 32-bit values"
+)]
+#[must_use]
+pub fn saturating_i64_to_i32(value: i64) -> i32 {
+    if value > i64::from(i32::MAX) {
+        i32::MAX
+    } else if value < i64::from(i32::MIN) {
+        i32::MIN
+    } else {
+        value as i32
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::saturating_i64_to_i32;
+
+    #[test]
+    fn saturating_i64_to_i32_clamps_positive_overflow() {
+        assert_eq!(saturating_i64_to_i32(i64::MAX), i32::MAX);
+        assert_eq!(saturating_i64_to_i32(i64::from(i32::MAX) + 1), i32::MAX);
+    }
+
+    #[test]
+    fn saturating_i64_to_i32_clamps_negative_overflow() {
+        assert_eq!(saturating_i64_to_i32(i64::MIN), i32::MIN);
+        assert_eq!(saturating_i64_to_i32(i64::from(i32::MIN) - 1), i32::MIN);
+    }
+
+    #[test]
+    fn saturating_i64_to_i32_passes_through_in_range() {
+        assert_eq!(saturating_i64_to_i32(0), 0);
+        assert_eq!(saturating_i64_to_i32(-1), -1);
+        assert_eq!(saturating_i64_to_i32(42), 42);
+        assert_eq!(saturating_i64_to_i32(i64::from(i32::MAX)), i32::MAX);
+        assert_eq!(saturating_i64_to_i32(i64::from(i32::MIN)), i32::MIN);
+    }
+}
+
 /// A music folder (library root directory).
 #[derive(Debug, Clone)]
 pub struct MusicFolder {

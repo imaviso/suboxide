@@ -8,6 +8,7 @@ use axum::response::{IntoResponse, Response};
 use thiserror::Error;
 
 use super::response::{Format, error_response};
+use crate::db::{MusicRepoError, MusicRepoErrorKind, UserRepoError, UserRepoErrorKind};
 
 /// Subsonic API error codes.
 /// These are defined by the Subsonic API specification.
@@ -105,6 +106,28 @@ impl ApiError {
     #[must_use]
     pub fn message(&self) -> String {
         self.to_string()
+    }
+}
+
+impl From<MusicRepoError> for ApiError {
+    fn from(error: MusicRepoError) -> Self {
+        match error.kind() {
+            MusicRepoErrorKind::NotFound => Self::NotFound(error.message().to_string()),
+            MusicRepoErrorKind::AlreadyExists
+            | MusicRepoErrorKind::Database
+            | MusicRepoErrorKind::Pool => Self::Generic(error.to_string()),
+        }
+    }
+}
+
+impl From<UserRepoError> for ApiError {
+    fn from(error: UserRepoError) -> Self {
+        match error.kind() {
+            UserRepoErrorKind::NotFound => Self::NotFound(error.message().to_string()),
+            UserRepoErrorKind::UsernameExists
+            | UserRepoErrorKind::Database
+            | UserRepoErrorKind::Pool => Self::Generic(error.to_string()),
+        }
     }
 }
 
