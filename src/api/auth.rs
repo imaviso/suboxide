@@ -21,8 +21,6 @@
 //! - Form body (POST requests with application/x-www-form-urlencoded)
 //! - Or a combination of both (query params take precedence)
 
-use std::sync::Arc;
-
 use axum::{
     Form,
     body::Body,
@@ -35,55 +33,9 @@ use serde::Deserialize;
 use super::error::ApiError;
 use super::response::{Format, error_response};
 use super::services::{MusicLibrary, RemoteSessions, Users};
-use crate::db::{DbPool, UserRepoError};
+use crate::db::DbPool;
 use crate::models::User;
 use crate::scanner::ScanStateHandle;
-
-/// User lookup required by authentication.
-pub trait AuthState: Send + Sync + 'static {
-    /// Find a user by username.
-    fn find_user(&self, username: &str) -> Result<Option<User>, UserRepoError>;
-    /// Find a user by API key.
-    fn find_user_by_api_key(&self, api_key: &str) -> Result<Option<User>, UserRepoError>;
-}
-
-impl AuthState for Users {
-    fn find_user(&self, username: &str) -> Result<Option<User>, UserRepoError> {
-        Self::find_user(self, username)
-    }
-
-    fn find_user_by_api_key(&self, api_key: &str) -> Result<Option<User>, UserRepoError> {
-        Self::find_user_by_api_key(self, api_key)
-    }
-}
-
-/// Shared authentication state handle.
-#[derive(Clone)]
-pub struct AuthStateHandle(Arc<Users>);
-
-impl AuthStateHandle {
-    /// Create a shared state handle.
-    #[must_use]
-    pub fn new(state: Users) -> Self {
-        Self(Arc::new(state))
-    }
-}
-
-impl std::fmt::Debug for AuthStateHandle {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("AuthStateHandle")
-            .field(&"<dyn AuthState>")
-            .finish()
-    }
-}
-
-impl std::ops::Deref for AuthStateHandle {
-    type Target = Users;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
 
 /// Common query parameters for all Subsonic API requests.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -266,7 +218,6 @@ impl IntoResponse for AuthError {
 impl<S> FromRequest<S> for SubsonicAuth
 where
     S: Send + Sync,
-    AuthStateHandle: FromRef<S>,
     MusicLibrary: FromRef<S>,
     Users: FromRef<S>,
     RemoteSessions: FromRef<S>,
@@ -342,8 +293,7 @@ where
             });
         }
 
-        // Get auth state
-        let auth_state = AuthStateHandle::from_ref(state);
+        let users = Users::from_ref(state);
 
         // Check for conflicting auth mechanisms
         if params.uses_api_key() && params.uses_user_auth() {
@@ -364,7 +314,7 @@ where
                 });
             }
 
-            let user = auth_state
+            let user = users
                 .find_user_by_api_key(api_key)
                 .map_err(|error| {
                     tracing::warn!(error = ?error, "user lookup by API key failed");
@@ -398,7 +348,7 @@ where
             }
 
             // Find user by username
-            let user = auth_state
+            let user = users
                 .find_user(&params.u)
                 .map_err(|error| {
                     tracing::warn!(error = ?error, "user lookup by username failed");

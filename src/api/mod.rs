@@ -8,12 +8,10 @@ pub mod router;
 pub mod services;
 
 #[doc(inline)]
-pub use auth::{AuthState, AuthStateHandle, SubsonicAuth};
+pub use auth::SubsonicAuth;
 #[doc(inline)]
 pub use error::ApiError;
 #[doc(inline)]
 pub use response::{Format, SubsonicResponse};
 #[doc(inline)]
 pub use router::SubsonicRouterExt;
-#[doc(inline)]
-pub use services::{MusicLibrary, RemoteSessions, Users};

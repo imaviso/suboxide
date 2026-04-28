@@ -74,11 +74,6 @@ impl ScanStateHandle {
         self.0.get_current_folder()
     }
 
-    /// Mark the scan as complete.
-    pub fn finish(&self) {
-        self.0.finish();
-    }
-
     /// Reset the count to 0.
     pub fn reset_count(&self) {
         self.0.reset_count();
@@ -115,8 +110,8 @@ impl ScanStateHandle {
         self.0.set_current_folder(folder);
     }
 
-    /// Attempt to start a scan. Returns `Some(ScanGuard)` if no scan is running.
-    /// The guard resets state on acquisition and calls `finish()` on drop.
+    /// Attempt to start a scan.
+    /// The guard resets state and finalizes it on drop.
     #[must_use]
     pub fn try_start(&self) -> Option<ScanGuard<'static>> {
         self.0.try_start_owned(Arc::clone(&self.0))
@@ -128,18 +123,21 @@ impl ScanStateHandle {
 /// Acquired via `ScanState::try_start` or `ScanStateHandle::try_start`.
 /// Resets counters on creation and marks the scan as finished on drop.
 #[derive(Debug)]
-pub enum ScanGuard<'a> {
-    /// Guard borrowed directly from a scan state.
+pub struct ScanGuard<'a> {
+    inner: ScanGuardInner<'a>,
+}
+
+#[derive(Debug)]
+enum ScanGuardInner<'a> {
     Borrowed(&'a ScanState, u64),
-    /// Guard owned by a clonable scan-state handle.
     Owned(Arc<ScanState>, u64),
 }
 
 impl Drop for ScanGuard<'_> {
     fn drop(&mut self) {
-        match self {
-            Self::Borrowed(state, generation) => state.finish_generation(*generation),
-            Self::Owned(state, generation) => state.finish_generation(*generation),
+        match &self.inner {
+            ScanGuardInner::Borrowed(state, generation) => state.finish_generation(*generation),
+            ScanGuardInner::Owned(state, generation) => state.finish_generation(*generation),
         }
     }
 }
@@ -205,7 +203,7 @@ impl ScanState {
     pub fn get_phase(&self) -> ScanPhase {
         self.phase
             .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .unwrap_or_else(|_| panic!("scan phase lock poisoned"))
             .clone()
     }
 
@@ -213,42 +211,34 @@ impl ScanState {
     pub fn get_current_folder(&self) -> Option<String> {
         self.current_folder
             .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .unwrap_or_else(|_| panic!("scan folder lock poisoned"))
             .clone()
     }
 
-    /// Try to start a scan. Returns `Some(ScanGuard)` if no scan is running.
-    /// The guard resets state on acquisition and calls `finish()` on drop.
+    /// Try to start a scan.
+    /// The guard resets state and finalizes it on drop.
     #[must_use]
     pub fn try_start(&self) -> Option<ScanGuard<'_>> {
         self.try_start_borrowed()
     }
 
-    /// Mark the scan as complete.
-    pub fn finish(&self) {
-        let _transition = self
-            .transition
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        self.clear_active_fields();
-        self.scanning.store(false, Ordering::SeqCst);
-    }
-
     fn try_start_borrowed(&self) -> Option<ScanGuard<'_>> {
-        self.try_start_generation()
-            .map(|generation| ScanGuard::Borrowed(self, generation))
+        self.try_start_generation().map(|generation| ScanGuard {
+            inner: ScanGuardInner::Borrowed(self, generation),
+        })
     }
 
     fn try_start_owned(&self, state: Arc<Self>) -> Option<ScanGuard<'static>> {
-        self.try_start_generation()
-            .map(|generation| ScanGuard::Owned(state, generation))
+        self.try_start_generation().map(|generation| ScanGuard {
+            inner: ScanGuardInner::Owned(state, generation),
+        })
     }
 
     fn try_start_generation(&self) -> Option<u64> {
         let _transition = self
             .transition
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+            .unwrap_or_else(|_| panic!("scan transition lock poisoned"));
         if self.scanning.load(Ordering::SeqCst) {
             return None;
         }
@@ -263,7 +253,7 @@ impl ScanState {
         let _transition = self
             .transition
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+            .unwrap_or_else(|_| panic!("scan transition lock poisoned"));
         if self.generation.load(Ordering::SeqCst) != generation {
             return;
         }
@@ -276,11 +266,11 @@ impl ScanState {
         *self
             .phase
             .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = ScanPhase::Idle;
+            .unwrap_or_else(|_| panic!("scan phase lock poisoned")) = ScanPhase::Idle;
         *self
             .current_folder
             .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            .unwrap_or_else(|_| panic!("scan folder lock poisoned")) = None;
     }
 
     /// Reset the count to 0.
@@ -293,7 +283,7 @@ impl ScanState {
         let _transition = self
             .transition
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+            .unwrap_or_else(|_| panic!("scan transition lock poisoned"));
         self.reset_progress();
     }
 
@@ -323,7 +313,7 @@ impl ScanState {
         *self
             .phase
             .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = phase;
+            .unwrap_or_else(|_| panic!("scan phase lock poisoned")) = phase;
     }
 
     /// Set the current folder being scanned.
@@ -331,7 +321,7 @@ impl ScanState {
         *self
             .current_folder
             .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = folder;
+            .unwrap_or_else(|_| panic!("scan folder lock poisoned")) = folder;
     }
 }
 
@@ -348,24 +338,24 @@ mod tests {
     }
 
     #[test]
-    fn scan_state_tracks_progress_then_resets_on_finish() {
+    fn scan_state_tracks_progress_until_guard_drop() {
         let state = ScanState::new();
 
-        let _guard = state.try_start().expect("should start");
-        assert!(state.try_start().is_none());
-        state.set_total(10);
-        state.set_phase(ScanPhase::Processing);
-        state.set_current_folder(Some("Music/A".into()));
-        assert_eq!(state.increment_count(), 1);
-        assert_eq!(state.increment_count(), 2);
+        {
+            let _guard = state.try_start().expect("should start");
+            assert!(state.try_start().is_none());
+            state.set_total(10);
+            state.set_phase(ScanPhase::Processing);
+            state.set_current_folder(Some("Music/A".into()));
+            assert_eq!(state.increment_count(), 1);
+            assert_eq!(state.increment_count(), 2);
 
-        assert!(state.is_scanning());
-        assert_eq!(state.get_count(), 2);
-        assert_eq!(state.get_total(), 10);
-        assert_eq!(state.get_phase(), ScanPhase::Processing);
-        assert_eq!(state.get_current_folder().as_deref(), Some("Music/A"));
-
-        state.finish();
+            assert!(state.is_scanning());
+            assert_eq!(state.get_count(), 2);
+            assert_eq!(state.get_total(), 10);
+            assert_eq!(state.get_phase(), ScanPhase::Processing);
+            assert_eq!(state.get_current_folder().as_deref(), Some("Music/A"));
+        }
 
         assert!(!state.is_scanning());
         assert_eq!(state.get_count(), 2);

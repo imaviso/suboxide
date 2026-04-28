@@ -24,17 +24,19 @@ const LASTFM_PLACEHOLDER_IMAGE_MARKER: &str = "2a96cbd8b46e442fc41c2b86b821562f"
 #[derive(Debug, thiserror::Error)]
 enum ArtistImageError {
     #[error("failed to create cover-art directory: {0}")]
-    CreateDirectory(std::io::Error),
+    CreateDirectory(#[source] std::io::Error),
     #[error("failed to download artist image: {0}")]
-    Download(reqwest::Error),
+    Download(#[source] reqwest::Error),
     #[error("artist image request returned {0}")]
     HttpStatus(reqwest::StatusCode),
     #[error("failed to read artist image bytes: {0}")]
-    ReadBytes(reqwest::Error),
+    ReadBytes(#[source] reqwest::Error),
     #[error("failed to create artist image file: {0}")]
-    CreateFile(std::io::Error),
+    CreateFile(#[source] std::io::Error),
     #[error("failed to write artist image file: {0}")]
-    WriteFile(std::io::Error),
+    WriteFile(#[source] std::io::Error),
+    #[error("failed to check artist image file: {0}")]
+    CheckFile(#[source] std::io::Error),
 }
 
 fn is_lastfm_placeholder_image(url: &str) -> bool {
@@ -52,17 +54,22 @@ async fn download_artist_image(
         .await
         .map_err(ArtistImageError::CreateDirectory)?;
 
-    let extension = if image_url.to_lowercase().ends_with(".png") {
-        "png"
-    } else if image_url.to_lowercase().ends_with(".gif") {
-        "gif"
-    } else {
-        "jpg"
-    };
+    let image_extension = std::path::Path::new(image_url).extension();
+    let extension =
+        if image_extension.is_some_and(|extension| extension.eq_ignore_ascii_case("png")) {
+            "png"
+        } else if image_extension.is_some_and(|extension| extension.eq_ignore_ascii_case("gif")) {
+            "gif"
+        } else {
+            "jpg"
+        };
 
     let cover_art_id = format!("artist-{artist_id}");
     let filepath = cover_art_dir.join(format!("{cover_art_id}.{extension}"));
-    if filepath.exists() {
+    if tokio::fs::try_exists(&filepath)
+        .await
+        .map_err(ArtistImageError::CheckFile)?
+    {
         return Ok(cover_art_id);
     }
 
@@ -124,7 +131,7 @@ impl MusicLibrary {
     // Music folders
     // ========================================================================
 
-    pub fn get_music_folders(
+    pub(in crate::api) fn get_music_folders(
         &self,
     ) -> Result<Vec<crate::models::music::MusicFolder>, MusicRepoError> {
         MusicFolderRepository::new(self.pool.clone()).find_enabled()
@@ -134,23 +141,31 @@ impl MusicLibrary {
     // Artists
     // ========================================================================
 
-    pub fn get_artists(&self) -> Result<Vec<Artist>, MusicRepoError> {
+    pub(in crate::api) fn get_artists(&self) -> Result<Vec<Artist>, MusicRepoError> {
         ArtistRepository::new(self.pool.clone()).find_all()
     }
 
-    pub fn get_artists_last_modified(&self) -> Result<Option<NaiveDateTime>, MusicRepoError> {
+    pub(in crate::api) fn get_artists_last_modified(
+        &self,
+    ) -> Result<Option<NaiveDateTime>, MusicRepoError> {
         ArtistRepository::new(self.pool.clone()).get_last_modified()
     }
 
-    pub fn get_artist_album_count(&self, artist_id: i32) -> Result<i64, MusicRepoError> {
+    pub(in crate::api) fn get_artist_album_count(
+        &self,
+        artist_id: i32,
+    ) -> Result<i64, MusicRepoError> {
         ArtistRepository::new(self.pool.clone()).count_albums(artist_id)
     }
 
-    pub fn get_artist(&self, artist_id: i32) -> Result<Option<Artist>, MusicRepoError> {
+    pub(in crate::api) fn get_artist(
+        &self,
+        artist_id: i32,
+    ) -> Result<Option<Artist>, MusicRepoError> {
         ArtistRepository::new(self.pool.clone()).find_by_id(artist_id)
     }
 
-    pub fn get_artist_album_counts_batch(
+    pub(in crate::api) fn get_artist_album_counts_batch(
         &self,
         artist_ids: &[i32],
     ) -> Result<HashMap<i32, i64>, MusicRepoError> {
@@ -161,15 +176,18 @@ impl MusicLibrary {
     // Albums
     // ========================================================================
 
-    pub fn get_album(&self, album_id: i32) -> Result<Option<Album>, MusicRepoError> {
+    pub(in crate::api) fn get_album(&self, album_id: i32) -> Result<Option<Album>, MusicRepoError> {
         AlbumRepository::new(self.pool.clone()).find_by_id(album_id)
     }
 
-    pub fn get_albums_by_artist(&self, artist_id: i32) -> Result<Vec<Album>, MusicRepoError> {
+    pub(in crate::api) fn get_albums_by_artist(
+        &self,
+        artist_id: i32,
+    ) -> Result<Vec<Album>, MusicRepoError> {
         AlbumRepository::new(self.pool.clone()).find_by_artist(artist_id)
     }
 
-    pub fn get_albums_alphabetical_by_name(
+    pub(in crate::api) fn get_albums_alphabetical_by_name(
         &self,
         offset: i64,
         limit: i64,
@@ -177,7 +195,7 @@ impl MusicLibrary {
         AlbumRepository::new(self.pool.clone()).find_alphabetical_by_name(offset, limit)
     }
 
-    pub fn get_albums_alphabetical_by_artist(
+    pub(in crate::api) fn get_albums_alphabetical_by_artist(
         &self,
         offset: i64,
         limit: i64,
@@ -185,11 +203,15 @@ impl MusicLibrary {
         AlbumRepository::new(self.pool.clone()).find_alphabetical_by_artist(offset, limit)
     }
 
-    pub fn get_albums_newest(&self, offset: i64, limit: i64) -> Result<Vec<Album>, MusicRepoError> {
+    pub(in crate::api) fn get_albums_newest(
+        &self,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Vec<Album>, MusicRepoError> {
         AlbumRepository::new(self.pool.clone()).find_newest(offset, limit)
     }
 
-    pub fn get_albums_frequent(
+    pub(in crate::api) fn get_albums_frequent(
         &self,
         offset: i64,
         limit: i64,
@@ -197,15 +219,22 @@ impl MusicLibrary {
         AlbumRepository::new(self.pool.clone()).find_frequent(offset, limit)
     }
 
-    pub fn get_albums_recent(&self, offset: i64, limit: i64) -> Result<Vec<Album>, MusicRepoError> {
+    pub(in crate::api) fn get_albums_recent(
+        &self,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Vec<Album>, MusicRepoError> {
         AlbumRepository::new(self.pool.clone()).find_recent(offset, limit)
     }
 
-    pub fn get_albums_random(&self, limit: i64) -> Result<Vec<Album>, MusicRepoError> {
+    pub(in crate::api) fn get_albums_random(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<Album>, MusicRepoError> {
         AlbumRepository::new(self.pool.clone()).find_random(limit)
     }
 
-    pub fn get_albums_by_year(
+    pub(in crate::api) fn get_albums_by_year(
         &self,
         from_year: i32,
         to_year: i32,
@@ -216,7 +245,7 @@ impl MusicLibrary {
             .find_by_year_range(from_year, to_year, offset, limit)
     }
 
-    pub fn get_albums_by_genre(
+    pub(in crate::api) fn get_albums_by_genre(
         &self,
         genre: &str,
         offset: i64,
@@ -225,7 +254,7 @@ impl MusicLibrary {
         AlbumRepository::new(self.pool.clone()).find_by_genre(genre, offset, limit)
     }
 
-    pub fn get_albums_starred(
+    pub(in crate::api) fn get_albums_starred(
         &self,
         user_id: i32,
         offset: i64,
@@ -236,7 +265,7 @@ impl MusicLibrary {
         Ok(starred.into_iter().map(|(album, _)| album).collect())
     }
 
-    pub fn get_albums_highest(
+    pub(in crate::api) fn get_albums_highest(
         &self,
         user_id: i32,
         offset: i64,
@@ -262,11 +291,11 @@ impl MusicLibrary {
     // Songs
     // ========================================================================
 
-    pub fn get_song(&self, song_id: i32) -> Result<Option<Song>, MusicRepoError> {
+    pub(in crate::api) fn get_song(&self, song_id: i32) -> Result<Option<Song>, MusicRepoError> {
         SongRepository::new(self.pool.clone()).find_by_id(song_id)
     }
 
-    pub fn find_song_by_artist_and_title(
+    pub(in crate::api) fn find_song_by_artist_and_title(
         &self,
         artist: &str,
         title: &str,
@@ -274,11 +303,14 @@ impl MusicLibrary {
         SongRepository::new(self.pool.clone()).find_by_artist_and_title(artist, title)
     }
 
-    pub fn get_songs_by_album(&self, album_id: i32) -> Result<Vec<Song>, MusicRepoError> {
+    pub(in crate::api) fn get_songs_by_album(
+        &self,
+        album_id: i32,
+    ) -> Result<Vec<Song>, MusicRepoError> {
         SongRepository::new(self.pool.clone()).find_by_album(album_id)
     }
 
-    pub fn get_random_songs(
+    pub(in crate::api) fn get_random_songs(
         &self,
         size: i64,
         genre: Option<&str>,
@@ -295,7 +327,7 @@ impl MusicLibrary {
         )
     }
 
-    pub fn get_songs_by_genre(
+    pub(in crate::api) fn get_songs_by_genre(
         &self,
         genre: &str,
         count: i64,
@@ -305,7 +337,7 @@ impl MusicLibrary {
         SongRepository::new(self.pool.clone()).find_by_genre(genre, count, offset, music_folder_id)
     }
 
-    pub fn get_similar_songs_by_artist(
+    pub(in crate::api) fn get_similar_songs_by_artist(
         &self,
         artist_id: i32,
         exclude_song_id: i32,
@@ -318,7 +350,7 @@ impl MusicLibrary {
         )
     }
 
-    pub fn get_top_songs_by_artist_name(
+    pub(in crate::api) fn get_top_songs_by_artist_name(
         &self,
         artist_name: &str,
         limit: i64,
@@ -326,7 +358,10 @@ impl MusicLibrary {
         SongRepository::new(self.pool.clone()).find_top_by_artist_name(artist_name, limit)
     }
 
-    pub fn get_song_lyrics(&self, song_id: i32) -> Result<Vec<ExtractedLyrics>, MusicRepoError> {
+    pub(in crate::api) fn get_song_lyrics(
+        &self,
+        song_id: i32,
+    ) -> Result<Vec<ExtractedLyrics>, MusicRepoError> {
         let Some(song) = self.get_song(song_id)? else {
             return Ok(Vec::new());
         };
@@ -337,11 +372,11 @@ impl MusicLibrary {
     // Genres & search
     // ========================================================================
 
-    pub fn get_genres(&self) -> Result<Vec<(String, i64, i64)>, MusicRepoError> {
+    pub(in crate::api) fn get_genres(&self) -> Result<Vec<(String, i64, i64)>, MusicRepoError> {
         SongRepository::new(self.pool.clone()).get_genres()
     }
 
-    pub fn search_artists(
+    pub(in crate::api) fn search_artists(
         &self,
         query: &str,
         offset: i64,
@@ -350,7 +385,7 @@ impl MusicLibrary {
         ArtistRepository::new(self.pool.clone()).search(query, offset, limit)
     }
 
-    pub fn search_albums(
+    pub(in crate::api) fn search_albums(
         &self,
         query: &str,
         offset: i64,
@@ -359,7 +394,7 @@ impl MusicLibrary {
         AlbumRepository::new(self.pool.clone()).search(query, offset, limit)
     }
 
-    pub fn search_songs(
+    pub(in crate::api) fn search_songs(
         &self,
         query: &str,
         offset: i64,
@@ -372,58 +407,82 @@ impl MusicLibrary {
     // Starred
     // ========================================================================
 
-    pub fn star_artist(&self, user_id: i32, artist_id: i32) -> Result<(), MusicRepoError> {
+    pub(in crate::api) fn star_artist(
+        &self,
+        user_id: i32,
+        artist_id: i32,
+    ) -> Result<(), MusicRepoError> {
         StarredRepository::new(self.pool.clone()).star_artist(user_id, artist_id)
     }
 
-    pub fn star_album(&self, user_id: i32, album_id: i32) -> Result<(), MusicRepoError> {
+    pub(in crate::api) fn star_album(
+        &self,
+        user_id: i32,
+        album_id: i32,
+    ) -> Result<(), MusicRepoError> {
         StarredRepository::new(self.pool.clone()).star_album(user_id, album_id)
     }
 
-    pub fn star_song(&self, user_id: i32, song_id: i32) -> Result<(), MusicRepoError> {
+    pub(in crate::api) fn star_song(
+        &self,
+        user_id: i32,
+        song_id: i32,
+    ) -> Result<(), MusicRepoError> {
         StarredRepository::new(self.pool.clone()).star_song(user_id, song_id)
     }
 
-    pub fn unstar_artist(&self, user_id: i32, artist_id: i32) -> Result<(), MusicRepoError> {
+    pub(in crate::api) fn unstar_artist(
+        &self,
+        user_id: i32,
+        artist_id: i32,
+    ) -> Result<(), MusicRepoError> {
         StarredRepository::new(self.pool.clone())
             .unstar_artist(user_id, artist_id)
             .map(|_| ())
     }
 
-    pub fn unstar_album(&self, user_id: i32, album_id: i32) -> Result<(), MusicRepoError> {
+    pub(in crate::api) fn unstar_album(
+        &self,
+        user_id: i32,
+        album_id: i32,
+    ) -> Result<(), MusicRepoError> {
         StarredRepository::new(self.pool.clone())
             .unstar_album(user_id, album_id)
             .map(|_| ())
     }
 
-    pub fn unstar_song(&self, user_id: i32, song_id: i32) -> Result<(), MusicRepoError> {
+    pub(in crate::api) fn unstar_song(
+        &self,
+        user_id: i32,
+        song_id: i32,
+    ) -> Result<(), MusicRepoError> {
         StarredRepository::new(self.pool.clone())
             .unstar_song(user_id, song_id)
             .map(|_| ())
     }
 
-    pub fn get_starred_artists(
+    pub(in crate::api) fn get_starred_artists(
         &self,
         user_id: i32,
     ) -> Result<Vec<(Artist, NaiveDateTime)>, MusicRepoError> {
         StarredRepository::new(self.pool.clone()).get_starred_artists(user_id)
     }
 
-    pub fn get_starred_albums(
+    pub(in crate::api) fn get_starred_albums(
         &self,
         user_id: i32,
     ) -> Result<Vec<(Album, NaiveDateTime)>, MusicRepoError> {
         StarredRepository::new(self.pool.clone()).get_starred_albums(user_id)
     }
 
-    pub fn get_starred_songs(
+    pub(in crate::api) fn get_starred_songs(
         &self,
         user_id: i32,
     ) -> Result<Vec<(Song, NaiveDateTime)>, MusicRepoError> {
         StarredRepository::new(self.pool.clone()).get_starred_songs(user_id)
     }
 
-    pub fn get_starred_at_for_artist(
+    pub(in crate::api) fn get_starred_at_for_artist(
         &self,
         user_id: i32,
         artist_id: i32,
@@ -431,7 +490,7 @@ impl MusicLibrary {
         StarredRepository::new(self.pool.clone()).get_starred_at_for_artist(user_id, artist_id)
     }
 
-    pub fn get_starred_at_for_album(
+    pub(in crate::api) fn get_starred_at_for_album(
         &self,
         user_id: i32,
         album_id: i32,
@@ -439,7 +498,7 @@ impl MusicLibrary {
         StarredRepository::new(self.pool.clone()).get_starred_at_for_album(user_id, album_id)
     }
 
-    pub fn get_starred_at_for_song(
+    pub(in crate::api) fn get_starred_at_for_song(
         &self,
         user_id: i32,
         song_id: i32,
@@ -447,7 +506,7 @@ impl MusicLibrary {
         StarredRepository::new(self.pool.clone()).get_starred_at_for_song(user_id, song_id)
     }
 
-    pub fn get_starred_at_for_songs_batch(
+    pub(in crate::api) fn get_starred_at_for_songs_batch(
         &self,
         user_id: i32,
         song_ids: &[i32],
@@ -455,7 +514,7 @@ impl MusicLibrary {
         StarredRepository::new(self.pool.clone()).get_starred_at_for_songs_batch(user_id, song_ids)
     }
 
-    pub fn get_starred_at_for_albums_batch(
+    pub(in crate::api) fn get_starred_at_for_albums_batch(
         &self,
         user_id: i32,
         album_ids: &[i32],
@@ -464,7 +523,7 @@ impl MusicLibrary {
             .get_starred_at_for_albums_batch(user_id, album_ids)
     }
 
-    pub fn get_starred_at_for_artists_batch(
+    pub(in crate::api) fn get_starred_at_for_artists_batch(
         &self,
         user_id: i32,
         artist_ids: &[i32],
@@ -477,7 +536,7 @@ impl MusicLibrary {
     // Scrobble & now playing
     // ========================================================================
 
-    pub fn scrobble(
+    pub(in crate::api) fn scrobble(
         &self,
         user_id: i32,
         song_id: i32,
@@ -494,7 +553,7 @@ impl MusicLibrary {
         Ok(())
     }
 
-    pub fn set_now_playing(
+    pub(in crate::api) fn set_now_playing(
         &self,
         user_id: i32,
         song_id: i32,
@@ -510,7 +569,7 @@ impl MusicLibrary {
         Ok(())
     }
 
-    pub fn get_now_playing(&self) -> Result<Vec<NowPlayingEntry>, MusicRepoError> {
+    pub(in crate::api) fn get_now_playing(&self) -> Result<Vec<NowPlayingEntry>, MusicRepoError> {
         NowPlayingRepository::new(self.pool.clone()).get_all_now_playing()
     }
 
@@ -573,7 +632,7 @@ impl MusicLibrary {
     // Ratings
     // ========================================================================
 
-    pub fn set_song_rating(
+    pub(in crate::api) fn set_song_rating(
         &self,
         user_id: i32,
         song_id: i32,
@@ -586,7 +645,7 @@ impl MusicLibrary {
     // Playlists
     // ========================================================================
 
-    pub fn get_playlists(
+    pub(in crate::api) fn get_playlists(
         &self,
         user_id: i32,
         username: &str,
@@ -594,25 +653,28 @@ impl MusicLibrary {
         PlaylistRepository::new(self.pool.clone()).get_playlists(user_id, username)
     }
 
-    pub fn get_playlist(
+    pub(in crate::api) fn get_playlist(
         &self,
         playlist_id: i32,
     ) -> Result<Option<crate::db::Playlist>, MusicRepoError> {
         PlaylistRepository::new(self.pool.clone()).get_playlist(playlist_id)
     }
 
-    pub fn get_playlist_songs(&self, playlist_id: i32) -> Result<Vec<Song>, MusicRepoError> {
+    pub(in crate::api) fn get_playlist_songs(
+        &self,
+        playlist_id: i32,
+    ) -> Result<Vec<Song>, MusicRepoError> {
         PlaylistRepository::new(self.pool.clone()).get_playlist_songs(playlist_id)
     }
 
-    pub fn get_playlist_cover_arts_batch(
+    pub(in crate::api) fn get_playlist_cover_arts_batch(
         &self,
         playlist_ids: &[i32],
     ) -> Result<HashMap<i32, String>, MusicRepoError> {
         PlaylistRepository::new(self.pool.clone()).get_playlist_cover_arts_batch(playlist_ids)
     }
 
-    pub fn create_playlist(
+    pub(in crate::api) fn create_playlist(
         &self,
         user_id: i32,
         name: &str,
@@ -622,7 +684,7 @@ impl MusicLibrary {
         PlaylistRepository::new(self.pool.clone()).create_playlist(user_id, name, comment, song_ids)
     }
 
-    pub fn update_playlist(
+    pub(in crate::api) fn update_playlist(
         &self,
         playlist_id: i32,
         name: Option<&str>,
@@ -641,11 +703,11 @@ impl MusicLibrary {
         )
     }
 
-    pub fn delete_playlist(&self, playlist_id: i32) -> Result<bool, MusicRepoError> {
+    pub(in crate::api) fn delete_playlist(&self, playlist_id: i32) -> Result<bool, MusicRepoError> {
         PlaylistRepository::new(self.pool.clone()).delete_playlist(playlist_id)
     }
 
-    pub fn is_playlist_owner(
+    pub(in crate::api) fn is_playlist_owner(
         &self,
         user_id: i32,
         playlist_id: i32,
@@ -657,7 +719,7 @@ impl MusicLibrary {
     // Play queue
     // ========================================================================
 
-    pub fn get_play_queue(
+    pub(in crate::api) fn get_play_queue(
         &self,
         user_id: i32,
         username: &str,
@@ -665,7 +727,7 @@ impl MusicLibrary {
         PlayQueueRepository::new(self.pool.clone()).get_play_queue(user_id, username)
     }
 
-    pub fn save_play_queue(
+    pub(in crate::api) fn save_play_queue(
         &self,
         user_id: i32,
         song_ids: &[i32],
@@ -686,7 +748,7 @@ impl MusicLibrary {
     // Artist info with Last.fm cache
     // ========================================================================
 
-    pub fn get_artist_info_with_cache(
+    pub(in crate::api) fn get_artist_info_with_cache(
         &self,
         artist_id: i32,
     ) -> Result<ArtistInfo2Response, MusicRepoError> {
@@ -867,7 +929,7 @@ impl MusicLibrary {
         }
     }
 
-    pub fn get_artist_info_non_id3_with_cache(
+    pub(in crate::api) fn get_artist_info_non_id3_with_cache(
         &self,
         artist_id: i32,
     ) -> Result<crate::models::music::ArtistInfoResponse, MusicRepoError> {
@@ -913,22 +975,27 @@ impl Users {
         Self { pool }
     }
 
-    pub fn find_user(&self, username: &str) -> Result<Option<User>, UserRepoError> {
+    pub(in crate::api) fn find_user(&self, username: &str) -> Result<Option<User>, UserRepoError> {
         UserRepository::new(self.pool.clone()).find_by_username(username)
     }
 
-    pub fn find_user_by_api_key(&self, api_key: &str) -> Result<Option<User>, UserRepoError> {
+    pub(in crate::api) fn find_user_by_api_key(
+        &self,
+        api_key: &str,
+    ) -> Result<Option<User>, UserRepoError> {
         UserRepository::new(self.pool.clone()).find_by_api_key(api_key)
     }
 
-    pub fn get_user(&self, username: &str) -> Result<Option<User>, UserRepoError> {
+    pub(in crate::api) fn get_user(&self, username: &str) -> Result<Option<User>, UserRepoError> {
         UserRepository::new(self.pool.clone()).find_by_username(username)
     }
 
+    /// List all users.
     pub fn get_all_users(&self) -> Result<Vec<User>, UserRepoError> {
         UserRepository::new(self.pool.clone()).find_all()
     }
 
+    /// Delete a user by name.
     pub fn delete_user(&self, username: &str) -> Result<bool, UserRepoError> {
         let user = UserRepository::new(self.pool.clone())
             .find_by_username(username)?
@@ -941,7 +1008,11 @@ impl Users {
         UserRepository::new(self.pool.clone()).delete(user.id)
     }
 
-    pub fn change_password(&self, username: &str, new_password: &str) -> Result<(), UserRepoError> {
+    pub(in crate::api) fn change_password(
+        &self,
+        username: &str,
+        new_password: &str,
+    ) -> Result<(), UserRepoError> {
         let user = UserRepository::new(self.pool.clone())
             .find_by_username(username)?
             .ok_or_else(|| {
@@ -960,7 +1031,7 @@ impl Users {
         Ok(())
     }
 
-    pub fn create_user(
+    pub(in crate::api) fn create_user(
         &self,
         username: &str,
         password: &str,
@@ -991,7 +1062,7 @@ impl Users {
         UserRepository::new(self.pool.clone()).create(&new_user)
     }
 
-    pub fn update_user(&self, update: &UserUpdate) -> Result<(), UserRepoError> {
+    pub(in crate::api) fn update_user(&self, update: &UserUpdate) -> Result<(), UserRepoError> {
         UserRepository::new(self.pool.clone())
             .update_user(update)
             .map(|_| ())
@@ -1011,7 +1082,7 @@ impl RemoteSessions {
         Self { pool }
     }
 
-    pub fn create_remote_session(
+    pub(in crate::api) fn create_remote_session(
         &self,
         user_id: i32,
         host_device_id: &str,
@@ -1026,7 +1097,7 @@ impl RemoteSessions {
         )
     }
 
-    pub fn join_remote_session(
+    pub(in crate::api) fn join_remote_session(
         &self,
         user_id: i32,
         pairing_code: &str,
@@ -1041,7 +1112,7 @@ impl RemoteSessions {
         )
     }
 
-    pub fn close_remote_session(
+    pub(in crate::api) fn close_remote_session(
         &self,
         user_id: i32,
         session_id: &str,
@@ -1049,7 +1120,7 @@ impl RemoteSessions {
         RemoteControlRepository::new(self.pool.clone()).close_session(session_id, user_id)
     }
 
-    pub fn get_remote_session(
+    pub(in crate::api) fn get_remote_session(
         &self,
         user_id: i32,
         session_id: &str,
@@ -1057,7 +1128,7 @@ impl RemoteSessions {
         RemoteControlRepository::new(self.pool.clone()).get_session_for_user(session_id, user_id)
     }
 
-    pub fn send_remote_command(
+    pub(in crate::api) fn send_remote_command(
         &self,
         user_id: i32,
         session_id: &str,
@@ -1079,7 +1150,7 @@ impl RemoteSessions {
         )
     }
 
-    pub fn get_remote_commands(
+    pub(in crate::api) fn get_remote_commands(
         &self,
         user_id: i32,
         session_id: &str,
@@ -1101,7 +1172,7 @@ impl RemoteSessions {
         )
     }
 
-    pub fn update_remote_state(
+    pub(in crate::api) fn update_remote_state(
         &self,
         user_id: i32,
         session_id: &str,
@@ -1121,7 +1192,7 @@ impl RemoteSessions {
         )
     }
 
-    pub fn get_remote_state(
+    pub(in crate::api) fn get_remote_state(
         &self,
         user_id: i32,
         session_id: &str,

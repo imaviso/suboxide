@@ -7,6 +7,7 @@ use crate::api::auth::SubsonicAuth;
 use crate::api::error::ApiError;
 use crate::api::response::{SubsonicResponse, error_response};
 use crate::api::services::MusicLibrary;
+use crate::db::MusicRepoError;
 use crate::models::music::{
     AlbumID3Response, AlbumList2Response, AlbumListResponse, ArtistResponse, ChildResponse,
     GenreResponse, GenresResponse, RandomSongsResponse, SimilarSongs2Response,
@@ -21,49 +22,39 @@ fn album_list_type_for_request(list_type: Option<&str>) -> &str {
     }
 }
 
-fn similar_songs_for_id(music: &MusicLibrary, id: i32, count: i64) -> Result<Vec<Song>, ApiError> {
-    if let Some(song) = music
-        .get_song(id)
-        .map_err(|error| ApiError::Generic(error.to_string()))?
-    {
+fn similar_songs_for_id(
+    music: &MusicLibrary,
+    id: i32,
+    count: i64,
+) -> Result<Option<Vec<Song>>, MusicRepoError> {
+    if let Some(song) = music.get_song(id)? {
         if let Some(artist_id) = song.artist_id {
             return music
                 .get_similar_songs_by_artist(artist_id, id, count)
-                .map_err(|error| ApiError::Generic(error.to_string()));
+                .map(Some);
         }
         if let Some(genre) = song.genre {
-            return music
-                .get_songs_by_genre(&genre, count, 0, None)
-                .map_err(|error| ApiError::Generic(error.to_string()));
+            return music.get_songs_by_genre(&genre, count, 0, None).map(Some);
         }
-        return Ok(Vec::new());
+        return Ok(Some(Vec::new()));
     }
 
-    if let Some(album) = music
-        .get_album(id)
-        .map_err(|error| ApiError::Generic(error.to_string()))?
-    {
+    if let Some(album) = music.get_album(id)? {
         return album.artist_id.map_or_else(
-            || Ok(Vec::new()),
+            || Ok(Some(Vec::new())),
             |artist_id| {
                 music
                     .get_similar_songs_by_artist(artist_id, -1, count)
-                    .map_err(|error| ApiError::Generic(error.to_string()))
+                    .map(Some)
             },
         );
     }
 
-    if music
-        .get_artist(id)
-        .map_err(|error| ApiError::Generic(error.to_string()))?
-        .is_some()
-    {
-        return music
-            .get_similar_songs_by_artist(id, -1, count)
-            .map_err(|error| ApiError::Generic(error.to_string()));
+    if music.get_artist(id)?.is_some() {
+        return music.get_similar_songs_by_artist(id, -1, count).map(Some);
     }
 
-    Err(ApiError::NotFound("Item".into()))
+    Ok(None)
 }
 
 /// Query parameters for getAlbumList2.
@@ -508,8 +499,14 @@ pub async fn get_similar_songs2(
     let user_id = auth.user.id;
 
     let songs = match similar_songs_for_id(auth.music(), id, count) {
-        Ok(songs) => songs,
-        Err(error) => return error_response(auth.format, &error).into_response(),
+        Ok(Some(songs)) => songs,
+        Ok(None) => {
+            return error_response(auth.format, &ApiError::NotFound("Item".into())).into_response();
+        }
+        Err(error) => {
+            return error_response(auth.format, &ApiError::Generic(error.to_string()))
+                .into_response();
+        }
     };
 
     // Batch fetch starred status for all songs
@@ -556,8 +553,14 @@ pub async fn get_similar_songs(
     let user_id = auth.user.id;
 
     let songs = match similar_songs_for_id(auth.music(), id, count) {
-        Ok(songs) => songs,
-        Err(error) => return error_response(auth.format, &error).into_response(),
+        Ok(Some(songs)) => songs,
+        Ok(None) => {
+            return error_response(auth.format, &ApiError::NotFound("Item".into())).into_response();
+        }
+        Err(error) => {
+            return error_response(auth.format, &ApiError::Generic(error.to_string()))
+                .into_response();
+        }
     };
 
     // Batch fetch starred status for all songs

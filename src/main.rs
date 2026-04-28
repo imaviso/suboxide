@@ -12,8 +12,7 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use suboxide::api::auth::AuthStateHandle;
-use suboxide::api::{MusicLibrary, RemoteSessions, SubsonicRouterExt, Users, handlers};
+use suboxide::api::{SubsonicRouterExt, handlers};
 use suboxide::crypto::{PasswordError, hash_password};
 use suboxide::db::{
     DbConfig, DbPool, MusicFolderRepository, MusicRepoError, NewUser, UserRepoError,
@@ -22,6 +21,8 @@ use suboxide::db::{
 use suboxide::lastfm::{LastFmClient, LastFmError};
 use suboxide::models::music::NewMusicFolder;
 use suboxide::scanner::{AutoScanner, ScanError, ScanMode, ScanState, ScanStateHandle, Scanner};
+
+use suboxide::api::services::{MusicLibrary, RemoteSessions, Users};
 
 /// Subsonic-compatible music streaming server.
 #[derive(Parser)]
@@ -247,12 +248,6 @@ impl AppState {
     #[must_use]
     pub fn scan_state(&self) -> ScanStateHandle {
         self.scan_state.clone()
-    }
-}
-
-impl FromRef<AppState> for AuthStateHandle {
-    fn from_ref(state: &AppState) -> Self {
-        Self::new(state.users.clone())
     }
 }
 
