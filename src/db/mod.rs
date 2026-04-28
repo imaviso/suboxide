@@ -8,9 +8,9 @@ pub(crate) mod schema;
 pub use connection::{DbConfig, DbConn, DbPool, DbPoolError, run_migrations};
 #[doc(inline)]
 pub use repo::{
-    AlbumRepository, ArtistRepository, MusicFolderRepository, MusicRepoError, MusicRepoErrorKind,
-    NewUser, NowPlayingEntry, NowPlayingRepository, PlayQueue, PlayQueueRepository, Playlist,
-    PlaylistRepository, RatingRepository, RemoteCommand, RemoteControlRepository, RemoteSession,
-    RemoteState, ScrobbleRepository, SongRepository, StarredRepository, UserRepoError,
-    UserRepoErrorKind, UserRepository, UserUpdate,
+    AlbumRepository, ArtistInfoCacheRepository, ArtistRepository, MusicFolderRepository,
+    MusicRepoError, MusicRepoErrorKind, NewUser, NowPlayingEntry, NowPlayingRepository, PlayQueue,
+    PlayQueueRepository, Playlist, PlaylistRepository, RatingRepository, RemoteCommand,
+    RemoteControlRepository, RemoteSession, RemoteState, ScrobbleRepository, SongRepository,
+    StarredRepository, UserRepoError, UserRepoErrorKind, UserRepository, UserUpdate,
 };

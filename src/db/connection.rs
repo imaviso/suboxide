@@ -129,11 +129,10 @@ impl CustomizeConnection<SqliteConnection, diesel::r2d2::Error> for SqliteConnec
 /// Run the SQL migrations to set up the database schema.
 ///
 /// # Errors
-/// Returns an error if any SQL statement fails while setting up schema,
-/// indexes, or compatibility columns.
+/// Returns an error if any SQL statement fails while setting up schema or indexes.
 #[expect(
     clippy::too_many_lines,
-    reason = "Bootstrapping schema and compatibility indexes is intentionally centralized"
+    reason = "Bootstrapping schema and indexes is intentionally centralized"
 )]
 pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result::Error> {
     // Enable WAL mode for better concurrent read/write performance
@@ -169,7 +168,8 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             subsonic_password TEXT,
-            api_key TEXT
+            api_key TEXT,
+            lastfm_session_key TEXT
         )
         ",
     )
@@ -185,31 +185,11 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
     )
     .execute(conn)?;
 
-    // Migration: Add api_key column if it doesn't exist (for existing databases)
-    // SQLite doesn't have a simple "ADD COLUMN IF NOT EXISTS" so we check first
-    let has_api_key = diesel::sql_query(
-        "SELECT COUNT(*) as cnt FROM pragma_table_info('users') WHERE name = 'api_key'",
+    // Create index for Last.fm session key lookups
+    diesel::sql_query(
+        "CREATE INDEX IF NOT EXISTS idx_users_lastfm_session ON users(lastfm_session_key) WHERE lastfm_session_key IS NOT NULL"
     )
-    .get_result::<CountResult>(conn)
-    .map(|r| r.cnt)?;
-
-    if has_api_key == 0 {
-        diesel::sql_query("ALTER TABLE users ADD COLUMN api_key TEXT").execute(conn)?;
-    }
-
-    // Migration: Add lastfm_session_key column if it doesn't exist
-    let has_lastfm_session_key = diesel::sql_query(
-        "SELECT COUNT(*) as cnt FROM pragma_table_info('users') WHERE name = 'lastfm_session_key'",
-    )
-    .get_result::<CountResult>(conn)
-    .map(|r| r.cnt)?;
-
-    if has_lastfm_session_key == 0 {
-        diesel::sql_query("ALTER TABLE users ADD COLUMN lastfm_session_key TEXT").execute(conn)?;
-        diesel::sql_query(
-            "CREATE INDEX IF NOT EXISTS idx_users_lastfm_session ON users(lastfm_session_key) WHERE lastfm_session_key IS NOT NULL"
-        ).execute(conn)?;
-    }
+    .execute(conn)?;
 
     // Create music_folders table
     diesel::sql_query(
@@ -311,17 +291,6 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
         ",
     )
     .execute(conn)?;
-
-    // Migration: Add file_modified_at column if it doesn't exist (for existing databases)
-    let has_file_modified_at = diesel::sql_query(
-        "SELECT COUNT(*) as cnt FROM pragma_table_info('songs') WHERE name = 'file_modified_at'",
-    )
-    .get_result::<CountResult>(conn)
-    .map(|r| r.cnt)?;
-
-    if has_file_modified_at == 0 {
-        diesel::sql_query("ALTER TABLE songs ADD COLUMN file_modified_at BIGINT").execute(conn)?;
-    }
 
     diesel::sql_query("CREATE INDEX IF NOT EXISTS idx_songs_title ON songs(title)")
         .execute(conn)?;
@@ -668,13 +637,6 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
     .execute(conn)?;
 
     Ok(())
-}
-
-/// Helper struct for count queries
-#[derive(QueryableByName)]
-struct CountResult {
-    #[diesel(sql_type = diesel::sql_types::Integer)]
-    cnt: i32,
 }
 
 #[cfg(test)]

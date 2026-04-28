@@ -48,7 +48,11 @@ impl Format {
     pub fn from_param(f: Option<&str>) -> Self {
         match f {
             Some("json" | "jsonp") => Self::Json,
-            _ => Self::Xml,
+            Some(other) => {
+                tracing::warn!(format = %other, "Unknown response format requested, falling back to XML");
+                Self::Xml
+            }
+            None => Self::Xml,
         }
     }
 }
@@ -94,10 +98,10 @@ pub struct OpenSubsonicExtension {
 }
 
 impl OpenSubsonicExtension {
-    pub fn new(name: impl Into<String>, versions: Vec<i32>) -> Self {
+    pub fn new(name: impl Into<String>, versions: &[i32]) -> Self {
         Self {
             name: name.into(),
-            versions,
+            versions: versions.to_vec(),
         }
     }
 }
@@ -106,9 +110,9 @@ impl OpenSubsonicExtension {
 #[must_use]
 pub fn supported_extensions() -> Vec<OpenSubsonicExtension> {
     vec![
-        OpenSubsonicExtension::new("apiKeyAuthentication", vec![1]),
-        OpenSubsonicExtension::new("songLyrics", vec![1]),
-        OpenSubsonicExtension::new("remoteControl", vec![1]),
+        OpenSubsonicExtension::new("apiKeyAuthentication", &[1]),
+        OpenSubsonicExtension::new("songLyrics", &[1]),
+        OpenSubsonicExtension::new("remoteControl", &[1]),
     ]
 }
 
