@@ -390,36 +390,22 @@ impl NowPlayingRepository {
         player_id: Option<&str>,
     ) -> Result<(), MusicRepoError> {
         let mut conn = self.pool.get()?;
+        let now = chrono::Utc::now().naive_utc();
 
-        // Check if there's already an entry for this user
-        let existing: Option<i32> = now_playing::table
-            .filter(now_playing::user_id.eq(user_id))
-            .select(now_playing::id)
-            .first(&mut conn)
-            .optional()?;
-
-        if existing.is_some() {
-            // Update existing entry
-            diesel::update(now_playing::table.filter(now_playing::user_id.eq(user_id)))
-                .set((
-                    now_playing::song_id.eq(song_id),
-                    now_playing::player_id.eq(player_id),
-                    now_playing::started_at.eq(chrono::Utc::now().naive_utc()),
-                    now_playing::minutes_ago.eq(0),
-                ))
-                .execute(&mut conn)?;
-        } else {
-            // Insert new entry
-            diesel::insert_into(now_playing::table)
-                .values((
-                    now_playing::user_id.eq(user_id),
-                    now_playing::song_id.eq(song_id),
-                    now_playing::player_id.eq(player_id),
-                    now_playing::started_at.eq(chrono::Utc::now().naive_utc()),
-                    now_playing::minutes_ago.eq(0),
-                ))
-                .execute(&mut conn)?;
-        }
+        diesel::sql_query(
+            "INSERT INTO now_playing (user_id, song_id, player_id, started_at, minutes_ago)
+             VALUES (?, ?, ?, ?, 0)
+             ON CONFLICT(user_id) DO UPDATE SET
+                song_id = excluded.song_id,
+                player_id = excluded.player_id,
+                started_at = excluded.started_at,
+                minutes_ago = 0",
+        )
+        .bind::<diesel::sql_types::Integer, _>(user_id)
+        .bind::<diesel::sql_types::Integer, _>(song_id)
+        .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(player_id)
+        .bind::<diesel::sql_types::Timestamp, _>(now)
+        .execute(&mut conn)?;
 
         Ok(())
     }

@@ -88,6 +88,32 @@ impl User {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use crate::crypto::password::PasswordErrorKind;
+
+    use super::User;
+
+    #[test]
+    fn verify_password_returns_err_for_malformed_hash() {
+        let user = User {
+            id: 1,
+            username: "test".into(),
+            password_hash: "not_a_valid_argon2_hash".into(),
+            subsonic_password: None,
+            api_key: None,
+            lastfm_session_key: None,
+            email: None,
+            roles: Default::default(),
+            max_bit_rate: 0,
+        };
+
+        let result = user.verify_password("any_password");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), PasswordErrorKind::InvalidHash);
+    }
+}
+
 /// Subsonic API user response format.
 #[derive(Debug, Serialize, Clone)]
 #[expect(

@@ -14,7 +14,7 @@ use crate::models::music::{ChildResponse, DirectoryResponse};
 /// list of albums for an artist, or list of songs for an album.
 /// The ID can refer to a music folder, artist, or album.
 pub async fn get_music_directory(
-    axum::extract::Query(params): axum::extract::Query<IdParams>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<IdParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
@@ -23,14 +23,38 @@ pub async fn get_music_directory(
             .into_response();
     };
 
-    // Try to find what this ID refers to: music folder, artist, or album
-    // First, check if it's an album (most common case when browsing)
     let maybe_album = match auth.music().get_album(id) {
         Ok(album) => album,
         Err(e) => {
             return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
         }
     };
+    let maybe_artist = match auth.music().get_artist(id) {
+        Ok(artist) => artist,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
+    };
+
+    let folders = match auth.music().get_music_folders() {
+        Ok(folders) => folders,
+        Err(e) => {
+            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+        }
+    };
+    let maybe_folder = folders.iter().find(|f| f.id == id);
+    let matches = usize::from(maybe_album.is_some())
+        + usize::from(maybe_artist.is_some())
+        + usize::from(maybe_folder.is_some());
+
+    if matches > 1 {
+        return error_response(
+            auth.format,
+            &ApiError::Generic(format!("Ambiguous directory id: {id}")),
+        )
+        .into_response();
+    }
+
     if let Some(album) = maybe_album {
         let songs = match auth.music().get_songs_by_album(id) {
             Ok(songs) => songs,
@@ -44,13 +68,6 @@ pub async fn get_music_directory(
         return SubsonicResponse::directory(auth.format, response).into_response();
     }
 
-    // Check if it's an artist
-    let maybe_artist = match auth.music().get_artist(id) {
-        Ok(artist) => artist,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
     if let Some(artist) = maybe_artist {
         let albums = match auth.music().get_albums_by_artist(id) {
             Ok(albums) => albums,
@@ -67,16 +84,8 @@ pub async fn get_music_directory(
         return SubsonicResponse::directory(auth.format, response).into_response();
     }
 
-    // Check if it's a music folder
-    let folders = match auth.music().get_music_folders() {
-        Ok(folders) => folders,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
-    if let Some(folder) = folders.iter().find(|f| f.id == id) {
-        // For music folders, return all artists as children
-        let artists = match auth.music().get_artists() {
+    if let Some(folder) = maybe_folder {
+        let artists = match auth.music().get_artists_by_music_folder(folder.id) {
             Ok(artists) => artists,
             Err(e) => {
                 return error_response(auth.format, &ApiError::Generic(e.to_string()))

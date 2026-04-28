@@ -73,60 +73,60 @@ impl RemoteControlRepository {
         let now = Utc::now().naive_utc();
         let expires_at = now + Duration::seconds(ttl_seconds);
 
-        diesel::sql_query(
-            "UPDATE remote_sessions
-             SET closed_at = ?, updated_at = ?
-             WHERE owner_user_id = ? AND host_device_id = ? AND closed_at IS NULL",
-        )
-        .bind::<Timestamp, _>(now)
-        .bind::<Timestamp, _>(now)
-        .bind::<Integer, _>(owner_user_id)
-        .bind::<Text, _>(host_device_id)
-        .execute(&mut conn)?;
-
-        for _ in 0..5 {
-            let session_id = generate_session_id();
-            let pairing_code = generate_pairing_code();
-
-            let insert_result = diesel::sql_query(
-                "INSERT INTO remote_sessions (
-                    session_id,
-                    pairing_code,
-                    owner_user_id,
-                    host_device_id,
-                    host_device_name,
-                    expires_at,
-                    created_at,
-                    updated_at
-                 )
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        conn.transaction(|conn| {
+            diesel::sql_query(
+                "UPDATE remote_sessions
+                 SET closed_at = ?, updated_at = ?
+                 WHERE owner_user_id = ? AND host_device_id = ? AND closed_at IS NULL",
             )
-            .bind::<Text, _>(&session_id)
-            .bind::<Text, _>(&pairing_code)
+            .bind::<Timestamp, _>(now)
+            .bind::<Timestamp, _>(now)
             .bind::<Integer, _>(owner_user_id)
             .bind::<Text, _>(host_device_id)
-            .bind::<Nullable<Text>, _>(host_device_name)
-            .bind::<Timestamp, _>(expires_at)
-            .bind::<Timestamp, _>(now)
-            .bind::<Timestamp, _>(now)
-            .execute(&mut conn);
+            .execute(conn)?;
 
-            match insert_result {
-                Ok(_) => {
-                    return self.get_session_by_id(&session_id);
+            for _ in 0..5 {
+                let session_id = generate_session_id();
+                let pairing_code = generate_pairing_code();
+
+                let insert_result = diesel::sql_query(
+                    "INSERT INTO remote_sessions (
+                        session_id,
+                        pairing_code,
+                        owner_user_id,
+                        host_device_id,
+                        host_device_name,
+                        expires_at,
+                        created_at,
+                        updated_at
+                     )
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                )
+                .bind::<Text, _>(&session_id)
+                .bind::<Text, _>(&pairing_code)
+                .bind::<Integer, _>(owner_user_id)
+                .bind::<Text, _>(host_device_id)
+                .bind::<Nullable<Text>, _>(host_device_name)
+                .bind::<Timestamp, _>(expires_at)
+                .bind::<Timestamp, _>(now)
+                .bind::<Timestamp, _>(now)
+                .execute(conn);
+
+                match insert_result {
+                    Ok(_) => return Self::get_session_by_id_with_conn(conn, &session_id),
+                    Err(diesel::result::Error::DatabaseError(
+                        diesel::result::DatabaseErrorKind::UniqueViolation,
+                        _,
+                    )) => {}
+                    Err(error) => return Err(error.into()),
                 }
-                Err(diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::UniqueViolation,
-                    _,
-                )) => {}
-                Err(error) => return Err(error.into()),
             }
-        }
 
-        Err(MusicRepoError::new(
-            MusicRepoErrorKind::Database,
-            "failed to create unique remote session",
-        ))
+            Err(MusicRepoError::new(
+                MusicRepoErrorKind::Database,
+                "failed to create unique remote session",
+            ))
+        })
     }
 
     /// Join a remote session using a pairing code.
@@ -190,8 +190,12 @@ impl RemoteControlRepository {
                pairing_code = ?,
                expires_at = ?,
                updated_at = ?
-             WHERE session_id = ?
-               AND closed_at IS NULL",
+              WHERE session_id = ?
+                AND pairing_code = ?
+                AND owner_user_id = ?
+                AND expires_at > ?
+                AND closed_at IS NULL
+                AND controller_user_id IS NULL",
         )
         .bind::<Integer, _>(controller_user_id)
         .bind::<Text, _>(controller_device_id)
@@ -200,6 +204,9 @@ impl RemoteControlRepository {
         .bind::<Timestamp, _>(new_expiry)
         .bind::<Timestamp, _>(now)
         .bind::<Text, _>(&session_row.session_id)
+        .bind::<Text, _>(pairing_code)
+        .bind::<Integer, _>(controller_user_id)
+        .bind::<Timestamp, _>(now)
         .execute(&mut conn)?;
 
         if changed == 0 {
@@ -416,6 +423,13 @@ impl RemoteControlRepository {
 
     fn get_session_by_id(&self, session_id: &str) -> Result<RemoteSession, MusicRepoError> {
         let mut conn = self.pool.get()?;
+        Self::get_session_by_id_with_conn(&mut conn, session_id)
+    }
+
+    fn get_session_by_id_with_conn(
+        conn: &mut diesel::SqliteConnection,
+        session_id: &str,
+    ) -> Result<RemoteSession, MusicRepoError> {
         diesel::sql_query(
             "SELECT
                 session_id,
@@ -435,7 +449,7 @@ impl RemoteControlRepository {
              LIMIT 1",
         )
         .bind::<Text, _>(session_id)
-        .get_result::<RemoteSessionRow>(&mut conn)
+        .get_result::<RemoteSessionRow>(conn)
         .map(RemoteSession::from)
         .map_err(MusicRepoError::from)
     }

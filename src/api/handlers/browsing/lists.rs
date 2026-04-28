@@ -7,7 +7,7 @@ use crate::api::auth::SubsonicContext;
 use crate::api::error::ApiError;
 use crate::api::response::{SubsonicResponse, error_response};
 use crate::api::services::MusicLibrary;
-use crate::db::MusicRepoError;
+use crate::db::{MusicRepoError, MusicRepoErrorKind};
 use crate::models::music::{
     AlbumID3Response, AlbumList2Response, AlbumListResponse, ArtistResponse, ChildResponse,
     GenreResponse, GenresResponse, RandomSongsResponse, SimilarSongs2Response,
@@ -27,7 +27,20 @@ fn similar_songs_for_id(
     id: i32,
     count: i64,
 ) -> Result<Option<Vec<Song>>, MusicRepoError> {
-    if let Some(song) = music.get_song(id)? {
+    let song = music.get_song(id)?;
+    let album = music.get_album(id)?;
+    let artist = music.get_artist(id)?;
+    let matches =
+        usize::from(song.is_some()) + usize::from(album.is_some()) + usize::from(artist.is_some());
+
+    if matches > 1 {
+        return Err(MusicRepoError::new(
+            MusicRepoErrorKind::Database,
+            format!("ambiguous similar-songs id: {id}"),
+        ));
+    }
+
+    if let Some(song) = song {
         if let Some(artist_id) = song.artist_id {
             return music
                 .get_similar_songs_by_artist(artist_id, id, count)
@@ -39,7 +52,7 @@ fn similar_songs_for_id(
         return Ok(Some(Vec::new()));
     }
 
-    if let Some(album) = music.get_album(id)? {
+    if let Some(album) = album {
         return album.artist_id.map_or_else(
             || Ok(Some(Vec::new())),
             |artist_id| {
@@ -50,7 +63,7 @@ fn similar_songs_for_id(
         );
     }
 
-    if music.get_artist(id)?.is_some() {
+    if artist.is_some() {
         return music.get_similar_songs_by_artist(id, -1, count).map(Some);
     }
 
@@ -86,7 +99,7 @@ pub struct AlbumList2Params {
 /// Returns a list of random, newest, highest rated etc. albums.
 /// Similar to getAlbumList, but organizes music according to ID3 tags.
 pub async fn get_album_list2(
-    axum::extract::Query(params): axum::extract::Query<AlbumList2Params>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<AlbumList2Params>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let list_type = album_list_type_for_request(params.list_type.as_deref());
@@ -163,7 +176,7 @@ pub async fn get_album_list2(
 /// Returns a list of random, newest, highest rated etc. albums.
 /// This is the non-ID3 version that returns Child elements.
 pub async fn get_album_list(
-    axum::extract::Query(params): axum::extract::Query<AlbumList2Params>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<AlbumList2Params>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let list_type = album_list_type_for_request(params.list_type.as_deref());
@@ -290,7 +303,7 @@ pub struct RandomSongsParams {
 ///
 /// Returns random songs matching the given criteria.
 pub async fn get_random_songs(
-    axum::extract::Query(params): axum::extract::Query<RandomSongsParams>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<RandomSongsParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let size = params.size.unwrap_or(10).clamp(1, 500);
@@ -355,7 +368,7 @@ pub struct SongsByGenreParams {
 ///
 /// Returns songs in a given genre.
 pub async fn get_songs_by_genre(
-    axum::extract::Query(params): axum::extract::Query<SongsByGenreParams>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<SongsByGenreParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let Some(genre) = params.genre.as_deref() else {
@@ -418,7 +431,7 @@ pub struct TopSongsParams {
 ///
 /// Returns the top songs for a given artist, ordered by play count.
 pub async fn get_top_songs(
-    axum::extract::Query(params): axum::extract::Query<TopSongsParams>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<TopSongsParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     // Get the required 'artist' parameter
@@ -486,7 +499,7 @@ pub struct SimilarSongs2Params {
 /// Returns songs similar to the given song, album, or artist.
 /// Since we don't have external metadata, we return random songs from the same artist or genre.
 pub async fn get_similar_songs2(
-    axum::extract::Query(params): axum::extract::Query<SimilarSongs2Params>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<SimilarSongs2Params>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
@@ -540,7 +553,7 @@ pub async fn get_similar_songs2(
 ///
 /// Returns similar songs (non-ID3 version). Similar to getSimilarSongs2.
 pub async fn get_similar_songs(
-    axum::extract::Query(params): axum::extract::Query<SimilarSongs2Params>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<SimilarSongs2Params>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter

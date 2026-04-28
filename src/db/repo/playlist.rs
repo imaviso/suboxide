@@ -10,6 +10,15 @@ use crate::db::repo::user::UserRow;
 use crate::db::schema::{play_queue, play_queue_songs, playlist_songs, playlists, songs, users};
 use crate::models::music::Song;
 
+fn usize_to_i32(value: usize, field: &str) -> Result<i32, MusicRepoError> {
+    i32::try_from(value).map_err(|error| {
+        MusicRepoError::new(
+            MusicRepoErrorKind::Database,
+            format!("{field} exceeds i32 range: {error}"),
+        )
+    })
+}
+
 // ============================================================================
 // Playlist Repository
 // ============================================================================
@@ -128,11 +137,18 @@ impl PlaylistRepository {
     pub fn get_playlist(&self, playlist_id: i32) -> Result<Option<Playlist>, MusicRepoError> {
         let mut conn = self.pool.get()?;
 
+        Self::get_playlist_with_conn(&mut conn, playlist_id)
+    }
+
+    fn get_playlist_with_conn(
+        conn: &mut diesel::SqliteConnection,
+        playlist_id: i32,
+    ) -> Result<Option<Playlist>, MusicRepoError> {
         let result: Option<(PlaylistRow, UserRow)> = playlists::table
             .inner_join(users::table.on(playlists::user_id.eq(users::id)))
             .filter(playlists::id.eq(playlist_id))
             .select((PlaylistRow::as_select(), UserRow::as_select()))
-            .first(&mut conn)
+            .first(conn)
             .optional()?;
 
         Ok(result.map(|(p, u)| Playlist {
@@ -198,64 +214,56 @@ impl PlaylistRepository {
     ) -> Result<Playlist, MusicRepoError> {
         let mut conn = self.pool.get()?;
 
-        // Insert the playlist
-        let new_playlist = NewPlaylist {
-            user_id,
-            name,
-            comment,
-            public: false,
-        };
+        conn.transaction(|conn| {
+            let new_playlist = NewPlaylist {
+                user_id,
+                name,
+                comment,
+                public: false,
+            };
 
-        diesel::insert_into(playlists::table)
-            .values(&new_playlist)
-            .execute(&mut conn)?;
+            diesel::insert_into(playlists::table)
+                .values(&new_playlist)
+                .execute(conn)?;
 
-        // Get the created playlist ID
-        let playlist_id: i32 = playlists::table
-            .filter(playlists::user_id.eq(user_id))
-            .filter(playlists::name.eq(name))
-            .order(playlists::created_at.desc())
-            .select(playlists::id)
-            .first(&mut conn)?;
-
-        // Add songs to playlist
-        if !song_ids.is_empty() {
-            let mut total_duration = 0i32;
+            let playlist_id: i32 = playlists::table
+                .filter(playlists::user_id.eq(user_id))
+                .filter(playlists::name.eq(name))
+                .order(playlists::created_at.desc())
+                .select(playlists::id)
+                .first(conn)?;
 
             for (position, song_id) in song_ids.iter().enumerate() {
-                // Get song duration
-                if let Some(duration) = songs::table
+                let exists = songs::table
                     .filter(songs::id.eq(song_id))
-                    .select(songs::duration)
-                    .first::<i32>(&mut conn)
-                    .optional()?
-                {
-                    total_duration += duration;
+                    .select(songs::id)
+                    .first::<i32>(conn)
+                    .optional()?;
 
-                    let new_song = NewPlaylistSong {
-                        playlist_id,
-                        song_id: *song_id,
-                        position: i32::try_from(position).unwrap_or(0),
-                    };
-
-                    diesel::insert_into(playlist_songs::table)
-                        .values(&new_song)
-                        .execute(&mut conn)?;
+                if exists.is_none() {
+                    return Err(MusicRepoError::new(
+                        MusicRepoErrorKind::NotFound,
+                        format!("song {song_id} not found"),
+                    ));
                 }
+
+                let new_song = NewPlaylistSong {
+                    playlist_id,
+                    song_id: *song_id,
+                    position: usize_to_i32(position, "playlist song position")?,
+                };
+
+                diesel::insert_into(playlist_songs::table)
+                    .values(&new_song)
+                    .execute(conn)?;
             }
 
-            // Update playlist stats
-            diesel::update(playlists::table.filter(playlists::id.eq(playlist_id)))
-                .set((
-                    playlists::song_count.eq(i32::try_from(song_ids.len()).unwrap_or(0)),
-                    playlists::duration.eq(total_duration),
-                ))
-                .execute(&mut conn)?;
-        }
+            Self::update_playlist_stats(conn, playlist_id)?;
 
-        // Return the created playlist
-        self.get_playlist(playlist_id)?
-            .ok_or_else(|| MusicRepoError::new(MusicRepoErrorKind::NotFound, "Playlist not found"))
+            Self::get_playlist_with_conn(conn, playlist_id)?.ok_or_else(|| {
+                MusicRepoError::new(MusicRepoErrorKind::NotFound, "Playlist not found")
+            })
+        })
     }
 
     /// Update a playlist (name/comment/songs).
@@ -270,67 +278,69 @@ impl PlaylistRepository {
     ) -> Result<(), MusicRepoError> {
         let mut conn = self.pool.get()?;
 
-        // Update name/comment/public if provided
-        if let Some(n) = name {
-            diesel::update(playlists::table.filter(playlists::id.eq(playlist_id)))
-                .set(playlists::name.eq(n))
-                .execute(&mut conn)?;
-        }
+        conn.transaction(|conn| {
+            if let Some(n) = name {
+                diesel::update(playlists::table.filter(playlists::id.eq(playlist_id)))
+                    .set(playlists::name.eq(n))
+                    .execute(conn)?;
+            }
 
-        if let Some(c) = comment {
-            diesel::update(playlists::table.filter(playlists::id.eq(playlist_id)))
-                .set(playlists::comment.eq(c))
-                .execute(&mut conn)?;
-        }
+            if let Some(c) = comment {
+                diesel::update(playlists::table.filter(playlists::id.eq(playlist_id)))
+                    .set(playlists::comment.eq(c))
+                    .execute(conn)?;
+            }
 
-        if let Some(p) = public {
-            diesel::update(playlists::table.filter(playlists::id.eq(playlist_id)))
-                .set(playlists::public.eq(p))
-                .execute(&mut conn)?;
-        }
+            if let Some(p) = public {
+                diesel::update(playlists::table.filter(playlists::id.eq(playlist_id)))
+                    .set(playlists::public.eq(p))
+                    .execute(conn)?;
+            }
 
-        // Remove songs by index (position)
-        if !song_indices_to_remove.is_empty() {
             for index in song_indices_to_remove {
                 diesel::delete(
                     playlist_songs::table
                         .filter(playlist_songs::playlist_id.eq(playlist_id))
                         .filter(playlist_songs::position.eq(index)),
                 )
-                .execute(&mut conn)?;
+                .execute(conn)?;
             }
 
-            // Renumber positions
-            Self::renumber_positions(&mut conn, playlist_id)?;
-        }
-
-        // Add new songs
-        if !song_ids_to_add.is_empty() {
-            // Get current max position
-            let max_pos: Option<i32> = playlist_songs::table
-                .filter(playlist_songs::playlist_id.eq(playlist_id))
-                .select(diesel::dsl::max(playlist_songs::position))
-                .first(&mut conn)?;
-
-            let start_pos = max_pos.unwrap_or(-1) + 1;
-
-            for (next_pos, song_id) in (start_pos..).zip(song_ids_to_add.iter()) {
-                let new_song = NewPlaylistSong {
-                    playlist_id,
-                    song_id: *song_id,
-                    position: next_pos,
-                };
-
-                diesel::insert_into(playlist_songs::table)
-                    .values(&new_song)
-                    .execute(&mut conn)?;
+            if !song_indices_to_remove.is_empty() {
+                Self::renumber_positions(conn, playlist_id)?;
             }
-        }
 
-        // Update playlist stats
-        Self::update_playlist_stats(&mut conn, playlist_id)?;
+            if !song_ids_to_add.is_empty() {
+                let max_pos: Option<i32> = playlist_songs::table
+                    .filter(playlist_songs::playlist_id.eq(playlist_id))
+                    .select(diesel::dsl::max(playlist_songs::position))
+                    .first(conn)?;
 
-        Ok(())
+                let start_pos = max_pos.unwrap_or(-1) + 1;
+
+                for (offset, song_id) in song_ids_to_add.iter().enumerate() {
+                    let next_pos = start_pos
+                        .checked_add(usize_to_i32(offset, "playlist song position")?)
+                        .ok_or_else(|| {
+                            MusicRepoError::new(
+                                MusicRepoErrorKind::Database,
+                                "playlist song position exceeds i32 range",
+                            )
+                        })?;
+                    let new_song = NewPlaylistSong {
+                        playlist_id,
+                        song_id: *song_id,
+                        position: next_pos,
+                    };
+
+                    diesel::insert_into(playlist_songs::table)
+                        .values(&new_song)
+                        .execute(conn)?;
+                }
+            }
+
+            Self::update_playlist_stats(conn, playlist_id)
+        })
     }
 
     /// Delete a playlist.
@@ -376,7 +386,7 @@ impl PlaylistRepository {
         // Update positions
         for (new_pos, id) in song_ids.iter().enumerate() {
             diesel::update(playlist_songs::table.filter(playlist_songs::id.eq(id)))
-                .set(playlist_songs::position.eq(i32::try_from(new_pos).unwrap_or(0)))
+                .set(playlist_songs::position.eq(usize_to_i32(new_pos, "playlist song position")?))
                 .execute(conn)?;
         }
 
@@ -395,7 +405,7 @@ impl PlaylistRepository {
             .select(SongRow::as_select())
             .load(conn)?;
 
-        let song_count = i32::try_from(results.len()).unwrap_or(0);
+        let song_count = usize_to_i32(results.len(), "playlist song count")?;
         let total_duration: i32 = results.iter().map(|s| s.duration).sum();
 
         diesel::update(playlists::table.filter(playlists::id.eq(playlist_id)))
@@ -541,64 +551,75 @@ impl PlayQueueRepository {
     ) -> Result<(), MusicRepoError> {
         let mut conn = self.pool.get()?;
 
-        // Get or create the play queue
-        let queue_id: i32 = {
-            let existing: Option<i32> = play_queue::table
-                .filter(play_queue::user_id.eq(user_id))
-                .select(play_queue::id)
-                .first(&mut conn)
-                .optional()?;
+        conn.transaction(|conn| {
+            for song_id in song_ids {
+                let exists = songs::table
+                    .filter(songs::id.eq(song_id))
+                    .select(songs::id)
+                    .first::<i32>(conn)
+                    .optional()?;
+                if exists.is_none() {
+                    return Err(MusicRepoError::new(
+                        MusicRepoErrorKind::NotFound,
+                        format!("song {song_id} not found"),
+                    ));
+                }
+            }
 
-            if let Some(id) = existing {
-                // Update existing queue
-                diesel::update(play_queue::table.filter(play_queue::id.eq(id)))
-                    .set((
-                        play_queue::current_song_id.eq(current_song_id),
-                        play_queue::position.eq(position),
-                        play_queue::changed_at.eq(chrono::Utc::now().naive_utc()),
-                        play_queue::changed_by.eq(changed_by),
-                    ))
-                    .execute(&mut conn)?;
-                id
-            } else {
-                // Insert new queue
-                let new_queue = NewPlayQueue {
-                    user_id,
-                    current_song_id,
-                    position,
-                    changed_by: changed_by.map(std::string::ToString::to_string),
-                };
-
-                diesel::insert_into(play_queue::table)
-                    .values(&new_queue)
-                    .execute(&mut conn)?;
-
-                play_queue::table
+            let queue_id: i32 = {
+                let existing: Option<i32> = play_queue::table
                     .filter(play_queue::user_id.eq(user_id))
                     .select(play_queue::id)
-                    .first(&mut conn)?
-            }
-        };
+                    .first(conn)
+                    .optional()?;
 
-        // Clear existing songs
-        diesel::delete(
-            play_queue_songs::table.filter(play_queue_songs::play_queue_id.eq(queue_id)),
-        )
-        .execute(&mut conn)?;
+                if let Some(id) = existing {
+                    diesel::update(play_queue::table.filter(play_queue::id.eq(id)))
+                        .set((
+                            play_queue::current_song_id.eq(current_song_id),
+                            play_queue::position.eq(position),
+                            play_queue::changed_at.eq(chrono::Utc::now().naive_utc()),
+                            play_queue::changed_by.eq(changed_by),
+                        ))
+                        .execute(conn)?;
+                    id
+                } else {
+                    let new_queue = NewPlayQueue {
+                        user_id,
+                        current_song_id,
+                        position,
+                        changed_by: changed_by.map(std::string::ToString::to_string),
+                    };
 
-        // Add new songs
-        for (pos, song_id) in song_ids.iter().enumerate() {
-            let new_song = NewPlayQueueSong {
-                play_queue_id: queue_id,
-                song_id: *song_id,
-                position: i32::try_from(pos).unwrap_or(0),
+                    diesel::insert_into(play_queue::table)
+                        .values(&new_queue)
+                        .execute(conn)?;
+
+                    play_queue::table
+                        .filter(play_queue::user_id.eq(user_id))
+                        .select(play_queue::id)
+                        .first(conn)?
+                }
             };
 
-            diesel::insert_into(play_queue_songs::table)
-                .values(&new_song)
-                .execute(&mut conn)?;
-        }
+            diesel::delete(
+                play_queue_songs::table.filter(play_queue_songs::play_queue_id.eq(queue_id)),
+            )
+            .execute(conn)?;
 
-        Ok(())
+            for (pos, song_id) in song_ids.iter().enumerate() {
+                let new_song = NewPlayQueueSong {
+                    play_queue_id: queue_id,
+                    song_id: *song_id,
+                    position: usize_to_i32(pos, "play queue position")?,
+                };
+
+                diesel::insert_into(play_queue_songs::table)
+                    .values(&new_song)
+                    .execute(conn)?;
+            }
+
+            Ok(())
+        })
     }
 }

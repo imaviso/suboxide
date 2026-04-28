@@ -33,9 +33,13 @@ pub struct StarParams {
 /// Stars one or more artists, albums, or songs.
 /// Supports multiple IDs via repeated parameters: `?id=1&id=2&albumId=3`
 pub async fn star(
-    axum::extract::Query(params): axum::extract::Query<StarParams>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<StarParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
+    if !auth.user.roles.comment_role {
+        return error_response(auth.format, &ApiError::NotAuthorized).into_response();
+    }
+
     let user_id = auth.user.id;
 
     for artist_id in &params.artist_id {
@@ -65,9 +69,13 @@ pub async fn star(
 /// Unstars one or more artists, albums, or songs.
 /// Supports multiple IDs via repeated parameters: `?id=1&id=2&albumId=3`
 pub async fn unstar(
-    axum::extract::Query(params): axum::extract::Query<StarParams>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<StarParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
+    if !auth.user.roles.comment_role {
+        return error_response(auth.format, &ApiError::NotAuthorized).into_response();
+    }
+
     let user_id = auth.user.id;
 
     for artist_id in &params.artist_id {
@@ -177,7 +185,7 @@ pub struct ScrobbleParams {
 /// - `time` (optional): Time in milliseconds since the media started playing (can be repeated, one per id)
 /// - `submission` (optional): Whether this is a "scrobble" (true) or a "now playing" notification (false). Default true.
 pub async fn scrobble(
-    axum::extract::Query(params): axum::extract::Query<ScrobbleParams>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<ScrobbleParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let user_id = auth.user.id;
@@ -264,9 +272,13 @@ pub struct SetRatingParams {
 /// - `id` (required): The ID of the item to rate
 /// - `rating` (required): The rating (0-5). 0 removes the rating.
 pub async fn set_rating(
-    axum::extract::Query(params): axum::extract::Query<SetRatingParams>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<SetRatingParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
+    if !auth.user.roles.comment_role {
+        return error_response(auth.format, &ApiError::NotAuthorized).into_response();
+    }
+
     let Some(id_str) = params.id.as_ref() else {
         return error_response(auth.format, &ApiError::MissingParameter("id".into()))
             .into_response();

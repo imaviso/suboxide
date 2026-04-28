@@ -18,18 +18,19 @@
 //!
 //! Parameters can be passed via:
 //! - Query string (GET requests)
-//! - Form body (POST requests with application/x-www-form-urlencoded)
-//! - Or a combination of both (query params take precedence)
+//! - Query string on POST requests
 
 use axum::{
     body::Body,
-    extract::{FromRef, FromRequest, Query, Request},
+    extract::{FromRef, FromRequest, FromRequestParts, Query, Request},
+    http::request::Parts,
     response::{IntoResponse, Response},
 };
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 
 use super::error::ApiError;
-use super::response::{Format, error_response};
+use super::response::{API_VERSION, Format, error_response};
 use super::services::{MusicLibrary, RemoteSessions, Users};
 use crate::db::DbPool;
 use crate::models::User;
@@ -67,8 +68,7 @@ pub struct AuthParams {
 
 impl AuthParams {
     /// Get the response format.
-    #[must_use]
-    pub fn format(&self) -> Format {
+    pub fn format(&self) -> Result<Format, String> {
         Format::from_param(self.f.as_deref())
     }
 
@@ -129,10 +129,46 @@ impl AuthParams {
     }
 }
 
+/// Query extractor that returns Subsonic-formatted errors.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SubsonicQuery<T>(pub T);
+
+impl<S, T> FromRequestParts<S> for SubsonicQuery<T>
+where
+    S: Send + Sync,
+    T: DeserializeOwned,
+{
+    type Rejection = Response;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let format = query_format(parts.uri.query());
+        let Some(query) = parts.uri.query() else {
+            return serde_urlencoded::from_str("").map(Self).map_err(|e| {
+                error_response(format, &ApiError::Generic(e.to_string())).into_response()
+            });
+        };
+
+        serde_urlencoded::from_str(query)
+            .map(Self)
+            .map_err(|e| error_response(format, &ApiError::Generic(e.to_string())).into_response())
+    }
+}
+
+fn query_format(query: Option<&str>) -> Format {
+    let Some(query) = query else {
+        return Format::Xml;
+    };
+
+    let format = serde_urlencoded::from_str::<AuthParams>(query)
+        .ok()
+        .and_then(|params| params.format().ok());
+
+    format.unwrap_or(Format::Xml)
+}
+
 /// Authenticated user extractor that also includes the response format.
 ///
-/// Supports GET and POST authentication parameters.
-/// Endpoint parameters are still read from query strings.
+/// Supports GET and POST query-string authentication parameters.
 ///
 /// Use this in your handlers to require authentication:
 ///
@@ -273,7 +309,15 @@ where
             }
         }
 
-        let format = params.format();
+        let format = match params.format() {
+            Ok(format) => format,
+            Err(format) => {
+                return Err(AuthError {
+                    error: ApiError::Generic(format!("Unsupported response format: {format}")),
+                    format: Format::Xml,
+                });
+            }
+        };
 
         // Validate common required parameters (for all auth methods)
         if params.v.is_empty() {
@@ -285,6 +329,12 @@ where
         if params.c.is_empty() {
             return Err(AuthError {
                 error: ApiError::MissingParameter("c (client)".into()),
+                format,
+            });
+        }
+        if !is_supported_client_version(&params.v) {
+            return Err(AuthError {
+                error: ApiError::ServerTooOld,
                 format,
             });
         }
@@ -360,7 +410,13 @@ where
             } else if let Some(password) = &params.p {
                 // Legacy password authentication - use Argon2
                 AuthParams::decode_password(password)
-                    .is_some_and(|decoded| user.verify_password(&decoded).unwrap_or(false))
+                    .is_some_and(|decoded| match user.verify_password(&decoded) {
+                        Ok(ok) => ok,
+                        Err(e) => {
+                            tracing::error!(username = %user.username, error = %e, "Stored password hash is malformed");
+                            false
+                        }
+                    })
             } else {
                 return Err(AuthError {
                     error: ApiError::MissingParameter(
@@ -385,6 +441,22 @@ where
             }
         }
     }
+}
+
+fn is_supported_client_version(version: &str) -> bool {
+    parse_version(version)
+        .is_some_and(|client| client <= parse_version(API_VERSION).unwrap_or([1, 16, 1]))
+}
+
+fn parse_version(version: &str) -> Option<[u16; 3]> {
+    let mut parts = version.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next().unwrap_or("0").parse().ok()?;
+    let patch = parts.next().unwrap_or("0").parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some([major, minor, patch])
 }
 
 impl<S> FromRequest<S> for SubsonicContext

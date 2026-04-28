@@ -515,7 +515,7 @@ async fn run_lastfm_command(pool: &DbPool, cmd: LastfmCommands) -> Result<(), La
             let api_key = std::env::var("LASTFM_API_KEY").unwrap_or_default();
             let api_secret = std::env::var("LASTFM_API_SECRET").unwrap_or_default();
 
-            let client = LastFmClient::new(api_key.clone(), api_secret)
+            let client = LastFmClient::new(api_key.clone(), api_secret)?
                 .ok_or(LastfmCommandError::NotConfigured)?;
 
             let Some(user) = repo.find_by_username(&username)? else {
@@ -561,7 +561,7 @@ async fn run_lastfm_command(pool: &DbPool, cmd: LastfmCommands) -> Result<(), La
             let api_secret = std::env::var("LASTFM_API_SECRET").unwrap_or_default();
 
             let client =
-                LastFmClient::new(api_key, api_secret).ok_or(LastfmCommandError::NotConfigured)?;
+                LastFmClient::new(api_key, api_secret)?.ok_or(LastfmCommandError::NotConfigured)?;
 
             println!("Querying Last.fm for artist: '{artist}'");
             match client.get_artist_info(&artist).await? {
@@ -611,6 +611,45 @@ fn run_scan_command(pool: &DbPool, folder: Option<i32>, full: bool) -> Result<()
     println!("  Albums added:     {}", stats.albums_added);
     println!("  Cover art saved:  {}", stats.cover_art_saved);
     Ok(())
+}
+
+fn load_lastfm_client() -> Result<Option<LastFmClient>, LastFmError> {
+    let api_key = std::env::var("LASTFM_API_KEY").unwrap_or_default();
+    let api_secret = std::env::var("LASTFM_API_SECRET").unwrap_or_default();
+    LastFmClient::new(api_key, api_secret)
+}
+
+async fn run_server_command_or_exit(
+    pool: DbPool,
+    port: u16,
+    auto_scan: bool,
+    auto_scan_interval: u64,
+) {
+    let lastfm_client = match load_lastfm_client() {
+        Ok(client) => client,
+        Err(e) => {
+            tracing::error!(error = %e, "Last.fm client initialization failed");
+            std::process::exit(1);
+        }
+    };
+
+    if let Err(e) = run_server(ServerConfig {
+        pool,
+        port,
+        auto_scan,
+        auto_scan_interval,
+        lastfm_client,
+    })
+    .await
+    {
+        tracing::event!(
+            name: "server.run.failed",
+            tracing::Level::ERROR,
+            error = %e,
+            "server failed"
+        );
+        std::process::exit(1);
+    }
 }
 
 #[tokio::main]
@@ -680,40 +719,21 @@ async fn main() {
             auto_scan,
             auto_scan_interval,
         }) => {
-            // Read Last.fm credentials before starting server
-            let api_key = std::env::var("LASTFM_API_KEY").unwrap_or_default();
-            let api_secret = std::env::var("LASTFM_API_SECRET").unwrap_or_default();
-            let lastfm_client = LastFmClient::new(api_key, api_secret);
-
-            if let Err(e) =
-                run_server(pool, cli.port, auto_scan, auto_scan_interval, lastfm_client).await
-            {
-                tracing::event!(
-                    name: "server.run.failed",
-                    tracing::Level::ERROR,
-                    error = %e,
-                    "server failed"
-                );
-                std::process::exit(1);
-            }
+            run_server_command_or_exit(pool, cli.port, auto_scan, auto_scan_interval).await;
         }
         None => {
-            // Default: start server without auto-scan
-            let api_key = std::env::var("LASTFM_API_KEY").unwrap_or_default();
-            let api_secret = std::env::var("LASTFM_API_SECRET").unwrap_or_default();
-            let lastfm_client = LastFmClient::new(api_key, api_secret);
-
-            if let Err(e) = run_server(pool, cli.port, false, 300, lastfm_client).await {
-                tracing::event!(
-                    name: "server.run.failed",
-                    tracing::Level::ERROR,
-                    error = %e,
-                    "server failed"
-                );
-                std::process::exit(1);
-            }
+            run_server_command_or_exit(pool, cli.port, false, 300).await;
         }
     }
+}
+
+/// Server configuration.
+struct ServerConfig {
+    pool: DbPool,
+    port: u16,
+    auto_scan: bool,
+    auto_scan_interval: u64,
+    lastfm_client: Option<LastFmClient>,
 }
 
 /// Errors that can occur during server startup.
@@ -729,13 +749,13 @@ enum ServerError {
     Serve(#[source] std::io::Error),
 }
 
-async fn run_server(
-    pool: DbPool,
-    port: u16,
-    auto_scan: bool,
-    auto_scan_interval: u64,
-    lastfm_client: Option<LastFmClient>,
-) -> Result<(), ServerError> {
+async fn run_server(config: ServerConfig) -> Result<(), ServerError> {
+    let pool = config.pool;
+    let port = config.port;
+    let auto_scan = config.auto_scan;
+    let auto_scan_interval = config.auto_scan_interval;
+    let lastfm_client = config.lastfm_client;
+
     // Check if there are any users
     let users = UserRepository::new(pool.clone())
         .find_all()

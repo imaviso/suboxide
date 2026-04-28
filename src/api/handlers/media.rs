@@ -49,6 +49,14 @@ fn validate_song_path(song: &Song, auth: &SubsonicContext) -> Result<PathBuf, &'
     Err("Audio file not found in music library")
 }
 
+fn is_safe_cover_art_id(id: &str) -> bool {
+    Path::new(id).file_name().and_then(|name| name.to_str()) == Some(id)
+        && !id.contains("..")
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 /// Query parameters for the stream endpoint.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 #[serde(default)]
@@ -87,7 +95,7 @@ pub struct StreamParams {
 )]
 pub async fn stream(
     headers: HeaderMap,
-    axum::extract::Query(params): axum::extract::Query<StreamParams>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<StreamParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     // Get song ID
@@ -123,21 +131,29 @@ pub async fn stream(
     };
 
     // Open the file
-    let Ok(file) = File::open(&path).await else {
-        return error_response(
-            auth.format,
-            &ApiError::Generic("Failed to open audio file".into()),
-        )
-        .into_response();
+    let file = match File::open(&path).await {
+        Ok(file) => file,
+        Err(e) => {
+            tracing::error!(path = %path.display(), error = %e, "Failed to open audio file");
+            return error_response(
+                auth.format,
+                &ApiError::Generic("Failed to open audio file".into()),
+            )
+            .into_response();
+        }
     };
 
     // Get file metadata
-    let Ok(metadata) = file.metadata().await else {
-        return error_response(
-            auth.format,
-            &ApiError::Generic("Failed to read file metadata".into()),
-        )
-        .into_response();
+    let metadata = match file.metadata().await {
+        Ok(metadata) => metadata,
+        Err(e) => {
+            tracing::error!(path = %path.display(), error = %e, "Failed to read file metadata");
+            return error_response(
+                auth.format,
+                &ApiError::Generic("Failed to read file metadata".into()),
+            )
+            .into_response();
+        }
     };
 
     let file_size = metadata.len();
@@ -183,7 +199,8 @@ pub async fn stream(
             let content_length = end - start + 1;
 
             let mut file = file;
-            if file.seek(std::io::SeekFrom::Start(start)).await.is_err() {
+            if let Err(e) = file.seek(std::io::SeekFrom::Start(start)).await {
+                tracing::error!(error = %e, "Failed to seek in file");
                 return error_response(
                     auth.format,
                     &ApiError::Generic("Failed to seek in file".into()),
@@ -231,7 +248,7 @@ pub async fn stream(
 ///
 /// Similar to stream but with Content-Disposition header for downloading.
 pub async fn download(
-    axum::extract::Query(params): axum::extract::Query<StreamParams>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<StreamParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     // Get song ID
@@ -274,21 +291,29 @@ pub async fn download(
         .replace(['"', '\r', '\n'], "");
 
     // Open the file
-    let Ok(file) = File::open(&path).await else {
-        return error_response(
-            auth.format,
-            &ApiError::Generic("Failed to open audio file".into()),
-        )
-        .into_response();
+    let file = match File::open(&path).await {
+        Ok(file) => file,
+        Err(e) => {
+            tracing::error!(path = %path.display(), error = %e, "Failed to open audio file");
+            return error_response(
+                auth.format,
+                &ApiError::Generic("Failed to open audio file".into()),
+            )
+            .into_response();
+        }
     };
 
     // Get file metadata
-    let Ok(metadata) = file.metadata().await else {
-        return error_response(
-            auth.format,
-            &ApiError::Generic("Failed to read file metadata".into()),
-        )
-        .into_response();
+    let metadata = match file.metadata().await {
+        Ok(metadata) => metadata,
+        Err(e) => {
+            tracing::error!(path = %path.display(), error = %e, "Failed to read file metadata");
+            return error_response(
+                auth.format,
+                &ApiError::Generic("Failed to read file metadata".into()),
+            )
+            .into_response();
+        }
     };
 
     let file_size = metadata.len();
@@ -331,7 +356,7 @@ pub struct CoverArtParams {
 /// - `id` (required): The cover art ID (hash from the album/song coverArt field).
 /// - `size` (optional): Requested size in pixels (not yet implemented).
 pub async fn get_cover_art(
-    axum::extract::Query(params): axum::extract::Query<CoverArtParams>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<CoverArtParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     // Get cover art ID
@@ -339,6 +364,10 @@ pub async fn get_cover_art(
         return error_response(auth.format, &ApiError::MissingParameter("id".into()))
             .into_response();
     };
+    if !is_safe_cover_art_id(cover_art_id) {
+        return error_response(auth.format, &ApiError::NotFound("Cover art".into()))
+            .into_response();
+    }
 
     // Check that user has coverArt permission
     if !auth.user.roles.cover_art_role {
@@ -378,21 +407,29 @@ pub async fn get_cover_art(
     };
 
     // Open the file
-    let Ok(file) = File::open(&path).await else {
-        return error_response(
-            auth.format,
-            &ApiError::Generic("Failed to open cover art file".into()),
-        )
-        .into_response();
+    let file = match File::open(&path).await {
+        Ok(file) => file,
+        Err(e) => {
+            tracing::error!(path = %path.display(), error = %e, "Failed to open cover art file");
+            return error_response(
+                auth.format,
+                &ApiError::Generic("Failed to open cover art file".into()),
+            )
+            .into_response();
+        }
     };
 
     // Get file metadata
-    let Ok(metadata) = file.metadata().await else {
-        return error_response(
-            auth.format,
-            &ApiError::Generic("Failed to read file metadata".into()),
-        )
-        .into_response();
+    let metadata = match file.metadata().await {
+        Ok(metadata) => metadata,
+        Err(e) => {
+            tracing::error!(path = %path.display(), error = %e, "Failed to read file metadata");
+            return error_response(
+                auth.format,
+                &ApiError::Generic("Failed to read file metadata".into()),
+            )
+            .into_response();
+        }
     };
 
     let file_size = metadata.len();

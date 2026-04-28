@@ -21,7 +21,7 @@ pub struct GetUserParams {
 /// Get details about a given user, including which authorization roles and folder access it has.
 /// Can be used to get information about the currently logged in user.
 pub async fn get_user(
-    axum::extract::Query(params): axum::extract::Query<GetUserParams>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<GetUserParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let username = match &params.username {
@@ -88,7 +88,7 @@ pub struct DeleteUserParams {
 /// Deletes an existing user.
 /// Only users with admin role are allowed to call this method.
 pub async fn delete_user(
-    axum::extract::Query(params): axum::extract::Query<DeleteUserParams>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<DeleteUserParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     if !auth.user.is_admin() {
@@ -138,7 +138,7 @@ pub struct ChangePasswordParams {
 /// Non-admin users can only change their own password.
 /// Admins can change anyone's password.
 pub async fn change_password(
-    axum::extract::Query(params): axum::extract::Query<ChangePasswordParams>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<ChangePasswordParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let username = match &params.username {
@@ -216,7 +216,7 @@ pub struct CreateUserParams {
 /// Creates a new user on the server.
 /// Only users with admin role are allowed to call this method.
 pub async fn create_user(
-    axum::extract::Query(params): axum::extract::Query<CreateUserParams>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<CreateUserParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     if !auth.user.is_admin() {
@@ -322,7 +322,7 @@ pub struct UpdateUserParams {
 /// Modifies an existing user on the server.
 /// Only users with admin role are allowed to call this method.
 pub async fn update_user(
-    axum::extract::Query(params): axum::extract::Query<UpdateUserParams>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<UpdateUserParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     if !auth.user.is_admin() {

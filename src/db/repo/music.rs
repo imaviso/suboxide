@@ -234,6 +234,22 @@ impl ArtistRepository {
         Ok(results.into_iter().map(Artist::from).collect())
     }
 
+    /// Get artists with songs in a music folder.
+    pub fn find_by_music_folder(&self, folder_id: i32) -> Result<Vec<Artist>, MusicRepoError> {
+        let mut conn = self.pool.get().map_err(MusicRepoError::from)?;
+
+        let results = artists::table
+            .inner_join(songs::table.on(songs::artist_id.eq(artists::id.nullable())))
+            .filter(songs::music_folder_id.eq(folder_id))
+            .select(ArtistRow::as_select())
+            .distinct()
+            .order(artists::name.asc())
+            .load(&mut conn)
+            .map_err(MusicRepoError::from)?;
+
+        Ok(results.into_iter().map(Artist::from).collect())
+    }
+
     /// Find an artist by ID.
     pub fn find_by_id(&self, artist_id: i32) -> Result<Option<Artist>, MusicRepoError> {
         let mut conn = self.pool.get().map_err(MusicRepoError::from)?;

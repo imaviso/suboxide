@@ -12,6 +12,17 @@ use crate::models::music::{
     SearchResult2Response, SearchResult3Response, SearchResultResponse, format_subsonic_datetime,
 };
 
+macro_rules! api_try {
+    ($expr:expr, $format:expr) => {
+        match $expr {
+            Ok(v) => v,
+            Err(e) => {
+                return error_response($format, &ApiError::Generic(e.to_string())).into_response();
+            }
+        }
+    };
+}
+
 /// Query parameters for search3.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
@@ -47,7 +58,7 @@ pub struct Search3Params {
 /// Supports paging through the result.
 /// An empty query returns all results (up to the count limits).
 pub async fn search3(
-    axum::extract::Query(params): axum::extract::Query<Search3Params>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<Search3Params>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     // Empty query is allowed - it returns all results
@@ -62,66 +73,44 @@ pub async fn search3(
     let song_count = params.song_count.unwrap_or(20).clamp(0, 500);
     let song_offset = params.song_offset.unwrap_or(0).max(0);
 
-    let artists = match auth
-        .music()
-        .search_artists(query, artist_offset, artist_count)
-    {
-        Ok(v) => v,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
-    let albums = match auth.music().search_albums(query, album_offset, album_count) {
-        Ok(v) => v,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
-    let songs = match auth.music().search_songs(query, song_offset, song_count) {
-        Ok(v) => v,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
+    let artists = api_try!(
+        auth.music()
+            .search_artists(query, artist_offset, artist_count),
+        auth.format
+    );
+    let albums = api_try!(
+        auth.music().search_albums(query, album_offset, album_count),
+        auth.format
+    );
+    let songs = api_try!(
+        auth.music().search_songs(query, song_offset, song_count),
+        auth.format
+    );
 
     let user_id = auth.user.id;
     let artist_ids: Vec<i32> = artists.iter().map(|a| a.id).collect();
     let album_ids: Vec<i32> = albums.iter().map(|a| a.id).collect();
     let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
 
-    let artist_album_counts = match auth.music().get_artist_album_counts_batch(&artist_ids) {
-        Ok(v) => v,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
-    let starred_artists = match auth
-        .music()
-        .get_starred_at_for_artists_batch(user_id, &artist_ids)
-    {
-        Ok(v) => v,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
-    let starred_albums = match auth
-        .music()
-        .get_starred_at_for_albums_batch(user_id, &album_ids)
-    {
-        Ok(v) => v,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
-    let starred_songs = match auth
-        .music()
-        .get_starred_at_for_songs_batch(user_id, &song_ids)
-    {
-        Ok(v) => v,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
+    let artist_album_counts = api_try!(
+        auth.music().get_artist_album_counts_batch(&artist_ids),
+        auth.format
+    );
+    let starred_artists = api_try!(
+        auth.music()
+            .get_starred_at_for_artists_batch(user_id, &artist_ids),
+        auth.format
+    );
+    let starred_albums = api_try!(
+        auth.music()
+            .get_starred_at_for_albums_batch(user_id, &album_ids),
+        auth.format
+    );
+    let starred_songs = api_try!(
+        auth.music()
+            .get_starred_at_for_songs_batch(user_id, &song_ids),
+        auth.format
+    );
 
     // Convert to response types with starred status from batch results
     let artist_responses: Vec<ArtistID3Response> = artists
@@ -195,7 +184,7 @@ pub struct Search2Params {
 ///
 /// Returns albums, artists and songs matching the given search criteria (non-ID3).
 pub async fn search2(
-    axum::extract::Query(params): axum::extract::Query<Search2Params>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<Search2Params>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let raw_query = params.query.as_deref().unwrap_or("");
@@ -208,60 +197,40 @@ pub async fn search2(
     let song_count = params.song_count.unwrap_or(20).clamp(0, 500);
     let song_offset = params.song_offset.unwrap_or(0).max(0);
 
-    let artists = match auth
-        .music()
-        .search_artists(query, artist_offset, artist_count)
-    {
-        Ok(v) => v,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
-    let albums = match auth.music().search_albums(query, album_offset, album_count) {
-        Ok(v) => v,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
-    let songs = match auth.music().search_songs(query, song_offset, song_count) {
-        Ok(v) => v,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
+    let artists = api_try!(
+        auth.music()
+            .search_artists(query, artist_offset, artist_count),
+        auth.format
+    );
+    let albums = api_try!(
+        auth.music().search_albums(query, album_offset, album_count),
+        auth.format
+    );
+    let songs = api_try!(
+        auth.music().search_songs(query, song_offset, song_count),
+        auth.format
+    );
 
     let user_id = auth.user.id;
     let artist_ids: Vec<i32> = artists.iter().map(|a| a.id).collect();
     let album_ids: Vec<i32> = albums.iter().map(|a| a.id).collect();
     let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
 
-    let starred_artists = match auth
-        .music()
-        .get_starred_at_for_artists_batch(user_id, &artist_ids)
-    {
-        Ok(v) => v,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
-    let starred_albums = match auth
-        .music()
-        .get_starred_at_for_albums_batch(user_id, &album_ids)
-    {
-        Ok(v) => v,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
-    let starred_songs = match auth
-        .music()
-        .get_starred_at_for_songs_batch(user_id, &song_ids)
-    {
-        Ok(v) => v,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
+    let starred_artists = api_try!(
+        auth.music()
+            .get_starred_at_for_artists_batch(user_id, &artist_ids),
+        auth.format
+    );
+    let starred_albums = api_try!(
+        auth.music()
+            .get_starred_at_for_albums_batch(user_id, &album_ids),
+        auth.format
+    );
+    let starred_songs = api_try!(
+        auth.music()
+            .get_starred_at_for_songs_batch(user_id, &song_ids),
+        auth.format
+    );
 
     // Convert to non-ID3 response types
     let artist_responses: Vec<ArtistResponse> = artists
@@ -324,7 +293,7 @@ pub struct SearchParams {
 ///
 /// Returns a listing of files matching the given search criteria (legacy).
 pub async fn search(
-    axum::extract::Query(params): axum::extract::Query<SearchParams>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<SearchParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let count = params.count.unwrap_or(20).clamp(0, 500);
@@ -340,12 +309,7 @@ pub async fn search(
         .unwrap_or("")
         .trim();
 
-    let songs = match auth.music().search_songs(query, offset, count) {
-        Ok(v) => v,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
+    let songs = api_try!(auth.music().search_songs(query, offset, count), auth.format);
 
     let matches: Vec<SearchMatch> = songs.iter().map(SearchMatch::from).collect();
     #[expect(

@@ -125,7 +125,7 @@ pub struct SavePlayQueueParams {
 /// - `current`: The ID of the currently playing song
 /// - `position`: Position in milliseconds within the currently playing song
 pub async fn save_play_queue(
-    axum::extract::Query(params): axum::extract::Query<SavePlayQueueParams>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<SavePlayQueueParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let user_id = auth.user.id;
@@ -206,7 +206,9 @@ pub struct SavePlayQueueByIndexParams {
 /// - `currentIndex`: The index of the currently playing song (0-based)
 /// - `position`: Position in milliseconds within the currently playing song
 pub async fn save_play_queue_by_index(
-    axum::extract::Query(params): axum::extract::Query<SavePlayQueueByIndexParams>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<
+        SavePlayQueueByIndexParams,
+    >,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let user_id = auth.user.id;

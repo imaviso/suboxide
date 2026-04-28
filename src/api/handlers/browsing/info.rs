@@ -29,7 +29,7 @@ pub struct ArtistInfo2Params {
 /// Returns artist info with biography, image URLs, similar artists, etc.
 /// This is a stub implementation that returns minimal data from the database.
 pub async fn get_artist_info2(
-    axum::extract::Query(params): axum::extract::Query<ArtistInfo2Params>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<ArtistInfo2Params>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
@@ -61,7 +61,7 @@ pub struct AlbumInfo2Params {
 /// Returns album info with notes, `MusicBrainz` ID, image URLs, etc.
 /// This is a stub implementation that returns minimal data from the database.
 pub async fn get_album_info2(
-    axum::extract::Query(params): axum::extract::Query<AlbumInfo2Params>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<AlbumInfo2Params>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
@@ -91,7 +91,7 @@ pub async fn get_album_info2(
 ///
 /// Returns artist info (non-ID3 version). Similar to getArtistInfo2.
 pub async fn get_artist_info(
-    axum::extract::Query(params): axum::extract::Query<ArtistInfo2Params>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<ArtistInfo2Params>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
@@ -114,7 +114,7 @@ pub async fn get_artist_info(
 ///
 /// Returns album info (non-ID3 version). Similar to getAlbumInfo2.
 pub async fn get_album_info(
-    axum::extract::Query(params): axum::extract::Query<AlbumInfo2Params>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<AlbumInfo2Params>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
@@ -154,7 +154,7 @@ pub struct LyricsParams {
 ///
 /// Searches for and returns lyrics for a given song.
 pub async fn get_lyrics(
-    axum::extract::Query(params): axum::extract::Query<LyricsParams>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<LyricsParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let artist = params.artist.as_deref().unwrap_or_default();
@@ -195,7 +195,7 @@ pub async fn get_lyrics(
 /// Extracts embedded lyrics from the audio file.
 /// Returns an empty lyricsList if no lyrics are available.
 pub async fn get_lyrics_by_song_id(
-    axum::extract::Query(params): axum::extract::Query<IdParams>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<IdParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     use crate::scanner::lyrics::{parse_lrc, parse_unsynced};

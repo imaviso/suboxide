@@ -1,6 +1,7 @@
 //! Last.fm API client.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use md5::{Digest, Md5};
 use reqwest::Client;
@@ -14,6 +15,11 @@ const LASTFM_API_URL: &str = "https://ws.audioscrobbler.com/2.0/";
 /// Last.fm API client.
 #[derive(Debug, Clone)]
 pub struct LastFmClient {
+    inner: Arc<Inner>,
+}
+
+#[derive(Debug)]
+struct Inner {
     client: Client,
     api_key: String,
     api_secret: String,
@@ -40,35 +46,25 @@ pub type Result<T> = std::result::Result<T, LastFmError>;
 impl LastFmClient {
     /// Create a new Last.fm client.
     ///
-    /// Returns `None` if the API key is empty, indicating Last.fm is not configured.
-    #[must_use]
-    pub fn new(api_key: String, api_secret: String) -> Option<Self> {
+    /// Returns `Ok(None)` when Last.fm credentials are absent.
+    pub fn new(api_key: String, api_secret: String) -> Result<Option<Self>> {
         if api_key.is_empty() || api_secret.is_empty() {
-            return None;
+            return Ok(None);
         }
 
-        let client = match Client::builder()
+        let client = Client::builder()
             .user_agent("Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0")
             .timeout(std::time::Duration::from_secs(30))
             .build()
-        {
-            Ok(client) => client,
-            Err(error) => {
-                tracing::event!(
-                    name: "lastfm.client.init.failed",
-                    tracing::Level::WARN,
-                    error = %error,
-                    "lastfm client initialization failed"
-                );
-                return None;
-            }
-        };
+            .map_err(LastFmError::Network)?;
 
-        Some(Self {
-            client,
-            api_key,
-            api_secret,
-        })
+        Ok(Some(Self {
+            inner: Arc::new(Inner {
+                client,
+                api_key,
+                api_secret,
+            }),
+        }))
     }
 
     /// Check if Last.fm is configured.
@@ -80,7 +76,7 @@ impl LastFmClient {
     /// Get the API key.
     #[must_use]
     pub fn api_key(&self) -> &str {
-        &self.api_key
+        &self.inner.api_key
     }
 
     /// Sign API parameters according to Last.fm rules.
@@ -93,7 +89,7 @@ impl LastFmClient {
             signature_input.push_str(value);
         }
 
-        signature_input.push_str(&self.api_secret);
+        signature_input.push_str(&self.inner.api_secret);
 
         let mut hasher = Md5::new();
         hasher.update(signature_input.as_bytes());
@@ -109,7 +105,7 @@ impl LastFmClient {
     ) -> BTreeMap<String, String> {
         let mut params = BTreeMap::new();
         params.insert("method".to_string(), method.to_string());
-        params.insert("api_key".to_string(), self.api_key.clone());
+        params.insert("api_key".to_string(), self.inner.api_key.clone());
 
         // Add extra params
         for (key, value) in extra {
@@ -149,6 +145,7 @@ impl LastFmClient {
         let params = self.build_params("auth.getSession", None, extra);
 
         let response = self
+            .inner
             .client
             .get(LASTFM_API_URL)
             .query(&params)
@@ -158,13 +155,14 @@ impl LastFmClient {
         let status = response.status();
         let body: String = response.text().await?;
 
+        if let Ok(error) = serde_json::from_str::<LastFmApiError>(&body) {
+            return Err(LastFmError::Api {
+                code: error.error,
+                message: error.message,
+            });
+        }
+
         if !status.is_success() {
-            if let Ok(error) = serde_json::from_str::<LastFmApiError>(&body) {
-                return Err(LastFmError::Api {
-                    code: error.error,
-                    message: error.message,
-                });
-            }
             return Err(LastFmError::Api {
                 code: i32::from(status.as_u16()),
                 message: body,
@@ -201,6 +199,7 @@ impl LastFmClient {
         let params = self.build_params("track.scrobble", Some(session_key), extra);
 
         let response = self
+            .inner
             .client
             .post(LASTFM_API_URL)
             .form(&params)
@@ -237,6 +236,7 @@ impl LastFmClient {
         let params = self.build_params("track.updateNowPlaying", Some(session_key), extra);
 
         let response = self
+            .inner
             .client
             .post(LASTFM_API_URL)
             .form(&params)
@@ -264,12 +264,13 @@ impl LastFmClient {
         // We simply build params manually to avoid signing logic
         let mut params = BTreeMap::new();
         params.insert("method".to_string(), "artist.getInfo".to_string());
-        params.insert("api_key".to_string(), self.api_key.clone());
+        params.insert("api_key".to_string(), self.inner.api_key.clone());
         params.insert("format".to_string(), "json".to_string());
         params.insert("artist".to_string(), artist_name.to_string());
         params.insert("autocorrect".to_string(), "1".to_string());
 
         let response = self
+            .inner
             .client
             .get(LASTFM_API_URL)
             .query(&params)
@@ -279,14 +280,14 @@ impl LastFmClient {
         let status = response.status();
         let body: String = response.text().await?;
 
+        if let Ok(error) = serde_json::from_str::<LastFmApiError>(&body) {
+            return Err(LastFmError::Api {
+                code: error.error,
+                message: error.message,
+            });
+        }
+
         if !status.is_success() {
-            // Try to parse as error
-            if let Ok(error) = serde_json::from_str::<LastFmApiError>(&body) {
-                return Err(LastFmError::Api {
-                    code: error.error,
-                    message: error.message,
-                });
-            }
             return Err(LastFmError::Api {
                 code: i32::from(status.as_u16()),
                 message: body,
@@ -305,7 +306,7 @@ impl LastFmClient {
     /// # Errors
     /// Returns an error when fetching or parsing the artist page fails.
     pub async fn fetch_artist_image_from_page(&self, url: &str) -> Result<Option<String>> {
-        let response = self.client.get(url).send().await?;
+        let response = self.inner.client.get(url).send().await?;
         let status = response.status();
         let body = response.text().await?;
 
@@ -370,4 +371,38 @@ impl LastFmClient {
 struct LastFmApiError {
     error: i32,
     message: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LastFmClient;
+
+    #[test]
+    fn client_clone_shares_same_inner_state() {
+        let client = LastFmClient::new("test_key".into(), "test_secret".into())
+            .unwrap()
+            .unwrap();
+        let cloned = client.clone();
+
+        assert_eq!(client.api_key(), cloned.api_key());
+        assert!(std::ptr::eq(
+            &*client.inner as *const _,
+            &*cloned.inner as *const _
+        ));
+    }
+
+    #[test]
+    fn new_returns_none_when_api_key_is_empty() {
+        assert!(
+            LastFmClient::new("".into(), "secret".into())
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            LastFmClient::new("key".into(), "".into())
+                .unwrap()
+                .is_none()
+        );
+        assert!(LastFmClient::new("".into(), "".into()).unwrap().is_none());
+    }
 }

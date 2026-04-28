@@ -43,6 +43,13 @@ struct DiscoveredFile {
     file_modified_at: Option<i64>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ExistingSong {
+    file_modified_at: Option<i64>,
+    file_size: i64,
+    album_id: Option<i32>,
+}
+
 enum AutoScanOutcome {
     Completed(ScanResult),
 }
@@ -339,11 +346,16 @@ impl Scanner {
             .collect();
 
         if !deleted_paths.is_empty() {
+            let dirty_album_ids: HashSet<i32> = deleted_paths
+                .iter()
+                .filter_map(|path| existing_songs.get(path).and_then(|song| song.album_id))
+                .collect();
             println!(
                 "  Removing {} deleted files from database",
                 deleted_paths.len()
             );
             result.tracks_removed = self.remove_deleted_songs(&deleted_paths)?;
+            self.update_album_stats_for_ids(&dirty_album_ids)?;
         }
 
         // Process tracks and populate database
@@ -367,24 +379,37 @@ impl Scanner {
     }
 
     /// Get existing songs in a folder from the database.
-    /// Returns a map of path -> (id, `file_modified_at`).
     fn get_existing_songs(
         &self,
         folder_id: i32,
-    ) -> Result<HashMap<String, (i32, Option<i64>)>, ScanError> {
+    ) -> Result<HashMap<String, ExistingSong>, ScanError> {
         use crate::db::schema::songs;
         use diesel::prelude::*;
 
         let mut conn = self.pool.get().map_err(MusicRepoError::from)?;
-        let existing: Vec<(i32, String, Option<i64>)> = songs::table
+        let existing = songs::table
             .filter(songs::music_folder_id.eq(folder_id))
-            .select((songs::id, songs::path, songs::file_modified_at))
+            .select((
+                songs::path,
+                songs::file_modified_at,
+                songs::file_size,
+                songs::album_id,
+            ))
             .load(&mut conn)
             .map_err(MusicRepoError::from)?;
 
         Ok(existing
             .into_iter()
-            .map(|(id, path, mtime)| (path, (id, mtime)))
+            .map(|(path, file_modified_at, file_size, album_id)| {
+                (
+                    path,
+                    ExistingSong {
+                        file_modified_at,
+                        file_size,
+                        album_id,
+                    },
+                )
+            })
             .collect())
     }
 
@@ -429,9 +454,15 @@ impl Scanner {
     fn discover_files_with_paths(folder_path: &Path) -> (Vec<DiscoveredFile>, HashSet<String>) {
         // First, collect all audio file paths (fast, sequential walk)
         let audio_files: Vec<PathBuf> = WalkDir::new(folder_path)
-            .follow_links(true)
+            .follow_links(false)
             .into_iter()
-            .filter_map(std::result::Result::ok)
+            .filter_map(|entry| match entry {
+                Ok(entry) => Some(entry),
+                Err(error) => {
+                    tracing::warn!(error = %error, "Failed to walk scanner path");
+                    None
+                }
+            })
             .filter(|entry| entry.path().is_file())
             .filter_map(|entry| {
                 let path = entry.into_path();
@@ -472,7 +503,7 @@ impl Scanner {
                     .modified()
                     .ok()
                     .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                    .map(|d| i64::try_from(d.as_secs()).unwrap_or(0));
+                    .map(|d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
 
                 Some(DiscoveredFile {
                     path,
@@ -487,7 +518,7 @@ impl Scanner {
 
     fn split_discovered_files_for_mode(
         discovered_files: Vec<DiscoveredFile>,
-        existing_songs: &HashMap<String, (i32, Option<i64>)>,
+        existing_songs: &HashMap<String, ExistingSong>,
         mode: ScanMode,
     ) -> (Vec<DiscoveredFile>, usize) {
         if mode == ScanMode::Full {
@@ -501,8 +532,9 @@ impl Scanner {
             let path_str = file.path.to_string_lossy();
             let unchanged = existing_songs
                 .get(path_str.as_ref())
-                .is_some_and(|(_, stored_mtime)| {
-                    matches!((stored_mtime, file.file_modified_at), (Some(stored), Some(current)) if *stored == current)
+                .is_some_and(|stored| {
+                    matches!((stored.file_modified_at, file.file_modified_at), (Some(stored), Some(current)) if stored == current)
+                        && stored.file_size == i64::try_from(file.file_size).unwrap_or(i64::MAX)
                 });
 
             if unchanged {
@@ -540,7 +572,7 @@ impl Scanner {
         })?;
 
         let properties = tagged_file.properties();
-        let duration_secs = u32::try_from(properties.duration().as_secs()).unwrap_or(0);
+        let duration_secs = u32::try_from(properties.duration().as_secs()).unwrap_or(u32::MAX);
         let bit_rate = properties.audio_bitrate();
         let bit_depth = properties.bit_depth();
         let sample_rate = properties.sample_rate();
@@ -639,7 +671,7 @@ impl Scanner {
         &self,
         folder: &MusicFolder,
         tracks: Vec<ScannedTrack>,
-        existing_songs: &HashMap<String, (i32, Option<i64>)>,
+        existing_songs: &HashMap<String, ExistingSong>,
         state: Option<&ScanState>,
         initial_tracks_skipped: usize,
     ) -> Result<ScanResult, ScanError> {
@@ -762,7 +794,8 @@ impl Scanner {
                             albums::name.eq(album_name),
                             albums::artist_id.eq(artist_id),
                             albums::artist_name.eq(&artist_name),
-                            albums::year.eq(track.year.map(|y| i32::try_from(y).unwrap_or(0))),
+                            albums::year
+                                .eq(track.year.map(|y| i32::try_from(y).unwrap_or(i32::MAX))),
                             albums::genre.eq(&track.genre),
                         ))
                         .on_conflict_do_nothing()
@@ -864,101 +897,108 @@ impl Scanner {
 
         // Process songs in batches within transactions
         for batch in prepared_tracks.chunks(BATCH_SIZE) {
-            conn.transaction::<_, diesel::result::Error, _>(|conn| {
+            conn.transaction::<_, MusicRepoError, _>(|conn| {
                 for prepared in batch {
-                    let query_result = if prepared.is_update {
-                        diesel::update(songs::table.filter(songs::path.eq(&prepared.path_str)))
-                            .set((
-                                songs::title.eq(&prepared.track.title),
-                                songs::album_id.eq(prepared.album_id),
-                                songs::artist_id.eq(prepared.artist_id),
-                                songs::artist_name.eq(&prepared.track.artist),
-                                songs::album_name.eq(&prepared.track.album),
-                                songs::file_size
-                                    .eq(i64::try_from(prepared.track.file_size).unwrap_or(0)),
-                                songs::duration
-                                    .eq(i32::try_from(prepared.track.duration_secs).unwrap_or(0)),
-                                songs::bit_rate.eq(prepared
-                                    .track
-                                    .bit_rate
-                                    .map(|b| i32::try_from(b).unwrap_or(0))),
-                                songs::bit_depth.eq(prepared.track.bit_depth.map(i32::from)),
-                                songs::sampling_rate.eq(prepared
-                                    .track
-                                    .sample_rate
-                                    .map(|s| i32::try_from(s).unwrap_or(0))),
-                                songs::channel_count.eq(prepared.track.channels.map(i32::from)),
-                                songs::track_number.eq(prepared
-                                    .track
-                                    .track_number
-                                    .map(|t| i32::try_from(t).unwrap_or(0))),
-                                songs::disc_number.eq(prepared
-                                    .track
-                                    .disc_number
-                                    .map(|d| i32::try_from(d).unwrap_or(0))),
-                                songs::year
-                                    .eq(prepared.track.year.map(|y| i32::try_from(y).unwrap_or(0))),
-                                songs::genre.eq(&prepared.track.genre),
-                                songs::cover_art.eq(&prepared.cover_art),
-                                songs::file_modified_at.eq(prepared.track.file_modified_at),
-                                songs::updated_at.eq(diesel::dsl::now),
-                            ))
-                            .execute(conn)
-                    } else {
-                        diesel::insert_into(songs::table)
-                            .values((
-                                songs::title.eq(&prepared.track.title),
-                                songs::album_id.eq(prepared.album_id),
-                                songs::artist_id.eq(prepared.artist_id),
-                                songs::artist_name.eq(&prepared.track.artist),
-                                songs::album_name.eq(&prepared.track.album),
-                                songs::music_folder_id.eq(folder.id),
-                                songs::path.eq(&prepared.path_str),
-                                songs::parent_path.eq(prepared.track.parent_path.to_string_lossy()),
-                                songs::file_size
-                                    .eq(i64::try_from(prepared.track.file_size).unwrap_or(0)),
-                                songs::content_type.eq(&prepared.track.content_type),
-                                songs::suffix.eq(&prepared.track.suffix),
-                                songs::duration
-                                    .eq(i32::try_from(prepared.track.duration_secs).unwrap_or(0)),
-                                songs::bit_rate.eq(prepared
-                                    .track
-                                    .bit_rate
-                                    .map(|b| i32::try_from(b).unwrap_or(0))),
-                                songs::bit_depth.eq(prepared.track.bit_depth.map(i32::from)),
-                                songs::sampling_rate.eq(prepared
-                                    .track
-                                    .sample_rate
-                                    .map(|s| i32::try_from(s).unwrap_or(0))),
-                                songs::channel_count.eq(prepared.track.channels.map(i32::from)),
-                                songs::track_number.eq(prepared
-                                    .track
-                                    .track_number
-                                    .map(|t| i32::try_from(t).unwrap_or(0))),
-                                songs::disc_number.eq(prepared
-                                    .track
-                                    .disc_number
-                                    .map(|d| i32::try_from(d).unwrap_or(0))),
-                                songs::year
-                                    .eq(prepared.track.year.map(|y| i32::try_from(y).unwrap_or(0))),
-                                songs::genre.eq(&prepared.track.genre),
-                                songs::cover_art.eq(&prepared.cover_art),
-                                songs::file_modified_at.eq(prepared.track.file_modified_at),
-                            ))
-                            .execute(conn)
-                    };
+                    let query_result =
+                        if prepared.is_update {
+                            diesel::update(songs::table.filter(songs::path.eq(&prepared.path_str)))
+                                .set((
+                                    songs::title.eq(&prepared.track.title),
+                                    songs::album_id.eq(prepared.album_id),
+                                    songs::artist_id.eq(prepared.artist_id),
+                                    songs::artist_name.eq(&prepared.track.artist),
+                                    songs::album_name.eq(&prepared.track.album),
+                                    songs::file_size
+                                        .eq(i64::try_from(prepared.track.file_size)
+                                            .unwrap_or(i64::MAX)),
+                                    songs::duration.eq(i32::try_from(prepared.track.duration_secs)
+                                        .unwrap_or(i32::MAX)),
+                                    songs::bit_rate.eq(prepared
+                                        .track
+                                        .bit_rate
+                                        .map(|b| i32::try_from(b).unwrap_or(i32::MAX))),
+                                    songs::bit_depth.eq(prepared.track.bit_depth.map(i32::from)),
+                                    songs::sampling_rate.eq(prepared
+                                        .track
+                                        .sample_rate
+                                        .map(|s| i32::try_from(s).unwrap_or(i32::MAX))),
+                                    songs::channel_count.eq(prepared.track.channels.map(i32::from)),
+                                    songs::track_number.eq(prepared
+                                        .track
+                                        .track_number
+                                        .map(|t| i32::try_from(t).unwrap_or(i32::MAX))),
+                                    songs::disc_number.eq(prepared
+                                        .track
+                                        .disc_number
+                                        .map(|d| i32::try_from(d).unwrap_or(i32::MAX))),
+                                    songs::year.eq(prepared
+                                        .track
+                                        .year
+                                        .map(|y| i32::try_from(y).unwrap_or(i32::MAX))),
+                                    songs::genre.eq(&prepared.track.genre),
+                                    songs::cover_art.eq(&prepared.cover_art),
+                                    songs::file_modified_at.eq(prepared.track.file_modified_at),
+                                    songs::updated_at.eq(diesel::dsl::now),
+                                ))
+                                .execute(conn)
+                        } else {
+                            diesel::insert_into(songs::table)
+                                .values((
+                                    songs::title.eq(&prepared.track.title),
+                                    songs::album_id.eq(prepared.album_id),
+                                    songs::artist_id.eq(prepared.artist_id),
+                                    songs::artist_name.eq(&prepared.track.artist),
+                                    songs::album_name.eq(&prepared.track.album),
+                                    songs::music_folder_id.eq(folder.id),
+                                    songs::path.eq(&prepared.path_str),
+                                    songs::parent_path
+                                        .eq(prepared.track.parent_path.to_string_lossy()),
+                                    songs::file_size
+                                        .eq(i64::try_from(prepared.track.file_size)
+                                            .unwrap_or(i64::MAX)),
+                                    songs::content_type.eq(&prepared.track.content_type),
+                                    songs::suffix.eq(&prepared.track.suffix),
+                                    songs::duration.eq(i32::try_from(prepared.track.duration_secs)
+                                        .unwrap_or(i32::MAX)),
+                                    songs::bit_rate.eq(prepared
+                                        .track
+                                        .bit_rate
+                                        .map(|b| i32::try_from(b).unwrap_or(i32::MAX))),
+                                    songs::bit_depth.eq(prepared.track.bit_depth.map(i32::from)),
+                                    songs::sampling_rate.eq(prepared
+                                        .track
+                                        .sample_rate
+                                        .map(|s| i32::try_from(s).unwrap_or(i32::MAX))),
+                                    songs::channel_count.eq(prepared.track.channels.map(i32::from)),
+                                    songs::track_number.eq(prepared
+                                        .track
+                                        .track_number
+                                        .map(|t| i32::try_from(t).unwrap_or(i32::MAX))),
+                                    songs::disc_number.eq(prepared
+                                        .track
+                                        .disc_number
+                                        .map(|d| i32::try_from(d).unwrap_or(i32::MAX))),
+                                    songs::year.eq(prepared
+                                        .track
+                                        .year
+                                        .map(|y| i32::try_from(y).unwrap_or(i32::MAX))),
+                                    songs::genre.eq(&prepared.track.genre),
+                                    songs::cover_art.eq(&prepared.cover_art),
+                                    songs::file_modified_at.eq(prepared.track.file_modified_at),
+                                ))
+                                .execute(conn)
+                        };
 
-                    match query_result {
-                        Ok(_) => {}
-                        Err(e) => {
-                            result.tracks_failed += 1;
-                            tracing::warn!(path = %prepared.path_str, error = %e, "Failed to persist track");
-                        }
+                    let changed = query_result.map_err(MusicRepoError::from)?;
+                    if changed == 0 {
+                        return Err(MusicRepoError::new(
+                            crate::db::repo::error::MusicRepoErrorKind::NotFound,
+                            format!("track disappeared during ingest: {}", prepared.path_str),
+                        ));
                     }
                 }
                 Ok(())
-            })
-            .map_err(MusicRepoError::from)?;
+            })?;
 
             // Update counters and progress
             for prepared in batch {
@@ -1010,6 +1050,11 @@ impl Scanner {
             .map_err(MusicRepoError::from)?;
 
         Ok(())
+    }
+
+    fn update_album_stats_for_ids(&self, dirty_album_ids: &HashSet<i32>) -> Result<(), ScanError> {
+        let mut conn = self.pool.get().map_err(MusicRepoError::from)?;
+        Self::update_album_stats(&mut conn, dirty_album_ids)
     }
 }
 
@@ -1184,7 +1229,7 @@ mod tests {
     use std::collections::HashMap;
     use std::path::PathBuf;
 
-    use super::{DiscoveredFile, ScanMode, Scanner};
+    use super::{DiscoveredFile, ExistingSong, ScanMode, Scanner};
 
     fn discovered(path: &str, file_modified_at: Option<i64>) -> DiscoveredFile {
         DiscoveredFile {
@@ -1203,8 +1248,22 @@ mod tests {
         ];
 
         let existing = HashMap::from([
-            ("/music/unchanged.mp3".to_string(), (1, Some(100))),
-            ("/music/changed.mp3".to_string(), (2, Some(150))),
+            (
+                "/music/unchanged.mp3".to_string(),
+                ExistingSong {
+                    file_modified_at: Some(100),
+                    file_size: 123,
+                    album_id: None,
+                },
+            ),
+            (
+                "/music/changed.mp3".to_string(),
+                ExistingSong {
+                    file_modified_at: Some(150),
+                    file_size: 123,
+                    album_id: None,
+                },
+            ),
         ]);
 
         let (to_process, skipped) = Scanner::split_discovered_files_for_mode(
@@ -1234,12 +1293,35 @@ mod tests {
             discovered("/music/two.mp3", Some(20)),
         ];
 
-        let existing = HashMap::from([("/music/one.mp3".to_string(), (1, Some(10)))]);
+        let existing = HashMap::from([(
+            "/music/one.mp3".to_string(),
+            ExistingSong {
+                file_modified_at: Some(10),
+                file_size: 123,
+                album_id: None,
+            },
+        )]);
 
         let (to_process, skipped) =
             Scanner::split_discovered_files_for_mode(discovered_files, &existing, ScanMode::Full);
 
         assert_eq!(skipped, 0);
         assert_eq!(to_process.len(), 2);
+    }
+
+    #[test]
+    fn file_modified_at_saturates_u64_overflow_to_i64_max() {
+        // When a file has a modification time that doesn't fit in i64,
+        // the saturating conversion must yield i64::MAX instead of 0.
+        let huge_secs = u64::MAX;
+        let converted = i64::try_from(huge_secs).unwrap_or(i64::MAX);
+        assert_eq!(converted, i64::MAX);
+    }
+
+    #[test]
+    fn file_modified_at_preserves_valid_seconds() {
+        let normal_secs: u64 = 1_700_000_000;
+        let converted = i64::try_from(normal_secs).unwrap_or(i64::MAX);
+        assert_eq!(converted, 1_700_000_000_i64);
     }
 }

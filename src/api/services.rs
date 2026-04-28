@@ -145,6 +145,13 @@ impl MusicLibrary {
         ArtistRepository::new(self.pool.clone()).find_all()
     }
 
+    pub(in crate::api) fn get_artists_by_music_folder(
+        &self,
+        folder_id: i32,
+    ) -> Result<Vec<Artist>, MusicRepoError> {
+        ArtistRepository::new(self.pool.clone()).find_by_music_folder(folder_id)
+    }
+
     pub(in crate::api) fn get_artists_last_modified(
         &self,
     ) -> Result<Option<NaiveDateTime>, MusicRepoError> {
@@ -1214,5 +1221,31 @@ impl RemoteSessions {
             })?;
 
         RemoteControlRepository::new(self.pool.clone()).get_state(session_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::saturating_i64_to_i32;
+
+    #[test]
+    fn saturating_i64_to_i32_clamps_positive_overflow() {
+        assert_eq!(saturating_i64_to_i32(i64::MAX), i32::MAX);
+        assert_eq!(saturating_i64_to_i32(i64::from(i32::MAX) + 1), i32::MAX);
+    }
+
+    #[test]
+    fn saturating_i64_to_i32_clamps_negative_overflow() {
+        assert_eq!(saturating_i64_to_i32(i64::MIN), i32::MIN);
+        assert_eq!(saturating_i64_to_i32(i64::from(i32::MIN) - 1), i32::MIN);
+    }
+
+    #[test]
+    fn saturating_i64_to_i32_passes_through_in_range() {
+        assert_eq!(saturating_i64_to_i32(0), 0);
+        assert_eq!(saturating_i64_to_i32(-1), -1);
+        assert_eq!(saturating_i64_to_i32(42), 42);
+        assert_eq!(saturating_i64_to_i32(i64::from(i32::MAX)), i32::MAX);
+        assert_eq!(saturating_i64_to_i32(i64::from(i32::MIN)), i32::MIN);
     }
 }

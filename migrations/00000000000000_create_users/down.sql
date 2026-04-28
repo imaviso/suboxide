@@ -1,2 +1,15 @@
--- Drop users table
+DROP TABLE IF EXISTS remote_state;
+DROP TABLE IF EXISTS remote_commands;
+DROP TABLE IF EXISTS remote_sessions;
+DROP TABLE IF EXISTS play_queue_songs;
+DROP TABLE IF EXISTS play_queue;
+DROP TABLE IF EXISTS playlist_songs;
+DROP TABLE IF EXISTS playlists;
+DROP TABLE IF EXISTS user_ratings;
+DROP TABLE IF EXISTS scrobbles;
+DROP TABLE IF EXISTS now_playing;
+DROP TABLE IF EXISTS songs;
+DROP TABLE IF EXISTS albums;
+DROP TABLE IF EXISTS artists;
+DROP TABLE IF EXISTS music_folders;
 DROP TABLE IF EXISTS users;

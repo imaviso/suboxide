@@ -44,15 +44,11 @@ pub enum Format {
 
 impl Format {
     /// Get the format from the `f` query parameter.
-    #[must_use]
-    pub fn from_param(f: Option<&str>) -> Self {
+    pub fn from_param(f: Option<&str>) -> Result<Self, String> {
         match f {
-            Some("json" | "jsonp") => Self::Json,
-            Some(other) => {
-                tracing::warn!(format = %other, "Unknown response format requested, falling back to XML");
-                Self::Xml
-            }
-            None => Self::Xml,
+            Some("json") => Ok(Self::Json),
+            Some("xml") | None => Ok(Self::Xml),
+            Some(other) => Err(other.to_string()),
         }
     }
 }
@@ -291,10 +287,16 @@ mod xml {
         pub versions: Vec<i32>,
     }
 
+    #[derive(Debug, Serialize)]
+    pub struct OpenSubsonicExtensionsXml {
+        #[serde(rename = "openSubsonicExtension")]
+        pub extensions: Vec<OpenSubsonicExtensionXml>,
+    }
+
     xml_response! {
         pub struct OpenSubsonicExtensionsResponse {
             #[serde(rename = "openSubsonicExtensions")]
-            pub extensions: Vec<OpenSubsonicExtensionXml>
+            pub extensions: OpenSubsonicExtensionsXml
         }
     }
 
@@ -1610,7 +1612,11 @@ impl SubsonicResponse {
                         versions: ext.versions,
                     })
                     .collect();
-                quick_xml::se::to_string(&xml::OpenSubsonicExtensionsResponse::new(xml_extensions))
+                quick_xml::se::to_string(&xml::OpenSubsonicExtensionsResponse::new(
+                    xml::OpenSubsonicExtensionsXml {
+                        extensions: xml_extensions,
+                    },
+                ))
             }
             ResponseKind::MusicFolders(folders) => {
                 quick_xml::se::to_string(&xml::MusicFoldersResponse::new(folders))
@@ -1736,7 +1742,13 @@ impl SubsonicResponse {
                     error = %e,
                     "xml serialization failed"
                 );
-                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
+                let body = r#"<?xml version="1.0" encoding="UTF-8"?><subsonic-response xmlns="http://subsonic.org/restapi" status="failed" version="1.16.1" type="suboxide"><error code="0" message="Internal server error"/></subsonic-response>"#;
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    [(header::CONTENT_TYPE, "application/xml; charset=utf-8")],
+                    body,
+                )
+                    .into_response()
             }
         }
     }
@@ -1871,8 +1883,7 @@ impl SubsonicResponse {
                             error = %error,
                             "json response transform failed"
                         );
-                        return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-                            .into_response();
+                        return json_internal_error_response();
                     }
                 };
                 (
@@ -1889,10 +1900,19 @@ impl SubsonicResponse {
                     error = %e,
                     "json serialization failed"
                 );
-                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
+                json_internal_error_response()
             }
         }
     }
+}
+
+fn json_internal_error_response() -> Response {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+        r#"{"subsonic-response":{"status":"failed","version":"1.16.1","type":"suboxide","error":{"code":0,"message":"Internal server error"}}}"#,
+    )
+        .into_response()
 }
 
 /// Transform JSON keys to match Subsonic API expectations:
@@ -1943,11 +1963,11 @@ mod tests {
 
     #[test]
     fn format_from_param_accepts_only_json_like_formats() {
-        assert_eq!(Format::from_param(Some("json")), Format::Json);
-        assert_eq!(Format::from_param(Some("jsonp")), Format::Json);
-        assert_eq!(Format::from_param(Some("xml")), Format::Xml);
-        assert_eq!(Format::from_param(Some("JSON")), Format::Xml);
-        assert_eq!(Format::from_param(None), Format::Xml);
+        assert_eq!(Format::from_param(Some("json")), Ok(Format::Json));
+        assert_eq!(Format::from_param(Some("xml")), Ok(Format::Xml));
+        assert_eq!(Format::from_param(None), Ok(Format::Xml));
+        assert_eq!(Format::from_param(Some("jsonp")), Err("jsonp".to_string()));
+        assert_eq!(Format::from_param(Some("JSON")), Err("JSON".to_string()));
     }
 
     #[test]

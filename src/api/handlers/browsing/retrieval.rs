@@ -109,7 +109,7 @@ fn song_response(auth: &SubsonicContext, song_id: i32) -> Result<ChildResponse, 
 ///
 /// Returns details for an album, including its songs.
 pub async fn get_album(
-    axum::extract::Query(params): axum::extract::Query<IdParams>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<IdParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let Some(album_id) = params.id else {
@@ -128,7 +128,7 @@ pub async fn get_album(
 ///
 /// Returns details for an artist, including their albums.
 pub async fn get_artist(
-    axum::extract::Query(params): axum::extract::Query<IdParams>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<IdParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let Some(artist_id) = params.id else {
@@ -147,7 +147,7 @@ pub async fn get_artist(
 ///
 /// Returns details for a song.
 pub async fn get_song(
-    axum::extract::Query(params): axum::extract::Query<IdParams>,
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<IdParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let Some(song_id) = params.id else {
