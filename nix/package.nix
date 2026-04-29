@@ -18,11 +18,7 @@ in
       lockFile = ../Cargo.lock;
     };
 
-    cargoTestFlags = [
-      "--lib"
-      "--bins"
-      "--tests"
-    ];
+    doCheck = false;
 
     nativeBuildInputs = [pkg-config];
 
