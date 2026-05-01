@@ -10,8 +10,7 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::ReaderStream;
 
 use crate::api::auth::SubsonicContext;
-use crate::api::error::ApiError;
-use crate::api::response::error_response;
+use crate::api::handlers::util;
 use crate::models::music::Song;
 use crate::paths::resolve_cover_art_dir;
 
@@ -57,6 +56,72 @@ fn is_safe_cover_art_id(id: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
+fn sanitized_filename(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("download")
+        .replace(['"', '\r', '\n'], "")
+}
+
+fn cover_art_content_type(extension: &str) -> &'static str {
+    match extension {
+        "png" => "image/png",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        "tiff" => "image/tiff",
+        "webp" => "image/webp",
+        _ => "image/jpeg",
+    }
+}
+
+struct ByteRange {
+    start: u64,
+    end: u64,
+}
+
+impl ByteRange {
+    const fn len(&self) -> u64 {
+        self.end - self.start + 1
+    }
+}
+
+fn parse_byte_range(range: &str, file_size: u64) -> Option<ByteRange> {
+    let range_spec = range.strip_prefix("bytes=")?;
+    let (start, end) = range_spec.split_once('-')?;
+    let start = start.parse::<u64>().ok()?;
+    if start >= file_size {
+        return None;
+    }
+    let end = if end.is_empty() {
+        file_size.saturating_sub(1)
+    } else {
+        end.parse::<u64>().ok()?.min(file_size - 1)
+    };
+    if end < start {
+        return None;
+    }
+
+    Some(ByteRange { start, end })
+}
+
+async fn open_file_with_size(
+    auth: &SubsonicContext,
+    path: &Path,
+    open_error: &'static str,
+) -> Result<(File, u64), axum::response::Response> {
+    let file = File::open(path).await.map_err(|error| {
+        tracing::error!(path = %path.display(), error = %error, "failed to open media file");
+        util::service_error(auth, open_error)
+    })?;
+
+    let metadata = file.metadata().await.map_err(|error| {
+        tracing::error!(path = %path.display(), error = %error, "failed to read media metadata");
+        util::service_error(auth, "Failed to read file metadata")
+    })?;
+
+    Ok((file, metadata.len()))
+}
+
 /// Query parameters for the stream endpoint.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 #[serde(default)]
@@ -89,10 +154,6 @@ pub struct StreamParams {
 /// - `id` (required): The ID of the song to stream.
 /// - `maxBitRate` (optional): Maximum bit rate for transcoding (not yet implemented).
 /// - `format` (optional): Preferred format for transcoding (not yet implemented).
-#[expect(
-    clippy::too_many_lines,
-    reason = "Handler coordinates auth, file I/O, and range response"
-)]
 pub async fn stream(
     headers: HeaderMap,
     crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<StreamParams>,
@@ -100,112 +161,48 @@ pub async fn stream(
 ) -> impl IntoResponse {
     // Get song ID
     let Some(song_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
-        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-            .into_response();
+        return util::missing_param(&auth, "id");
     };
 
     // Look up song in database
     let song = match auth.music().get_song(song_id) {
         Ok(Some(song)) => song,
         Ok(None) => {
-            return error_response(auth.format, &ApiError::NotFound("Song not found".into()))
-                .into_response();
+            return util::not_found(&auth, "Song not found");
         }
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     };
 
     // Check that user has stream permission
     if !auth.user.roles.stream_role {
-        return error_response(auth.format, &ApiError::NotAuthorized).into_response();
+        return util::unauthorized(&auth);
     }
 
     // Validate the song path is within a music folder (prevents path traversal)
     let Ok(path) = validate_song_path(&song, &auth) else {
-        return error_response(
-            auth.format,
-            &ApiError::NotFound("Audio file not found".into()),
-        )
-        .into_response();
+        return util::not_found(&auth, "Audio file not found");
     };
 
-    // Open the file
-    let file = match File::open(&path).await {
-        Ok(file) => file,
-        Err(e) => {
-            tracing::error!(path = %path.display(), error = %e, "Failed to open audio file");
-            return error_response(
-                auth.format,
-                &ApiError::Generic("Failed to open audio file".into()),
-            )
-            .into_response();
-        }
-    };
-
-    // Get file metadata
-    let metadata = match file.metadata().await {
-        Ok(metadata) => metadata,
-        Err(e) => {
-            tracing::error!(path = %path.display(), error = %e, "Failed to read file metadata");
-            return error_response(
-                auth.format,
-                &ApiError::Generic("Failed to read file metadata".into()),
-            )
-            .into_response();
-        }
-    };
-
-    let file_size = metadata.len();
+    let (file, file_size) =
+        match open_file_with_size(&auth, &path, "Failed to open audio file").await {
+            Ok(file) => file,
+            Err(response) => return response,
+        };
     let content_type = song.content_type.clone();
 
     // Check for Range header to support seeking
     if let Some(range) = headers.get(header::RANGE).and_then(|v| v.to_str().ok())
-        && let Some(range_spec) = range.strip_prefix("bytes=")
+        && range.starts_with("bytes=")
     {
-        let parts: Vec<&str> = range_spec.split('-').collect();
-        if parts.len() == 2 {
-            let Ok(start) = parts[0].parse::<u64>() else {
-                return error_response(
-                    auth.format,
-                    &ApiError::Generic("Invalid range start".into()),
-                )
-                .into_response();
-            };
-            let end = if parts[1].is_empty() {
-                file_size.saturating_sub(1)
-            } else {
-                match parts[1].parse::<u64>() {
-                    Ok(v) => v,
-                    Err(_) => {
-                        return error_response(
-                            auth.format,
-                            &ApiError::Generic("Invalid range end".into()),
-                        )
-                        .into_response();
-                    }
-                }
-            };
-
-            if start >= file_size {
-                return (
-                    StatusCode::RANGE_NOT_SATISFIABLE,
-                    [(header::CONTENT_RANGE, format!("bytes */{file_size}"))],
-                )
-                    .into_response();
-            }
-
-            let end = end.min(file_size - 1);
-            let content_length = end - start + 1;
+        if let Some(byte_range) = parse_byte_range(range, file_size) {
+            let content_length = byte_range.len();
 
             let mut file = file;
-            if let Err(e) = file.seek(std::io::SeekFrom::Start(start)).await {
+            if let Err(e) = file.seek(std::io::SeekFrom::Start(byte_range.start)).await {
                 tracing::error!(error = %e, "Failed to seek in file");
-                return error_response(
-                    auth.format,
-                    &ApiError::Generic("Failed to seek in file".into()),
-                )
-                .into_response();
+                return util::service_error(&auth, "Failed to seek in file");
             }
 
             let stream = ReaderStream::new(file.take(content_length));
@@ -218,7 +215,10 @@ pub async fn stream(
                     (header::CONTENT_LENGTH, content_length.to_string()),
                     (
                         header::CONTENT_RANGE,
-                        format!("bytes {start}-{end}/{file_size}"),
+                        format!(
+                            "bytes {}-{}/{}",
+                            byte_range.start, byte_range.end, file_size
+                        ),
                     ),
                     (header::ACCEPT_RANGES, "bytes".to_string()),
                 ],
@@ -226,6 +226,21 @@ pub async fn stream(
             )
                 .into_response();
         }
+
+        if range.strip_prefix("bytes=").is_some_and(|range_spec| {
+            range_spec
+                .split_once('-')
+                .and_then(|(start, _)| start.parse::<u64>().ok())
+                .is_some_and(|start| start >= file_size)
+        }) {
+            return (
+                StatusCode::RANGE_NOT_SATISFIABLE,
+                [(header::CONTENT_RANGE, format!("bytes */{file_size}"))],
+            )
+                .into_response();
+        }
+
+        return util::service_error(&auth, "Invalid byte range");
     }
 
     // No range requested, stream entire file
@@ -253,70 +268,38 @@ pub async fn download(
 ) -> impl IntoResponse {
     // Get song ID
     let Some(song_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
-        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-            .into_response();
+        return util::missing_param(&auth, "id");
     };
 
     // Look up song in database
     let song = match auth.music().get_song(song_id) {
         Ok(Some(song)) => song,
         Ok(None) => {
-            return error_response(auth.format, &ApiError::NotFound("Song not found".into()))
-                .into_response();
+            return util::not_found(&auth, "Song not found");
         }
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     };
 
     // Check that user has download permission
     if !auth.user.roles.download_role {
-        return error_response(auth.format, &ApiError::NotAuthorized).into_response();
+        return util::unauthorized(&auth);
     }
 
     // Validate the song path is within a music folder (prevents path traversal)
     let Ok(path) = validate_song_path(&song, &auth) else {
-        return error_response(
-            auth.format,
-            &ApiError::NotFound("Audio file not found".into()),
-        )
-        .into_response();
+        return util::not_found(&auth, "Audio file not found");
     };
 
     // Get filename for Content-Disposition and sanitize it to prevent header injection
-    let filename = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("download")
-        .replace(['"', '\r', '\n'], "");
+    let filename = sanitized_filename(&path);
 
-    // Open the file
-    let file = match File::open(&path).await {
-        Ok(file) => file,
-        Err(e) => {
-            tracing::error!(path = %path.display(), error = %e, "Failed to open audio file");
-            return error_response(
-                auth.format,
-                &ApiError::Generic("Failed to open audio file".into()),
-            )
-            .into_response();
-        }
-    };
-
-    // Get file metadata
-    let metadata = match file.metadata().await {
-        Ok(metadata) => metadata,
-        Err(e) => {
-            tracing::error!(path = %path.display(), error = %e, "Failed to read file metadata");
-            return error_response(
-                auth.format,
-                &ApiError::Generic("Failed to read file metadata".into()),
-            )
-            .into_response();
-        }
-    };
-
-    let file_size = metadata.len();
+    let (file, file_size) =
+        match open_file_with_size(&auth, &path, "Failed to open audio file").await {
+            Ok(file) => file,
+            Err(response) => return response,
+        };
     let content_type = song.content_type.clone();
 
     // Stream the file
@@ -361,17 +344,15 @@ pub async fn get_cover_art(
 ) -> impl IntoResponse {
     // Get cover art ID
     let Some(cover_art_id) = params.id.as_ref().filter(|id| !id.is_empty()) else {
-        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-            .into_response();
+        return util::missing_param(&auth, "id");
     };
     if !is_safe_cover_art_id(cover_art_id) {
-        return error_response(auth.format, &ApiError::NotFound("Cover art".into()))
-            .into_response();
+        return util::not_found(&auth, "Cover art");
     }
 
     // Check that user has coverArt permission
     if !auth.user.roles.cover_art_role {
-        return error_response(auth.format, &ApiError::NotAuthorized).into_response();
+        return util::unauthorized(&auth);
     }
 
     // Get cover art cache directory
@@ -385,54 +366,21 @@ pub async fn get_cover_art(
     for ext in &extensions {
         let path = cover_art_dir.join(format!("{cover_art_id}.{ext}"));
         if path.exists() {
-            content_type = match *ext {
-                "png" => "image/png",
-                "gif" => "image/gif",
-                "bmp" => "image/bmp",
-                "tiff" => "image/tiff",
-                "webp" => "image/webp",
-                _ => "image/jpeg",
-            };
+            content_type = cover_art_content_type(ext);
             cover_art_path = Some(path);
             break;
         }
     }
 
     let Some(path) = cover_art_path else {
-        return error_response(
-            auth.format,
-            &ApiError::NotFound("Cover art not found".into()),
-        )
-        .into_response();
+        return util::not_found(&auth, "Cover art not found");
     };
 
-    // Open the file
-    let file = match File::open(&path).await {
-        Ok(file) => file,
-        Err(e) => {
-            tracing::error!(path = %path.display(), error = %e, "Failed to open cover art file");
-            return error_response(
-                auth.format,
-                &ApiError::Generic("Failed to open cover art file".into()),
-            )
-            .into_response();
-        }
-    };
-
-    // Get file metadata
-    let metadata = match file.metadata().await {
-        Ok(metadata) => metadata,
-        Err(e) => {
-            tracing::error!(path = %path.display(), error = %e, "Failed to read file metadata");
-            return error_response(
-                auth.format,
-                &ApiError::Generic("Failed to read file metadata".into()),
-            )
-            .into_response();
-        }
-    };
-
-    let file_size = metadata.len();
+    let (file, file_size) =
+        match open_file_with_size(&auth, &path, "Failed to open cover art file").await {
+            Ok(file) => file,
+            Err(response) => return response,
+        };
 
     // Stream the file
     let stream = ReaderStream::new(file);
@@ -451,4 +399,64 @@ pub async fn get_cover_art(
         body,
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::{
+        cover_art_content_type, is_safe_cover_art_id, parse_byte_range, sanitized_filename,
+    };
+
+    #[test]
+    fn safe_cover_art_id_allows_content_hash_like_values() {
+        assert!(is_safe_cover_art_id("abc123"));
+        assert!(is_safe_cover_art_id("cover-art_2024"));
+    }
+
+    #[test]
+    fn safe_cover_art_id_rejects_paths_traversal_dots_and_extensions() {
+        assert!(!is_safe_cover_art_id("../secret"));
+        assert!(!is_safe_cover_art_id("nested/cover"));
+        assert!(!is_safe_cover_art_id("cover.jpg"));
+        assert!(!is_safe_cover_art_id(""));
+    }
+
+    #[test]
+    fn sanitized_filename_removes_content_disposition_breakout_characters() {
+        assert_eq!(
+            sanitized_filename(Path::new("/music/evil\"\r\nname.flac")),
+            "evilname.flac"
+        );
+        assert_eq!(sanitized_filename(Path::new("/music")), "music");
+    }
+
+    #[test]
+    fn cover_art_content_type_matches_supported_extensions() {
+        assert_eq!(cover_art_content_type("jpg"), "image/jpeg");
+        assert_eq!(cover_art_content_type("jpeg"), "image/jpeg");
+        assert_eq!(cover_art_content_type("png"), "image/png");
+        assert_eq!(cover_art_content_type("gif"), "image/gif");
+        assert_eq!(cover_art_content_type("bmp"), "image/bmp");
+        assert_eq!(cover_art_content_type("tiff"), "image/tiff");
+        assert_eq!(cover_art_content_type("webp"), "image/webp");
+    }
+
+    #[test]
+    fn byte_range_parser_accepts_open_and_closed_ranges() {
+        let closed = parse_byte_range("bytes=2-5", 10).expect("closed range should parse");
+        assert_eq!((closed.start, closed.end, closed.len()), (2, 5, 4));
+
+        let open = parse_byte_range("bytes=4-", 10).expect("open range should parse");
+        assert_eq!((open.start, open.end, open.len()), (4, 9, 6));
+    }
+
+    #[test]
+    fn byte_range_parser_rejects_invalid_or_unsatisfiable_ranges() {
+        assert!(parse_byte_range("items=1-2", 10).is_none());
+        assert!(parse_byte_range("bytes=bogus-2", 10).is_none());
+        assert!(parse_byte_range("bytes=5-2", 10).is_none());
+        assert!(parse_byte_range("bytes=10-12", 10).is_none());
+    }
 }

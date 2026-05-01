@@ -1,15 +1,16 @@
 //! List-based browsing handlers (albums, genres, songs).
 
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 
 use crate::api::auth::SubsonicContext;
 use crate::api::error::ApiError;
-use crate::api::response::{SubsonicResponse, error_response};
+use crate::api::handlers::util;
+use crate::api::response::SubsonicResponse;
 use crate::api::services::MusicLibrary;
 use crate::db::MusicRepoError;
 use crate::models::music::{
-    AlbumID3Response, AlbumList2Response, AlbumListResponse, ArtistResponse, ChildResponse,
+    Album, AlbumID3Response, AlbumList2Response, AlbumListResponse, ArtistResponse, ChildResponse,
     GenreResponse, GenresResponse, RandomSongsResponse, SimilarSongs2Response,
     SimilarSongsResponse, Song, SongsByGenreResponse, StarredResponse, TopSongsResponse,
     format_subsonic_datetime,
@@ -22,7 +23,45 @@ fn album_list_type_for_request(list_type: Option<&str>) -> &str {
     }
 }
 
-#[derive(Clone, Copy)]
+fn albums_for_list_type(
+    auth: &SubsonicContext,
+    params: &AlbumList2Params,
+    list_type: &str,
+    size: i64,
+    offset: i64,
+) -> Result<Vec<Album>, Box<Response>> {
+    match list_type {
+        "random" => auth.music().get_albums_random(size),
+        "newest" => auth.music().get_albums_newest(offset, size),
+        "frequent" => auth.music().get_albums_frequent(offset, size),
+        "recent" => auth.music().get_albums_recent(offset, size),
+        "alphabeticalByName" => auth.music().get_albums_alphabetical_by_name(offset, size),
+        "alphabeticalByArtist" => auth.music().get_albums_alphabetical_by_artist(offset, size),
+        "byYear" => {
+            let from_year = params.from_year.unwrap_or(0);
+            let to_year = params.to_year.unwrap_or(9999);
+            auth.music()
+                .get_albums_by_year(from_year, to_year, offset, size)
+        }
+        "byGenre" => {
+            let Some(genre) = params.genre.as_deref() else {
+                return Err(Box::new(util::missing_param(auth, "genre")));
+            };
+            auth.music().get_albums_by_genre(genre, offset, size)
+        }
+        "starred" => auth.music().get_albums_starred(auth.user.id, offset, size),
+        "highest" => auth.music().get_albums_highest(auth.user.id, offset, size),
+        _ => {
+            return Err(Box::new(util::service_error(
+                auth,
+                format!("Unknown list type: {list_type}"),
+            )));
+        }
+    }
+    .map_err(|error| Box::new(util::service_error(auth, error)))
+}
+
+#[derive(Clone, Copy, Debug)]
 enum SimilarSongsSeed {
     Song(i32),
     Album(i32),
@@ -133,44 +172,11 @@ pub async fn get_album_list2(
     let size = params.size.unwrap_or(10).clamp(1, 500);
     let offset = params.offset.unwrap_or(0).max(0);
 
+    let albums = match albums_for_list_type(&auth, &params, list_type, size, offset) {
+        Ok(albums) => albums,
+        Err(response) => return *response,
+    };
     let user_id = auth.user.id;
-    let albums_result = match list_type {
-        "random" => auth.music().get_albums_random(size),
-        "newest" => auth.music().get_albums_newest(offset, size),
-        "frequent" => auth.music().get_albums_frequent(offset, size),
-        "recent" => auth.music().get_albums_recent(offset, size),
-        "alphabeticalByName" => auth.music().get_albums_alphabetical_by_name(offset, size),
-        "alphabeticalByArtist" => auth.music().get_albums_alphabetical_by_artist(offset, size),
-        "byYear" => {
-            let from_year = params.from_year.unwrap_or(0);
-            let to_year = params.to_year.unwrap_or(9999);
-            auth.music()
-                .get_albums_by_year(from_year, to_year, offset, size)
-        }
-        "byGenre" => {
-            let Some(genre) = params.genre.as_deref() else {
-                return error_response(auth.format, &ApiError::MissingParameter("genre".into()))
-                    .into_response();
-            };
-            auth.music().get_albums_by_genre(genre, offset, size)
-        }
-        "starred" => auth.music().get_albums_starred(user_id, offset, size),
-        "highest" => auth.music().get_albums_highest(user_id, offset, size),
-        _ => {
-            return error_response(
-                auth.format,
-                &ApiError::Generic(format!("Unknown list type: {list_type}")),
-            )
-            .into_response();
-        }
-    };
-
-    let albums = match albums_result {
-        Ok(v) => v,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
 
     // Batch fetch starred status for all albums
     let album_ids: Vec<i32> = albums.iter().map(|a| a.id).collect();
@@ -180,7 +186,7 @@ pub async fn get_album_list2(
     {
         Ok(v) => v,
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     };
 
@@ -210,44 +216,11 @@ pub async fn get_album_list(
     let size = params.size.unwrap_or(10).clamp(1, 500);
     let offset = params.offset.unwrap_or(0).max(0);
 
+    let albums = match albums_for_list_type(&auth, &params, list_type, size, offset) {
+        Ok(albums) => albums,
+        Err(response) => return *response,
+    };
     let user_id = auth.user.id;
-    let albums_result = match list_type {
-        "random" => auth.music().get_albums_random(size),
-        "newest" => auth.music().get_albums_newest(offset, size),
-        "frequent" => auth.music().get_albums_frequent(offset, size),
-        "recent" => auth.music().get_albums_recent(offset, size),
-        "alphabeticalByName" => auth.music().get_albums_alphabetical_by_name(offset, size),
-        "alphabeticalByArtist" => auth.music().get_albums_alphabetical_by_artist(offset, size),
-        "byYear" => {
-            let from_year = params.from_year.unwrap_or(0);
-            let to_year = params.to_year.unwrap_or(9999);
-            auth.music()
-                .get_albums_by_year(from_year, to_year, offset, size)
-        }
-        "byGenre" => {
-            let Some(genre) = params.genre.as_deref() else {
-                return error_response(auth.format, &ApiError::MissingParameter("genre".into()))
-                    .into_response();
-            };
-            auth.music().get_albums_by_genre(genre, offset, size)
-        }
-        "starred" => auth.music().get_albums_starred(user_id, offset, size),
-        "highest" => auth.music().get_albums_highest(user_id, offset, size),
-        _ => {
-            return error_response(
-                auth.format,
-                &ApiError::Generic(format!("Unknown list type: {list_type}")),
-            )
-            .into_response();
-        }
-    };
-
-    let albums = match albums_result {
-        Ok(v) => v,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
 
     // Batch fetch starred status for all albums
     let album_ids: Vec<i32> = albums.iter().map(|a| a.id).collect();
@@ -257,7 +230,7 @@ pub async fn get_album_list(
     {
         Ok(v) => v,
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     };
 
@@ -288,7 +261,7 @@ pub async fn get_genres(auth: SubsonicContext) -> impl IntoResponse {
     let genres = match auth.music().get_genres() {
         Ok(v) => v,
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     };
     let genre_responses: Vec<GenreResponse> = genres
@@ -345,7 +318,7 @@ pub async fn get_random_songs(
     ) {
         Ok(v) => v,
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     };
 
@@ -357,7 +330,7 @@ pub async fn get_random_songs(
     {
         Ok(v) => v,
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     };
 
@@ -399,8 +372,7 @@ pub async fn get_songs_by_genre(
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let Some(genre) = params.genre.as_deref() else {
-        return error_response(auth.format, &ApiError::MissingParameter("genre".into()))
-            .into_response();
+        return util::missing_param(&auth, "genre");
     };
 
     let count = params.count.unwrap_or(10).clamp(1, 500);
@@ -413,7 +385,7 @@ pub async fn get_songs_by_genre(
     {
         Ok(v) => v,
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     };
 
@@ -425,7 +397,7 @@ pub async fn get_songs_by_genre(
     {
         Ok(v) => v,
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     };
 
@@ -465,8 +437,7 @@ pub async fn get_top_songs(
     let artist_name = match params.artist.as_ref() {
         Some(name) if !name.is_empty() => name,
         _ => {
-            return error_response(auth.format, &ApiError::MissingParameter("artist".into()))
-                .into_response();
+            return util::missing_param(&auth, "artist");
         }
     };
 
@@ -480,7 +451,7 @@ pub async fn get_top_songs(
     {
         Ok(v) => v,
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     };
 
@@ -492,7 +463,7 @@ pub async fn get_top_songs(
     {
         Ok(v) => v,
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     };
 
@@ -538,7 +509,7 @@ pub async fn get_similar_songs2(
 ) -> impl IntoResponse {
     let seed = match similar_songs_seed(&params) {
         Ok(seed) => seed,
-        Err(error) => return error_response(auth.format, &error).into_response(),
+        Err(error) => return util::api_error(&auth, &error),
     };
 
     let count = params.count.unwrap_or(50).clamp(1, 500);
@@ -547,11 +518,10 @@ pub async fn get_similar_songs2(
     let songs = match similar_songs_for_seed(auth.music(), seed, count) {
         Ok(Some(songs)) => songs,
         Ok(None) => {
-            return error_response(auth.format, &ApiError::NotFound("Item".into())).into_response();
+            return util::not_found(&auth, "Item");
         }
         Err(error) => {
-            return error_response(auth.format, &ApiError::Generic(error.to_string()))
-                .into_response();
+            return util::service_error(&auth, error);
         }
     };
 
@@ -563,7 +533,7 @@ pub async fn get_similar_songs2(
     {
         Ok(v) => v,
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     };
 
@@ -591,7 +561,7 @@ pub async fn get_similar_songs(
 ) -> impl IntoResponse {
     let seed = match similar_songs_seed(&params) {
         Ok(seed) => seed,
-        Err(error) => return error_response(auth.format, &error).into_response(),
+        Err(error) => return util::api_error(&auth, &error),
     };
 
     let count = params.count.unwrap_or(50).clamp(1, 500);
@@ -600,11 +570,10 @@ pub async fn get_similar_songs(
     let songs = match similar_songs_for_seed(auth.music(), seed, count) {
         Ok(Some(songs)) => songs,
         Ok(None) => {
-            return error_response(auth.format, &ApiError::NotFound("Item".into())).into_response();
+            return util::not_found(&auth, "Item");
         }
         Err(error) => {
-            return error_response(auth.format, &ApiError::Generic(error.to_string()))
-                .into_response();
+            return util::service_error(&auth, error);
         }
     };
 
@@ -616,7 +585,7 @@ pub async fn get_similar_songs(
     {
         Ok(v) => v,
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     };
 
@@ -645,19 +614,19 @@ pub async fn get_starred(auth: SubsonicContext) -> impl IntoResponse {
     let starred_artists = match auth.music().get_starred_artists(user_id) {
         Ok(v) => v,
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     };
     let starred_albums = match auth.music().get_starred_albums(user_id) {
         Ok(v) => v,
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     };
     let starred_songs = match auth.music().get_starred_songs(user_id) {
         Ok(v) => v,
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     };
 
@@ -694,7 +663,10 @@ pub async fn get_starred(auth: SubsonicContext) -> impl IntoResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::album_list_type_for_request;
+    use super::{
+        SimilarSongs2Params, SimilarSongsSeed, album_list_type_for_request, similar_songs_seed,
+    };
+    use crate::api::error::ApiError;
 
     #[test]
     fn defaults_missing_album_list_type_to_alphabetical_by_name() {
@@ -717,5 +689,38 @@ mod tests {
             "alphabeticalByArtist"
         );
         assert_eq!(album_list_type_for_request(Some("newest")), "newest");
+    }
+
+    #[test]
+    fn similar_songs_seed_requires_exactly_one_seed() {
+        let missing = similar_songs_seed(&SimilarSongs2Params::default())
+            .expect_err("missing seed should fail");
+        assert!(
+            matches!(missing, ApiError::MissingParameter(parameter) if parameter == "songId, albumId, or artistId")
+        );
+
+        let duplicate = similar_songs_seed(&SimilarSongs2Params {
+            song_id: Some(1),
+            album_id: Some(2),
+            artist_id: None,
+            count: None,
+        })
+        .expect_err("multiple seeds should fail");
+        assert!(
+            matches!(duplicate, ApiError::Generic(message) if message == "Specify exactly one of songId, albumId, or artistId")
+        );
+    }
+
+    #[test]
+    fn similar_songs_seed_preserves_selected_seed_id() {
+        let seed = similar_songs_seed(&SimilarSongs2Params {
+            song_id: None,
+            album_id: None,
+            artist_id: Some(42),
+            count: None,
+        })
+        .expect("single artist seed should parse");
+
+        assert!(matches!(seed, SimilarSongsSeed::Artist(42)));
     }
 }

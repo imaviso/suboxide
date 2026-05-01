@@ -1,14 +1,50 @@
 //! Playlist-related API handlers (getPlaylists, getPlaylist, createPlaylist, updatePlaylist, deletePlaylist)
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 
 use crate::api::auth::SubsonicContext;
-use crate::api::error::ApiError;
-use crate::api::response::{SubsonicResponse, error_response};
+use crate::api::handlers::util;
+use crate::api::response::SubsonicResponse;
+use crate::db::Playlist;
 use crate::models::music::{
-    ChildResponse, PlaylistResponse, PlaylistWithSongsResponse, PlaylistsResponse,
+    ChildResponse, PlaylistResponse, PlaylistWithSongsResponse, PlaylistsResponse, Song,
     format_subsonic_datetime,
 };
+
+fn playlist_with_songs_response(
+    auth: &SubsonicContext,
+    playlist: &Playlist,
+    songs: &[Song],
+) -> Result<PlaylistWithSongsResponse, Box<Response>> {
+    let song_ids: Vec<i32> = songs.iter().map(|song| song.id).collect();
+    let starred_map = auth
+        .music()
+        .get_starred_at_for_songs_batch(auth.user.id, &song_ids)
+        .map_err(|error| Box::new(util::service_error(auth, error)))?;
+
+    let entries = songs
+        .iter()
+        .map(|song| {
+            let starred_at = starred_map.get(&song.id);
+            ChildResponse::from_song_with_starred(song, starred_at)
+        })
+        .collect();
+    let cover_art = songs.first().and_then(|song| song.cover_art.clone());
+
+    Ok(PlaylistWithSongsResponse {
+        id: playlist.id.to_string(),
+        name: playlist.name.clone(),
+        comment: playlist.comment.clone(),
+        owner: playlist.owner.clone(),
+        public: playlist.public,
+        song_count: playlist.song_count,
+        duration: playlist.duration,
+        created: format_subsonic_datetime(&playlist.created_at),
+        changed: format_subsonic_datetime(&playlist.updated_at),
+        cover_art,
+        entries,
+    })
+}
 
 /// Query parameters for getPlaylists.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -28,18 +64,16 @@ pub async fn get_playlists(
 ) -> impl IntoResponse {
     let (user_id, username) = if let Some(username) = params.username.as_deref() {
         if username != auth.user.username && !auth.user.is_admin() {
-            return error_response(auth.format, &ApiError::NotAuthorized).into_response();
+            return util::unauthorized(&auth);
         }
 
         let user = match auth.users().find_user(username) {
             Ok(Some(user)) => user,
             Ok(None) => {
-                return error_response(auth.format, &ApiError::NotFound("User".into()))
-                    .into_response();
+                return util::not_found(&auth, "User");
             }
             Err(e) => {
-                return error_response(auth.format, &ApiError::Generic(e.to_string()))
-                    .into_response();
+                return util::service_error(&auth, e);
             }
         };
         (user.id, user.username)
@@ -50,7 +84,7 @@ pub async fn get_playlists(
     let playlists = match auth.music().get_playlists(user_id, &username) {
         Ok(v) => v,
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     };
 
@@ -58,7 +92,7 @@ pub async fn get_playlists(
     let cover_arts = match auth.music().get_playlist_cover_arts_batch(&playlist_ids) {
         Ok(v) => v,
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     };
 
@@ -104,73 +138,35 @@ pub async fn get_playlist(
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let Some(id_str) = params.id.as_ref() else {
-        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-            .into_response();
+        return util::missing_param(&auth, "id");
     };
     let Ok(playlist_id) = id_str.parse::<i32>() else {
-        return error_response(
-            auth.format,
-            &ApiError::Generic(format!("Invalid id: {id_str}")),
-        )
-        .into_response();
+        return util::service_error(&auth, format!("Invalid id: {id_str}"));
     };
 
     let playlist = match auth.music().get_playlist(playlist_id) {
         Ok(Some(p)) => p,
         Ok(None) => {
-            return error_response(auth.format, &ApiError::NotFound("Playlist".into()))
-                .into_response();
+            return util::not_found(&auth, "Playlist");
         }
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     };
 
     if playlist.owner != auth.user.username && !playlist.public {
-        return error_response(auth.format, &ApiError::NotAuthorized).into_response();
+        return util::unauthorized(&auth);
     }
 
     let songs = match auth.music().get_playlist_songs(playlist_id) {
         Ok(v) => v,
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     };
-    let user_id = auth.user.id;
-
-    let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
-    let starred_map = match auth
-        .music()
-        .get_starred_at_for_songs_batch(user_id, &song_ids)
-    {
-        Ok(v) => v,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
-
-    let song_responses: Vec<ChildResponse> = songs
-        .iter()
-        .map(|s| {
-            let starred_at = starred_map.get(&s.id);
-            ChildResponse::from_song_with_starred(s, starred_at)
-        })
-        .collect();
-
-    let cover_art = songs.first().and_then(|s| s.cover_art.clone());
-
-    let response = PlaylistWithSongsResponse {
-        id: playlist.id.to_string(),
-        name: playlist.name.clone(),
-        comment: playlist.comment.clone(),
-        owner: playlist.owner.clone(),
-        public: playlist.public,
-        song_count: playlist.song_count,
-        duration: playlist.duration,
-        created: format_subsonic_datetime(&playlist.created_at),
-        changed: format_subsonic_datetime(&playlist.updated_at),
-        cover_art,
-        entries: song_responses,
+    let response = match playlist_with_songs_response(&auth, &playlist, &songs) {
+        Ok(response) => response,
+        Err(response) => return *response,
     };
 
     SubsonicResponse::playlist(auth.format, response).into_response()
@@ -198,16 +194,12 @@ pub struct CreatePlaylistParams {
 /// - `playlistId`: The playlist ID (if updating an existing playlist)
 /// - `name`: The playlist name (required if creating a new playlist)
 /// - `songId`: ID of a song to add (can be repeated)
-#[expect(
-    clippy::too_many_lines,
-    reason = "Playlist creation supports create/update flows and repeated query parameters"
-)]
 pub async fn create_playlist(
     crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<CreatePlaylistParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     if !auth.user.roles.playlist_role {
-        return error_response(auth.format, &ApiError::NotAuthorized).into_response();
+        return util::unauthorized(&auth);
     }
 
     let user_id = auth.user.id;
@@ -215,18 +207,16 @@ pub async fn create_playlist(
 
     if let Some(playlist_id_str) = params.playlist_id.as_ref() {
         let Ok(playlist_id) = playlist_id_str.parse::<i32>() else {
-            return error_response(auth.format, &ApiError::Generic("Invalid playlistId".into()))
-                .into_response();
+            return util::service_error(&auth, "Invalid playlistId");
         };
 
         match auth.music().is_playlist_owner(user_id, playlist_id) {
             Ok(true) => {}
             Ok(false) => {
-                return error_response(auth.format, &ApiError::NotAuthorized).into_response();
+                return util::unauthorized(&auth);
             }
             Err(e) => {
-                return error_response(auth.format, &ApiError::Generic(e.to_string()))
-                    .into_response();
+                return util::service_error(&auth, e);
             }
         }
 
@@ -238,62 +228,28 @@ pub async fn create_playlist(
             &song_ids,
             &[],
         ) {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
 
         let playlist = match auth.music().get_playlist(playlist_id) {
             Ok(Some(p)) => p,
             Ok(None) => {
-                return error_response(auth.format, &ApiError::NotFound("Playlist".into()))
-                    .into_response();
+                return util::not_found(&auth, "Playlist");
             }
             Err(e) => {
-                return error_response(auth.format, &ApiError::Generic(e.to_string()))
-                    .into_response();
+                return util::service_error(&auth, e);
             }
         };
         let songs = match auth.music().get_playlist_songs(playlist_id) {
             Ok(v) => v,
             Err(e) => {
-                return error_response(auth.format, &ApiError::Generic(e.to_string()))
-                    .into_response();
+                return util::service_error(&auth, e);
             }
         };
 
-        let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
-        let starred_map = match auth
-            .music()
-            .get_starred_at_for_songs_batch(user_id, &song_ids)
-        {
-            Ok(v) => v,
-            Err(e) => {
-                return error_response(auth.format, &ApiError::Generic(e.to_string()))
-                    .into_response();
-            }
-        };
-
-        let song_responses: Vec<ChildResponse> = songs
-            .iter()
-            .map(|s| {
-                let starred_at = starred_map.get(&s.id);
-                ChildResponse::from_song_with_starred(s, starred_at)
-            })
-            .collect();
-
-        let cover_art = songs.first().and_then(|s| s.cover_art.clone());
-
-        let response = PlaylistWithSongsResponse {
-            id: playlist.id.to_string(),
-            name: playlist.name.clone(),
-            comment: playlist.comment.clone(),
-            owner: playlist.owner.clone(),
-            public: playlist.public,
-            song_count: playlist.song_count,
-            duration: playlist.duration,
-            created: format_subsonic_datetime(&playlist.created_at),
-            changed: format_subsonic_datetime(&playlist.updated_at),
-            cover_art,
-            entries: song_responses,
+        let response = match playlist_with_songs_response(&auth, &playlist, &songs) {
+            Ok(response) => response,
+            Err(response) => return *response,
         };
 
         return SubsonicResponse::playlist(auth.format, response).into_response();
@@ -302,58 +258,27 @@ pub async fn create_playlist(
     let name = match params.name.as_deref() {
         Some(n) if !n.is_empty() => n,
         _ => {
-            return error_response(auth.format, &ApiError::MissingParameter("name".into()))
-                .into_response();
+            return util::missing_param(&auth, "name");
         }
     };
 
     let playlist = match auth.music().create_playlist(user_id, name, None, &song_ids) {
         Ok(p) => p,
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     };
 
     let songs = match auth.music().get_playlist_songs(playlist.id) {
         Ok(v) => v,
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     };
 
-    let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
-    let starred_map = match auth
-        .music()
-        .get_starred_at_for_songs_batch(user_id, &song_ids)
-    {
-        Ok(v) => v,
-        Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
-        }
-    };
-
-    let song_responses: Vec<ChildResponse> = songs
-        .iter()
-        .map(|s| {
-            let starred_at = starred_map.get(&s.id);
-            ChildResponse::from_song_with_starred(s, starred_at)
-        })
-        .collect();
-
-    let cover_art = songs.first().and_then(|s| s.cover_art.clone());
-
-    let response = PlaylistWithSongsResponse {
-        id: playlist.id.to_string(),
-        name: playlist.name.clone(),
-        comment: playlist.comment.clone(),
-        owner: playlist.owner.clone(),
-        public: playlist.public,
-        song_count: playlist.song_count,
-        duration: playlist.duration,
-        created: format_subsonic_datetime(&playlist.created_at),
-        changed: format_subsonic_datetime(&playlist.updated_at),
-        cover_art,
-        entries: song_responses,
+    let response = match playlist_with_songs_response(&auth, &playlist, &songs) {
+        Ok(response) => response,
+        Err(response) => return *response,
     };
 
     SubsonicResponse::playlist(auth.format, response).into_response()
@@ -396,31 +321,23 @@ pub async fn update_playlist(
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     if !auth.user.roles.playlist_role {
-        return error_response(auth.format, &ApiError::NotAuthorized).into_response();
+        return util::unauthorized(&auth);
     }
 
     let user_id = auth.user.id;
 
     let Some(id_str) = params.playlist_id.as_ref() else {
-        return error_response(
-            auth.format,
-            &ApiError::MissingParameter("playlistId".into()),
-        )
-        .into_response();
+        return util::missing_param(&auth, "playlistId");
     };
     let Ok(playlist_id) = id_str.parse::<i32>() else {
-        return error_response(
-            auth.format,
-            &ApiError::Generic(format!("Invalid playlistId: {id_str}")),
-        )
-        .into_response();
+        return util::service_error(&auth, format!("Invalid playlistId: {id_str}"));
     };
 
     match auth.music().is_playlist_owner(user_id, playlist_id) {
         Ok(true) => {}
-        Ok(false) => return error_response(auth.format, &ApiError::NotAuthorized).into_response(),
+        Ok(false) => return util::unauthorized(&auth),
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     }
 
@@ -433,7 +350,7 @@ pub async fn update_playlist(
         &params.song_index_to_remove,
     ) {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
-        Err(e) => error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+        Err(e) => util::service_error(&auth, e),
     }
 }
 
@@ -453,36 +370,29 @@ pub async fn delete_playlist(
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     if !auth.user.roles.playlist_role {
-        return error_response(auth.format, &ApiError::NotAuthorized).into_response();
+        return util::unauthorized(&auth);
     }
 
     let Some(id_str) = params.id.as_ref() else {
-        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-            .into_response();
+        return util::missing_param(&auth, "id");
     };
     let Ok(playlist_id) = id_str.parse::<i32>() else {
-        return error_response(
-            auth.format,
-            &ApiError::Generic(format!("Invalid id: {id_str}")),
-        )
-        .into_response();
+        return util::service_error(&auth, format!("Invalid id: {id_str}"));
     };
 
     let user_id = auth.user.id;
 
     match auth.music().is_playlist_owner(user_id, playlist_id) {
         Ok(true) => {}
-        Ok(false) => return error_response(auth.format, &ApiError::NotAuthorized).into_response(),
+        Ok(false) => return util::unauthorized(&auth),
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     }
 
     match auth.music().delete_playlist(playlist_id) {
         Ok(true) => SubsonicResponse::empty(auth.format).into_response(),
-        Ok(false) => {
-            error_response(auth.format, &ApiError::NotFound("Playlist".into())).into_response()
-        }
-        Err(e) => error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+        Ok(false) => util::not_found(&auth, "Playlist"),
+        Err(e) => util::service_error(&auth, e),
     }
 }

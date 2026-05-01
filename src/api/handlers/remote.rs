@@ -4,9 +4,9 @@ use axum::response::IntoResponse;
 use serde::Deserialize;
 
 use crate::api::auth::SubsonicContext;
-use crate::api::error::ApiError;
+use crate::api::handlers::util;
 
-use crate::api::response::{SubsonicResponse, error_response};
+use crate::api::response::SubsonicResponse;
 use crate::db::{RemoteCommand, RemoteSession, RemoteState};
 use crate::models::music::{
     RemoteCommandResponse, RemoteCommandsResponse, RemoteSessionResponse, RemoteStateResponse,
@@ -38,8 +38,7 @@ pub async fn create_remote_session(
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let Some(device_id) = resolve_device_id(params.device_id.as_deref(), &auth) else {
-        return error_response(auth.format, &ApiError::MissingParameter("deviceId".into()))
-            .into_response();
+        return util::missing_param(&auth, "deviceId");
     };
 
     let ttl_seconds = params
@@ -58,9 +57,7 @@ pub async fn create_remote_session(
     ) {
         Ok(session) => SubsonicResponse::remote_session(auth.format, map_session(&session, true))
             .into_response(),
-        Err(error) => {
-            error_response(auth.format, &ApiError::Generic(error.to_string())).into_response()
-        }
+        Err(error) => util::service_error(&auth, error),
     }
 }
 
@@ -84,13 +81,11 @@ pub async fn join_remote_session(
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let Some(code) = params.code.as_deref().filter(|value| !value.is_empty()) else {
-        return error_response(auth.format, &ApiError::MissingParameter("code".into()))
-            .into_response();
+        return util::missing_param(&auth, "code");
     };
 
     let Some(device_id) = resolve_device_id(params.device_id.as_deref(), &auth) else {
-        return error_response(auth.format, &ApiError::MissingParameter("deviceId".into()))
-            .into_response();
+        return util::missing_param(&auth, "deviceId");
     };
 
     match auth.remote().join_remote_session(
@@ -103,11 +98,8 @@ pub async fn join_remote_session(
             SubsonicResponse::remote_session(auth.format, map_session(&session, false))
                 .into_response()
         }
-        Ok(None) => error_response(auth.format, &ApiError::NotFound("Remote session".into()))
-            .into_response(),
-        Err(error) => {
-            error_response(auth.format, &ApiError::Generic(error.to_string())).into_response()
-        }
+        Ok(None) => util::not_found(&auth, "Remote session"),
+        Err(error) => util::service_error(&auth, error),
     }
 }
 
@@ -139,8 +131,7 @@ pub async fn get_remote_session(
         .as_deref()
         .filter(|value| !value.is_empty())
     else {
-        return error_response(auth.format, &ApiError::MissingParameter("sessionId".into()))
-            .into_response();
+        return util::missing_param(&auth, "sessionId");
     };
 
     match auth.remote().get_remote_session(auth.user.id, session_id) {
@@ -148,11 +139,8 @@ pub async fn get_remote_session(
             SubsonicResponse::remote_session(auth.format, map_session(&session, true))
                 .into_response()
         }
-        Ok(None) => error_response(auth.format, &ApiError::NotFound("Remote session".into()))
-            .into_response(),
-        Err(error) => {
-            error_response(auth.format, &ApiError::Generic(error.to_string())).into_response()
-        }
+        Ok(None) => util::not_found(&auth, "Remote session"),
+        Err(error) => util::service_error(&auth, error),
     }
 }
 
@@ -170,17 +158,13 @@ pub async fn close_remote_session(
         .as_deref()
         .filter(|value| !value.is_empty())
     else {
-        return error_response(auth.format, &ApiError::MissingParameter("sessionId".into()))
-            .into_response();
+        return util::missing_param(&auth, "sessionId");
     };
 
     match auth.remote().close_remote_session(auth.user.id, session_id) {
         Ok(true) => SubsonicResponse::empty(auth.format).into_response(),
-        Ok(false) => error_response(auth.format, &ApiError::NotFound("Remote session".into()))
-            .into_response(),
-        Err(error) => {
-            error_response(auth.format, &ApiError::Generic(error.to_string())).into_response()
-        }
+        Ok(false) => util::not_found(&auth, "Remote session"),
+        Err(error) => util::service_error(&auth, error),
     }
 }
 
@@ -209,16 +193,13 @@ pub async fn send_remote_command(
         .as_deref()
         .filter(|value| !value.is_empty())
     else {
-        return error_response(auth.format, &ApiError::MissingParameter("sessionId".into()))
-            .into_response();
+        return util::missing_param(&auth, "sessionId");
     };
     let Some(command) = params.command.as_deref().filter(|value| !value.is_empty()) else {
-        return error_response(auth.format, &ApiError::MissingParameter("command".into()))
-            .into_response();
+        return util::missing_param(&auth, "command");
     };
     let Some(device_id) = resolve_device_id(params.device_id.as_deref(), &auth) else {
-        return error_response(auth.format, &ApiError::MissingParameter("deviceId".into()))
-            .into_response();
+        return util::missing_param(&auth, "deviceId");
     };
 
     match auth.remote().send_remote_command(
@@ -229,9 +210,7 @@ pub async fn send_remote_command(
         params.payload.as_deref(),
     ) {
         Ok(_) => SubsonicResponse::empty(auth.format).into_response(),
-        Err(error) => {
-            error_response(auth.format, &ApiError::Generic(error.to_string())).into_response()
-        }
+        Err(error) => util::service_error(&auth, error),
     }
 }
 
@@ -261,12 +240,10 @@ pub async fn get_remote_commands(
         .as_deref()
         .filter(|value| !value.is_empty())
     else {
-        return error_response(auth.format, &ApiError::MissingParameter("sessionId".into()))
-            .into_response();
+        return util::missing_param(&auth, "sessionId");
     };
     let Some(device_id) = resolve_device_id(params.device_id.as_deref(), &auth) else {
-        return error_response(auth.format, &ApiError::MissingParameter("deviceId".into()))
-            .into_response();
+        return util::missing_param(&auth, "deviceId");
     };
 
     let since_id = params.since_id.unwrap_or(0).max(0);
@@ -282,9 +259,7 @@ pub async fn get_remote_commands(
             };
             SubsonicResponse::remote_commands(auth.format, response).into_response()
         }
-        Err(error) => {
-            error_response(auth.format, &ApiError::Generic(error.to_string())).into_response()
-        }
+        Err(error) => util::service_error(&auth, error),
     }
 }
 
@@ -313,20 +288,17 @@ pub async fn update_remote_state(
         .as_deref()
         .filter(|value| !value.is_empty())
     else {
-        return error_response(auth.format, &ApiError::MissingParameter("sessionId".into()))
-            .into_response();
+        return util::missing_param(&auth, "sessionId");
     };
     let Some(state_json) = params
         .state_json
         .as_deref()
         .filter(|value| !value.is_empty())
     else {
-        return error_response(auth.format, &ApiError::MissingParameter("stateJson".into()))
-            .into_response();
+        return util::missing_param(&auth, "stateJson");
     };
     let Some(device_id) = resolve_device_id(params.device_id.as_deref(), &auth) else {
-        return error_response(auth.format, &ApiError::MissingParameter("deviceId".into()))
-            .into_response();
+        return util::missing_param(&auth, "deviceId");
     };
 
     match auth
@@ -334,9 +306,7 @@ pub async fn update_remote_state(
         .update_remote_state(auth.user.id, session_id, device_id, state_json)
     {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
-        Err(error) => {
-            error_response(auth.format, &ApiError::Generic(error.to_string())).into_response()
-        }
+        Err(error) => util::service_error(&auth, error),
     }
 }
 
@@ -359,8 +329,7 @@ pub async fn get_remote_state(
         .as_deref()
         .filter(|value| !value.is_empty())
     else {
-        return error_response(auth.format, &ApiError::MissingParameter("sessionId".into()))
-            .into_response();
+        return util::missing_param(&auth, "sessionId");
     };
 
     match auth.remote().get_remote_state(auth.user.id, session_id) {
@@ -368,12 +337,8 @@ pub async fn get_remote_state(
             let response = map_state(&state);
             SubsonicResponse::remote_state(auth.format, response).into_response()
         }
-        Ok(None) => {
-            error_response(auth.format, &ApiError::NotFound("Remote state".into())).into_response()
-        }
-        Err(error) => {
-            error_response(auth.format, &ApiError::Generic(error.to_string())).into_response()
-        }
+        Ok(None) => util::not_found(&auth, "Remote state"),
+        Err(error) => util::service_error(&auth, error),
     }
 }
 
@@ -413,5 +378,83 @@ fn map_state(state: &RemoteState) -> RemoteStateResponse {
         state_json: state.state_json.clone(),
         updated_by_device_id: state.updated_by_device_id.clone(),
         updated_at: format_subsonic_datetime(&state.updated_at),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::NaiveDate;
+
+    use super::{map_command, map_session, map_state};
+    use crate::db::{RemoteCommand, RemoteSession, RemoteState};
+
+    fn ts() -> chrono::NaiveDateTime {
+        NaiveDate::from_ymd_opt(2024, 1, 2)
+            .expect("valid date")
+            .and_hms_milli_opt(3, 4, 5, 678)
+            .expect("valid time")
+    }
+
+    fn remote_session(controller_device_id: Option<&str>) -> RemoteSession {
+        RemoteSession {
+            session_id: "session-1".to_string(),
+            pairing_code: "PAIR12".to_string(),
+            owner_user_id: 7,
+            host_device_id: "host-device".to_string(),
+            host_device_name: Some("Host".to_string()),
+            controller_user_id: controller_device_id.map(|_| 8),
+            controller_device_id: controller_device_id.map(str::to_string),
+            controller_device_name: controller_device_id.map(|_| "Controller".to_string()),
+            expires_at: ts(),
+            created_at: ts(),
+            updated_at: ts(),
+            closed_at: None,
+        }
+    }
+
+    #[test]
+    fn map_session_includes_pairing_code_only_when_requested_and_marks_connected() {
+        let disconnected = map_session(&remote_session(None), true);
+        assert_eq!(disconnected.pairing_code.as_deref(), Some("PAIR12"));
+        assert!(!disconnected.connected);
+
+        let connected = map_session(&remote_session(Some("controller-device")), false);
+        assert_eq!(connected.pairing_code, None);
+        assert!(connected.connected);
+        assert_eq!(
+            connected.controller_device_id.as_deref(),
+            Some("controller-device")
+        );
+        assert_eq!(connected.expires_at, "2024-01-02T03:04:05.678Z");
+    }
+
+    #[test]
+    fn map_command_preserves_payload_source_and_timestamp() {
+        let response = map_command(&RemoteCommand {
+            id: 42,
+            command: "play".to_string(),
+            payload: Some(r#"{"id":"song-1"}"#.to_string()),
+            source_device_id: "controller-device".to_string(),
+            created_at: ts(),
+        });
+
+        assert_eq!(response.id, 42);
+        assert_eq!(response.command, "play");
+        assert_eq!(response.payload.as_deref(), Some(r#"{"id":"song-1"}"#));
+        assert_eq!(response.source_device_id, "controller-device");
+        assert_eq!(response.created, "2024-01-02T03:04:05.678Z");
+    }
+
+    #[test]
+    fn map_state_preserves_json_device_and_timestamp() {
+        let response = map_state(&RemoteState {
+            state_json: r#"{"playing":true}"#.to_string(),
+            updated_by_device_id: "host-device".to_string(),
+            updated_at: ts(),
+        });
+
+        assert_eq!(response.state_json, r#"{"playing":true}"#);
+        assert_eq!(response.updated_by_device_id, "host-device");
+        assert_eq!(response.updated_at, "2024-01-02T03:04:05.678Z");
     }
 }

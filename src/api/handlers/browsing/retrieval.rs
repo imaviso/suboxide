@@ -5,7 +5,8 @@ use axum::response::IntoResponse;
 use crate::api::auth::SubsonicContext;
 use crate::api::error::ApiError;
 use crate::api::handlers::browsing::IdParams;
-use crate::api::response::{SubsonicResponse, error_response};
+use crate::api::handlers::util;
+use crate::api::response::SubsonicResponse;
 use crate::models::music::{
     AlbumID3Response, AlbumWithSongsID3Response, ArtistWithAlbumsID3Response, ChildResponse,
 };
@@ -113,13 +114,12 @@ pub async fn get_album(
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let Some(album_id) = params.id else {
-        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-            .into_response();
+        return util::missing_param(&auth, "id");
     };
 
     let response = match album_response(&auth, album_id) {
         Ok(response) => response,
-        Err(error) => return error_response(auth.format, &error).into_response(),
+        Err(error) => return util::api_error(&auth, &error),
     };
     SubsonicResponse::album(auth.format, response).into_response()
 }
@@ -132,13 +132,12 @@ pub async fn get_artist(
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let Some(artist_id) = params.id else {
-        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-            .into_response();
+        return util::missing_param(&auth, "id");
     };
 
     let response = match artist_response(&auth, artist_id) {
         Ok(response) => response,
-        Err(error) => return error_response(auth.format, &error).into_response(),
+        Err(error) => return util::api_error(&auth, &error),
     };
     SubsonicResponse::artist(auth.format, response).into_response()
 }
@@ -151,13 +150,12 @@ pub async fn get_song(
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let Some(song_id) = params.id else {
-        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-            .into_response();
+        return util::missing_param(&auth, "id");
     };
 
     let response = match song_response(&auth, song_id) {
         Ok(response) => response,
-        Err(error) => return error_response(auth.format, &error).into_response(),
+        Err(error) => return util::api_error(&auth, &error),
     };
     SubsonicResponse::song(auth.format, response).into_response()
 }

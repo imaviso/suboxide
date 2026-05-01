@@ -3,9 +3,9 @@
 use axum::response::IntoResponse;
 
 use crate::api::auth::SubsonicContext;
-use crate::api::error::ApiError;
 use crate::api::handlers::browsing::IdParams;
-use crate::api::response::{SubsonicResponse, error_response};
+use crate::api::handlers::util;
+use crate::api::response::SubsonicResponse;
 use crate::models::music::{ChildResponse, DirectoryResponse};
 
 /// GET/POST /rest/getMusicDirectory[.view]
@@ -19,27 +19,26 @@ pub async fn get_music_directory(
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
     let Some(id) = params.id else {
-        return error_response(auth.format, &ApiError::MissingParameter("id".into()))
-            .into_response();
+        return util::missing_param(&auth, "id");
     };
 
     let maybe_album = match auth.music().get_album(id) {
         Ok(album) => album,
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     };
     let maybe_artist = match auth.music().get_artist(id) {
         Ok(artist) => artist,
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     };
 
     let folders = match auth.music().get_music_folders() {
         Ok(folders) => folders,
         Err(e) => {
-            return error_response(auth.format, &ApiError::Generic(e.to_string())).into_response();
+            return util::service_error(&auth, e);
         }
     };
     let maybe_folder = folders.iter().find(|f| f.id == id);
@@ -48,19 +47,14 @@ pub async fn get_music_directory(
         + usize::from(maybe_folder.is_some());
 
     if matches > 1 {
-        return error_response(
-            auth.format,
-            &ApiError::Generic(format!("Ambiguous directory id: {id}")),
-        )
-        .into_response();
+        return util::service_error(&auth, format!("Ambiguous directory id: {id}"));
     }
 
     if let Some(album) = maybe_album {
         let songs = match auth.music().get_songs_by_album(id) {
             Ok(songs) => songs,
             Err(e) => {
-                return error_response(auth.format, &ApiError::Generic(e.to_string()))
-                    .into_response();
+                return util::service_error(&auth, e);
             }
         };
         let children: Vec<ChildResponse> = songs.iter().map(ChildResponse::from).collect();
@@ -72,8 +66,7 @@ pub async fn get_music_directory(
         let albums = match auth.music().get_albums_by_artist(id) {
             Ok(albums) => albums,
             Err(e) => {
-                return error_response(auth.format, &ApiError::Generic(e.to_string()))
-                    .into_response();
+                return util::service_error(&auth, e);
             }
         };
         let children: Vec<ChildResponse> = albums
@@ -88,8 +81,7 @@ pub async fn get_music_directory(
         let artists = match auth.music().get_artists_by_music_folder(folder.id) {
             Ok(artists) => artists,
             Err(e) => {
-                return error_response(auth.format, &ApiError::Generic(e.to_string()))
-                    .into_response();
+                return util::service_error(&auth, e);
             }
         };
         let children: Vec<ChildResponse> = artists
@@ -100,5 +92,5 @@ pub async fn get_music_directory(
         return SubsonicResponse::directory(auth.format, response).into_response();
     }
 
-    error_response(auth.format, &ApiError::NotFound("Directory".into())).into_response()
+    util::not_found(&auth, "Directory")
 }

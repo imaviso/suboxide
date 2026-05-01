@@ -4,7 +4,8 @@ use serde::Deserialize;
 
 use crate::api::auth::SubsonicContext;
 use crate::api::error::ApiError;
-use crate::api::response::{SubsonicResponse, error_response};
+use crate::api::handlers::util;
+use crate::api::response::SubsonicResponse;
 use crate::db::PlayQueue;
 use crate::models::music::{
     ChildResponse, PlayQueueByIndexResponse, PlayQueueResponse, format_subsonic_datetime,
@@ -82,7 +83,7 @@ pub async fn get_play_queue(auth: SubsonicContext) -> impl IntoResponse {
         Ok(Some(play_queue)) => {
             let response = match play_queue_response(&auth, play_queue) {
                 Ok(response) => response,
-                Err(error) => return error_response(auth.format, &error).into_response(),
+                Err(error) => return util::api_error(&auth, &error),
             };
 
             SubsonicResponse::play_queue(auth.format, response).into_response()
@@ -99,7 +100,7 @@ pub async fn get_play_queue(auth: SubsonicContext) -> impl IntoResponse {
 
             SubsonicResponse::play_queue(auth.format, response).into_response()
         }
-        Err(e) => error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+        Err(e) => util::service_error(&auth, e),
     }
 }
 
@@ -145,7 +146,7 @@ pub async fn save_play_queue(
         changed_by,
     ) {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
-        Err(e) => error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+        Err(e) => util::service_error(&auth, e),
     }
 }
 
@@ -161,7 +162,7 @@ pub async fn get_play_queue_by_index(auth: SubsonicContext) -> impl IntoResponse
         Ok(Some(play_queue)) => {
             let response = match play_queue_by_index_response(&auth, play_queue) {
                 Ok(response) => response,
-                Err(error) => return error_response(auth.format, &error).into_response(),
+                Err(error) => return util::api_error(&auth, &error),
             };
 
             SubsonicResponse::play_queue_by_index(auth.format, response).into_response()
@@ -178,7 +179,7 @@ pub async fn get_play_queue_by_index(auth: SubsonicContext) -> impl IntoResponse
 
             SubsonicResponse::play_queue_by_index(auth.format, response).into_response()
         }
-        Err(e) => error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+        Err(e) => util::service_error(&auth, e),
     }
 }
 
@@ -232,6 +233,6 @@ pub async fn save_play_queue_by_index(
         changed_by,
     ) {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
-        Err(e) => error_response(auth.format, &ApiError::Generic(e.to_string())).into_response(),
+        Err(e) => util::service_error(&auth, e),
     }
 }
