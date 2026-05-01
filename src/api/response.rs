@@ -1257,7 +1257,9 @@ pub fn error_response(format: Format, error: &ApiError) -> SubsonicResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::{Format, supported_extensions};
+    use serde_json::json;
+
+    use super::{Format, json_empty, json_error, json_named, supported_extensions};
 
     #[test]
     fn format_from_param_accepts_only_json_like_formats() {
@@ -1313,5 +1315,44 @@ mod tests {
         let invalid = "not json";
 
         assert!(super::transform_json_keys(invalid).is_err());
+    }
+
+    #[test]
+    fn json_empty_contains_success_envelope_metadata() {
+        let value = json_empty();
+        let response = &value["subsonic-response"];
+
+        assert_eq!(response["status"], "ok");
+        assert_eq!(response["version"], "1.16.1");
+        assert_eq!(response["type"], "suboxide");
+        assert_eq!(response["openSubsonic"], true);
+    }
+
+    #[test]
+    fn json_error_contains_failed_status_code_and_message() {
+        let value = json_error(10, "missing id".to_string()).expect("error JSON should serialize");
+        let response = &value["subsonic-response"];
+
+        assert_eq!(response["status"], "failed");
+        assert_eq!(response["error"]["code"], 10);
+        assert_eq!(response["error"]["message"], "missing id");
+    }
+
+    #[test]
+    fn json_named_nests_payload_and_transforms_subsonic_attribute_keys() {
+        let value = json_named(
+            "genre",
+            json!({
+                "@songCount": 7,
+                "$text": "Jazz",
+                "album": [{ "@id": "42" }]
+            }),
+        )
+        .expect("named JSON should serialize");
+        let genre = &value["subsonic-response"]["genre"];
+
+        assert_eq!(genre["songCount"], 7);
+        assert_eq!(genre["value"], "Jazz");
+        assert_eq!(genre["album"][0]["id"], "42");
     }
 }

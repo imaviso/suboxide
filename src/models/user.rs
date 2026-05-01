@@ -94,23 +94,46 @@ mod tests {
 
     use super::User;
 
-    #[test]
-    fn verify_password_returns_err_for_malformed_hash() {
-        let user = User {
+    fn user_with_subsonic_password(password: Option<&str>) -> User {
+        User {
             id: 1,
             username: "test".into(),
             password_hash: "not_a_valid_argon2_hash".into(),
-            subsonic_password: None,
+            subsonic_password: password.map(str::to_string),
             api_key: None,
             lastfm_session_key: None,
             email: None,
             roles: Default::default(),
             max_bit_rate: 0,
-        };
+        }
+    }
+
+    #[test]
+    fn verify_password_returns_err_for_malformed_hash() {
+        let user = user_with_subsonic_password(None);
 
         let result = user.verify_password("any_password");
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().kind(), PasswordErrorKind::InvalidHash);
+    }
+
+    #[test]
+    fn verify_token_accepts_expected_md5_password_plus_salt_case_insensitively() {
+        let user = user_with_subsonic_password(Some("correct horse"));
+
+        assert!(user.verify_token("0F8ACE3B2B97FC3820DEF0A5A79CF93A", "salt"));
+    }
+
+    #[test]
+    fn verify_token_rejects_wrong_token_salt_and_missing_plaintext_password() {
+        let user = user_with_subsonic_password(Some("correct horse"));
+
+        assert!(!user.verify_token("0f8ace3b2b97fc3820def0a5a79cf93a", "wrong-salt"));
+        assert!(!user.verify_token("deadbeef", "salt"));
+        assert!(
+            !user_with_subsonic_password(None)
+                .verify_token("0f8ace3b2b97fc3820def0a5a79cf93a", "salt")
+        );
     }
 }
 

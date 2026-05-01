@@ -40,3 +40,19 @@ pub fn resolve_data_dir() -> PathBuf {
 pub fn resolve_cover_art_dir() -> PathBuf {
     cover_art_dir_from_data_dir(resolve_data_dir())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::{COVER_ART_RELATIVE_DIR, cover_art_dir_from_data_dir};
+
+    #[test]
+    fn cover_art_dir_from_data_dir_uses_stable_covers_subdirectory() {
+        assert_eq!(COVER_ART_RELATIVE_DIR, "covers");
+        assert_eq!(
+            cover_art_dir_from_data_dir(Path::new("/var/lib/suboxide")),
+            Path::new("/var/lib/suboxide/covers")
+        );
+    }
+}

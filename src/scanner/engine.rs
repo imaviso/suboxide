@@ -1324,4 +1324,20 @@ mod tests {
         let converted = i64::try_from(normal_secs).unwrap_or(i64::MAX);
         assert_eq!(converted, 1_700_000_000_i64);
     }
+
+    #[test]
+    fn image_mime_from_ext_maps_supported_cover_extensions() {
+        assert_eq!(Scanner::image_mime_from_ext("png"), "image/png");
+        assert_eq!(Scanner::image_mime_from_ext("gif"), "image/gif");
+        assert_eq!(Scanner::image_mime_from_ext("bmp"), "image/bmp");
+        assert_eq!(Scanner::image_mime_from_ext("webp"), "image/webp");
+    }
+
+    #[test]
+    fn image_mime_from_ext_defaults_unknown_and_jpeg_to_jpeg() {
+        assert_eq!(Scanner::image_mime_from_ext("jpg"), "image/jpeg");
+        assert_eq!(Scanner::image_mime_from_ext("jpeg"), "image/jpeg");
+        assert_eq!(Scanner::image_mime_from_ext("tiff"), "image/jpeg");
+        assert_eq!(Scanner::image_mime_from_ext("unknown"), "image/jpeg");
+    }
 }

@@ -1417,6 +1417,57 @@ impl LyricsListResponse {
     }
 }
 
+#[cfg(test)]
+mod lyric_tests {
+    use super::{LyricLine, LyricsListResponse, StructuredLyrics};
+
+    #[test]
+    fn lyric_line_constructors_preserve_sync_state() {
+        let synced = LyricLine::synced(1234, "line");
+        assert_eq!(synced.start, Some(1234));
+        assert_eq!(synced.value, "line");
+
+        let unsynced = LyricLine::unsynced("plain");
+        assert_eq!(unsynced.start, None);
+        assert_eq!(unsynced.value, "plain");
+    }
+
+    #[test]
+    fn structured_lyrics_builders_preserve_lang_sync_lines_and_metadata() {
+        let lyrics = StructuredLyrics::synced("eng", vec![(500, "hello".to_string())])
+            .with_display_artist("Display Artist")
+            .with_display_title("Display Title")
+            .with_offset(-120);
+
+        assert!(lyrics.synced);
+        assert_eq!(lyrics.lang, "eng");
+        assert_eq!(lyrics.display_artist.as_deref(), Some("Display Artist"));
+        assert_eq!(lyrics.display_title.as_deref(), Some("Display Title"));
+        assert_eq!(lyrics.offset, Some(-120));
+        assert_eq!(lyrics.lines[0].start, Some(500));
+        assert_eq!(lyrics.lines[0].value, "hello");
+    }
+
+    #[test]
+    fn unsynced_structured_lyrics_omit_line_start_times() {
+        let lyrics = StructuredLyrics::unsynced("und", vec!["a".to_string(), "b".to_string()]);
+
+        assert!(!lyrics.synced);
+        assert_eq!(lyrics.lang, "und");
+        assert_eq!(lyrics.lines.len(), 2);
+        assert!(lyrics.lines.iter().all(|line| line.start.is_none()));
+    }
+
+    #[test]
+    fn lyrics_list_response_preserves_empty_and_non_empty_payloads() {
+        assert!(LyricsListResponse::empty().structured_lyrics.is_empty());
+
+        let lyrics = StructuredLyrics::unsynced("eng", vec!["line".to_string()]);
+        let response = LyricsListResponse::new(vec![lyrics]);
+        assert_eq!(response.structured_lyrics.len(), 1);
+    }
+}
+
 // ============================================================================
 // Response types for getMusicDirectory (non-ID3 folder browsing)
 // ============================================================================
@@ -1544,6 +1595,118 @@ impl ChildResponse {
             media_type: None,
             starred: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod directory_tests {
+    use chrono::{NaiveDate, NaiveDateTime};
+
+    use super::{Album, Artist, ChildResponse, DirectoryResponse, MusicFolder};
+
+    fn ts() -> NaiveDateTime {
+        NaiveDate::from_ymd_opt(2024, 1, 2)
+            .expect("valid date")
+            .and_hms_milli_opt(3, 4, 5, 678)
+            .expect("valid time")
+    }
+
+    fn artist() -> Artist {
+        Artist {
+            id: 11,
+            name: "Artist".to_string(),
+            sort_name: Some("Artist Sort".to_string()),
+            musicbrainz_id: Some("mb-artist".to_string()),
+            cover_art: Some("artist-cover".to_string()),
+            artist_image_url: Some("https://example.test/artist.jpg".to_string()),
+            created_at: ts(),
+            updated_at: ts(),
+        }
+    }
+
+    fn album() -> Album {
+        Album {
+            id: 22,
+            name: "Album".to_string(),
+            sort_name: None,
+            artist_id: Some(11),
+            artist_name: Some("Artist".to_string()),
+            year: Some(2024),
+            genre: Some("Jazz".to_string()),
+            cover_art: Some("album-cover".to_string()),
+            musicbrainz_id: Some("mb-album".to_string()),
+            duration: 123,
+            song_count: 8,
+            play_count: 5,
+            created_at: ts(),
+            updated_at: ts(),
+        }
+    }
+
+    #[test]
+    fn directory_response_from_music_folder_uses_folder_as_root() {
+        let folder = MusicFolder {
+            id: 3,
+            name: "Library".to_string(),
+            path: "/music".to_string(),
+            enabled: true,
+            created_at: ts(),
+            updated_at: ts(),
+        };
+        let child = ChildResponse::from_artist_as_dir(&artist());
+
+        let response = DirectoryResponse::from_music_folder(&folder, vec![child]);
+
+        assert_eq!(response.id, "3");
+        assert_eq!(response.parent, None);
+        assert_eq!(response.name, "Library");
+        assert_eq!(response.children.len(), 1);
+    }
+
+    #[test]
+    fn directory_response_from_album_uses_artist_parent_and_play_count() {
+        let response = DirectoryResponse::from_album(&album(), Vec::new());
+
+        assert_eq!(response.id, "22");
+        assert_eq!(response.parent.as_deref(), Some("11"));
+        assert_eq!(response.name, "Album");
+        assert_eq!(response.play_count, Some(5));
+    }
+
+    #[test]
+    fn child_response_from_artist_as_dir_pins_directory_fields() {
+        let response = ChildResponse::from_artist_as_dir(&artist());
+
+        assert_eq!(response.id, "11");
+        assert!(response.is_dir);
+        assert_eq!(response.title, "Artist");
+        assert_eq!(response.artist.as_deref(), Some("Artist"));
+        assert_eq!(response.artist_id.as_deref(), Some("11"));
+        assert_eq!(response.cover_art.as_deref(), Some("artist-cover"));
+        assert_eq!(
+            response.created.as_deref(),
+            Some("2024-01-02T03:04:05.678Z")
+        );
+        assert_eq!(response.album_id, None);
+        assert_eq!(response.duration, None);
+    }
+
+    #[test]
+    fn child_response_from_album_as_dir_pins_album_metadata() {
+        let response = ChildResponse::from_album_as_dir(&album());
+
+        assert_eq!(response.id, "22");
+        assert_eq!(response.parent.as_deref(), Some("11"));
+        assert!(response.is_dir);
+        assert_eq!(response.title, "Album");
+        assert_eq!(response.album.as_deref(), Some("Album"));
+        assert_eq!(response.artist.as_deref(), Some("Artist"));
+        assert_eq!(response.year, Some(2024));
+        assert_eq!(response.genre.as_deref(), Some("Jazz"));
+        assert_eq!(response.duration, Some(123));
+        assert_eq!(response.play_count, Some(5));
+        assert_eq!(response.album_id.as_deref(), Some("22"));
+        assert_eq!(response.artist_id.as_deref(), Some("11"));
     }
 }
 

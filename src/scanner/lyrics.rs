@@ -218,6 +218,43 @@ mod tests {
     }
 
     #[test]
+    fn parse_lrc_expands_multiple_timestamps_and_sorts_output() {
+        let lrc = "[00:10.00]Later\n[00:02.00][00:01.00]Repeated";
+        let lines = parse_lrc(lrc);
+
+        assert_eq!(lines.len(), 3);
+        assert_eq!(
+            (lines[0].start_ms, lines[0].text.as_str()),
+            (1000, "Repeated")
+        );
+        assert_eq!(
+            (lines[1].start_ms, lines[1].text.as_str()),
+            (2000, "Repeated")
+        );
+        assert_eq!(
+            (lines[2].start_ms, lines[2].text.as_str()),
+            (10000, "Later")
+        );
+    }
+
+    #[test]
+    fn parse_lrc_ignores_metadata_and_invalid_timestamp_lines() {
+        let lrc = "[ar:Artist]\n[bad]Nope\n[00:03.00]Lyric";
+        let lines = parse_lrc(lrc);
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!((lines[0].start_ms, lines[0].text.as_str()), (3000, "Lyric"));
+    }
+
+    #[test]
+    fn parse_unsynced_trims_and_drops_empty_lines() {
+        assert_eq!(
+            parse_unsynced(" first \n\n second\t\n"),
+            ["first", "second"]
+        );
+    }
+
+    #[test]
     fn test_looks_like_lrc() {
         assert!(looks_like_lrc("[00:00.00]Hello"));
         assert!(looks_like_lrc("[01:30]Test"));
