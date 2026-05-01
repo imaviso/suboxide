@@ -9,7 +9,7 @@ static GLOBAL: MiMalloc = MiMalloc;
 use clap::{Parser, Subcommand};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use suboxide::app::{AppState, create_router};
+use suboxide::app::{AppState, CorsConfig, CorsConfigError, create_router};
 use suboxide::crypto::{PasswordError, hash_password};
 use suboxide::db::{
     DbConfig, DbPool, MusicFolderRepository, MusicRepoError, NewUser, UserRepoError,
@@ -749,6 +749,8 @@ enum ServerError {
     Bind(#[source] std::io::Error),
     #[error("Failed to get local address: {0}")]
     LocalAddr(#[source] std::io::Error),
+    #[error("Failed to configure CORS: {0}")]
+    CorsConfig(#[source] CorsConfigError),
     #[error("Server error: {0}")]
     Serve(#[source] std::io::Error),
 }
@@ -779,7 +781,8 @@ async fn run_server(config: ServerConfig) -> Result<(), ServerError> {
     }
 
     let state = AppState::new(pool.clone(), lastfm_client);
-    let app = create_router(state.clone());
+    let cors_config = CorsConfig::from_env().map_err(ServerError::CorsConfig)?;
+    let app = create_router(state.clone(), &cors_config);
 
     // Start auto-scanner if enabled, sharing the same scan state with the API
     let _auto_scan_handle = if auto_scan {
@@ -810,8 +813,44 @@ async fn run_server(config: ServerConfig) -> Result<(), ServerError> {
     );
 
     axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
         .await
         .map_err(ServerError::Serve)?;
 
     Ok(())
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(error) = tokio::signal::ctrl_c().await {
+            tracing::error!(error = %error, "failed to install ctrl-c handler");
+        }
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(error) => {
+                tracing::error!(error = %error, "failed to install terminate handler");
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        () = ctrl_c => {},
+        () = terminate => {},
+    }
+
+    tracing::event!(
+        name: "server.shutdown.started",
+        tracing::Level::INFO,
+        "shutdown signal received"
+    );
 }

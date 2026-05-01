@@ -30,7 +30,7 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
 use super::error::ApiError;
-use super::response::{API_VERSION, Format, error_response};
+use super::response::{API_VERSION, Format, SubsonicResponse, error_response};
 use super::services::{MusicLibrary, RemoteSessions, Users};
 use crate::db::DbPool;
 use crate::models::User;
@@ -211,6 +211,12 @@ pub struct SubsonicContext {
 }
 
 impl SubsonicContext {
+    /// Build a response using this request's response format.
+    #[must_use]
+    pub fn error(&self, error: &ApiError) -> SubsonicResponse {
+        error_response(self.format, error)
+    }
+
     /// Return the music service.
     #[must_use]
     pub const fn music(&self) -> &MusicLibrary {

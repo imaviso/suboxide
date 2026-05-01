@@ -9,6 +9,7 @@ pub mod remote;
 pub mod scanning;
 pub mod system;
 pub mod users;
+mod util;
 
 // Annotation handlers
 #[doc(inline)]
