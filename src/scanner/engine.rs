@@ -265,6 +265,16 @@ impl Scanner {
         folder_id: i32,
         mode: ScanMode,
     ) -> Result<ScanResult, ScanError> {
+        self.scan_folder_by_id_with_state_and_mode(folder_id, None, mode)
+    }
+
+    /// Scan a specific music folder by ID with optional progress tracking and scan mode.
+    pub fn scan_folder_by_id_with_state_and_mode(
+        &self,
+        folder_id: i32,
+        state: Option<&ScanState>,
+        mode: ScanMode,
+    ) -> Result<ScanResult, ScanError> {
         let folder_repo = MusicFolderRepository::new(self.pool.clone());
         let folder = folder_repo
             .find_by_id(folder_id)?
@@ -274,7 +284,7 @@ impl Scanner {
             "Scanning folder: {} ({}) [mode: {:?}]",
             folder.name, folder.path, mode
         );
-        self.scan_folder_with_options(&folder, None, mode)
+        self.scan_folder_with_options(&folder, state, mode)
     }
 
     /// Scan a single music folder with optional progress tracking and scan mode.

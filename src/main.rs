@@ -1,6 +1,11 @@
 //! Subsonic API compatible server.
 
+use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use mimalloc::MiMalloc;
 
@@ -17,7 +22,8 @@ use suboxide::db::{
 };
 use suboxide::lastfm::{LastFmClient, LastFmError};
 use suboxide::models::music::NewMusicFolder;
-use suboxide::scanner::{AutoScanner, ScanError, ScanMode, Scanner};
+use suboxide::scanner::state::ScanSnapshot;
+use suboxide::scanner::{AutoScanner, ScanError, ScanMode, ScanState, ScanStateHandle, Scanner};
 
 /// Subsonic-compatible music streaming server.
 #[derive(Parser)]
@@ -597,11 +603,19 @@ fn run_scan_command(pool: &DbPool, folder: Option<i32>, full: bool) -> Result<()
     } else {
         ScanMode::Incremental
     };
+    let scan_state = ScanStateHandle::new(ScanState::new());
+    let progress = CliScanProgress::start(scan_state.clone());
 
-    let result = folder.map_or_else(
-        || scanner.scan_all_with_options(None, mode),
-        |folder_id| scanner.scan_folder_by_id_with_mode(folder_id, mode),
-    );
+    let result = {
+        let _guard = scan_state.try_start().expect("new scan state should start");
+        folder.map_or_else(
+            || scanner.scan_all_with_options(Some(&scan_state), mode),
+            |folder_id| {
+                scanner.scan_folder_by_id_with_state_and_mode(folder_id, Some(&scan_state), mode)
+            },
+        )
+    };
+    progress.finish();
 
     let stats = result?;
     println!("\nScan complete:");
@@ -615,6 +629,154 @@ fn run_scan_command(pool: &DbPool, folder: Option<i32>, full: bool) -> Result<()
     println!("  Albums added:     {}", stats.albums_added);
     println!("  Cover art saved:  {}", stats.cover_art_saved);
     Ok(())
+}
+
+struct CliScanProgress {
+    stop: Arc<AtomicBool>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl CliScanProgress {
+    fn start(scan_state: ScanStateHandle) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        if !std::io::stderr().is_terminal() {
+            return Self { stop, handle: None };
+        }
+
+        let render_stop = Arc::clone(&stop);
+        let handle = thread::spawn(move || {
+            let started_at = Instant::now();
+            while !render_stop.load(Ordering::Relaxed) {
+                let snapshot = scan_state.snapshot();
+                eprint!(
+                    "\r{}",
+                    format_scan_progress(&snapshot, started_at.elapsed())
+                );
+                let _ = std::io::stderr().flush();
+                thread::sleep(Duration::from_millis(120));
+            }
+            eprint!("\r{}\r", " ".repeat(96));
+            let _ = std::io::stderr().flush();
+        });
+
+        Self {
+            stop,
+            handle: Some(handle),
+        }
+    }
+
+    fn finish(mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+fn format_scan_progress(snapshot: &ScanSnapshot, elapsed: Duration) -> String {
+    let count = snapshot.count;
+    let total = snapshot.total;
+    let phase = snapshot.phase.as_str();
+    let folder = snapshot.current_folder.as_deref().unwrap_or("all folders");
+    let elapsed = format_elapsed(elapsed);
+    if total > 0 {
+        let percent = count
+            .saturating_mul(100)
+            .checked_div(total)
+            .unwrap_or(0)
+            .min(100);
+        format!(
+            "Scanning [{bar}] {count}/{total} {percent:>3}% elapsed {elapsed} {phase} {folder}",
+            bar = progress_bar(count, total, 24),
+        )
+    } else {
+        format!(
+            "Scanning [{bar}] elapsed {elapsed} {phase} {folder}",
+            bar = spinner_frame(count)
+        )
+    }
+}
+
+fn format_elapsed(duration: Duration) -> String {
+    let seconds = duration.as_secs();
+    let minutes = seconds / 60;
+    let seconds = seconds % 60;
+    format!("{minutes:02}:{seconds:02}")
+}
+
+fn progress_bar(count: u64, total: u64, width: usize) -> String {
+    if total == 0 || width == 0 {
+        return String::new();
+    }
+    let width_u128 = u128::try_from(width).unwrap_or(u128::MAX);
+    let filled_u128 = (u128::from(count.min(total)) * width_u128) / u128::from(total);
+    let filled = usize::try_from(filled_u128).unwrap_or(width).min(width);
+    format!("{}{}", "#".repeat(filled), "-".repeat(width - filled))
+}
+
+const fn spinner_frame(count: u64) -> &'static str {
+    match count % 4 {
+        0 => "|",
+        1 => "/",
+        2 => "-",
+        _ => "\\",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use suboxide::scanner::ScanPhase;
+    use suboxide::scanner::state::ScanSnapshot;
+
+    use super::{format_elapsed, format_scan_progress, progress_bar, spinner_frame};
+
+    #[test]
+    fn progress_bar_fills_proportionally_and_clamps_overflow() {
+        assert_eq!(progress_bar(0, 10, 10), "----------");
+        assert_eq!(progress_bar(5, 10, 10), "#####-----");
+        assert_eq!(progress_bar(15, 10, 10), "##########");
+    }
+
+    #[test]
+    fn progress_bar_handles_zero_total_and_width() {
+        assert_eq!(progress_bar(1, 0, 10), "");
+        assert_eq!(progress_bar(1, 10, 0), "");
+    }
+
+    #[test]
+    fn spinner_frame_cycles_deterministically() {
+        assert_eq!(spinner_frame(0), "|");
+        assert_eq!(spinner_frame(1), "/");
+        assert_eq!(spinner_frame(2), "-");
+        assert_eq!(spinner_frame(3), "\\");
+        assert_eq!(spinner_frame(4), "|");
+    }
+
+    #[test]
+    fn format_elapsed_renders_mm_ss() {
+        assert_eq!(format_elapsed(Duration::from_secs(0)), "00:00");
+        assert_eq!(format_elapsed(Duration::from_secs(65)), "01:05");
+    }
+
+    #[test]
+    fn format_scan_progress_includes_elapsed_time() {
+        let snapshot = ScanSnapshot {
+            scanning: true,
+            count: 5,
+            total: 10,
+            phase: ScanPhase::Processing,
+            current_folder: Some("Library".to_string()),
+        };
+
+        let rendered = format_scan_progress(&snapshot, Duration::from_secs(65));
+
+        assert!(rendered.contains("5/10"));
+        assert!(rendered.contains(" 50%"));
+        assert!(rendered.contains("elapsed 01:05"));
+        assert!(rendered.contains("processing Library"));
+    }
 }
 
 fn load_lastfm_client() -> Result<LastFmClient, LastFmError> {
