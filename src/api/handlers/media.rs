@@ -4,7 +4,11 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::IntoResponse,
 };
-use std::path::{Path, PathBuf};
+use image::{GenericImageView, ImageFormat, imageops::FilterType};
+use std::{
+    io::Cursor,
+    path::{Path, PathBuf},
+};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::ReaderStream;
@@ -74,6 +78,18 @@ fn cover_art_content_type(extension: &str) -> &'static str {
     }
 }
 
+fn cover_art_image_format(extension: &str) -> Option<ImageFormat> {
+    match extension {
+        "jpg" | "jpeg" => Some(ImageFormat::Jpeg),
+        "png" => Some(ImageFormat::Png),
+        "gif" => Some(ImageFormat::Gif),
+        "bmp" => Some(ImageFormat::Bmp),
+        "tiff" => Some(ImageFormat::Tiff),
+        "webp" => Some(ImageFormat::WebP),
+        _ => None,
+    }
+}
+
 struct ByteRange {
     start: u64,
     end: u64,
@@ -120,6 +136,35 @@ async fn open_file_with_size(
     })?;
 
     Ok((file, metadata.len()))
+}
+
+async fn read_cover_art_bytes(
+    auth: &SubsonicContext,
+    path: &Path,
+    open_error: &'static str,
+) -> Result<Vec<u8>, axum::response::Response> {
+    tokio::fs::read(path).await.map_err(|error| {
+        tracing::error!(path = %path.display(), error = %error, "failed to read cover art file");
+        util::service_error(auth, open_error)
+    })
+}
+
+async fn resize_cover_art_bytes(bytes: Vec<u8>, format: ImageFormat, size: u32) -> Option<Vec<u8>> {
+    tokio::task::spawn_blocking(move || {
+        let image = image::load_from_memory(&bytes).ok()?;
+        let (width, height) = image.dimensions();
+        if width <= size && height <= size {
+            return Some(bytes);
+        }
+
+        let resized = image.resize(size, size, FilterType::Lanczos3);
+        let mut output = Cursor::new(Vec::new());
+        resized.write_to(&mut output, format).ok()?;
+        Some(output.into_inner())
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 /// Query parameters for the stream endpoint.
@@ -327,7 +372,7 @@ pub async fn download(
 pub struct CoverArtParams {
     /// The ID of the cover art to retrieve (the hash stored in album/song `cover_art` field).
     pub id: Option<String>,
-    /// Requested size (width/height in pixels). Currently ignored - returns original size.
+    /// Requested size (width/height in pixels). Images are scaled to fit within this square without upscaling.
     pub size: Option<u32>,
 }
 
@@ -337,7 +382,7 @@ pub struct CoverArtParams {
 ///
 /// Parameters:
 /// - `id` (required): The cover art ID (hash from the album/song coverArt field).
-/// - `size` (optional): Requested size in pixels (not yet implemented).
+/// - `size` (optional): Maximum width/height in pixels. Images are scaled to fit within that square without upscaling.
 pub async fn get_cover_art(
     crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<CoverArtParams>,
     auth: SubsonicContext,
@@ -355,18 +400,23 @@ pub async fn get_cover_art(
         return util::unauthorized(&auth);
     }
 
+    // Zero is not meaningful here; treat it as if the client omitted size.
+    let requested_size = params.size.filter(|size| *size > 0);
+
     // Get cover art cache directory
     let cover_art_dir = resolve_cover_art_dir();
 
     // Try to find the cover art file with different extensions
     let extensions = ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp"];
     let mut cover_art_path = None;
+    let mut cover_art_extension = "jpg";
     let mut content_type = "image/jpeg";
 
-    for ext in &extensions {
+    for &ext in &extensions {
         let path = cover_art_dir.join(format!("{cover_art_id}.{ext}"));
         if path.exists() {
             content_type = cover_art_content_type(ext);
+            cover_art_extension = ext;
             cover_art_path = Some(path);
             break;
         }
@@ -375,6 +425,44 @@ pub async fn get_cover_art(
     let Some(path) = cover_art_path else {
         return util::not_found(&auth, "Cover art not found");
     };
+
+    if let Some(size) = requested_size {
+        let original_bytes =
+            match read_cover_art_bytes(&auth, &path, "Failed to open cover art file").await {
+                Ok(bytes) => bytes,
+                Err(response) => return response,
+            };
+
+        let bytes = if let Some(image_format) = cover_art_image_format(cover_art_extension) {
+            resize_cover_art_bytes(original_bytes.clone(), image_format, size)
+                .await
+                .unwrap_or_else(|| {
+                    tracing::warn!(
+                        cover_art_id = %cover_art_id,
+                        requested_size = size,
+                        path = %path.display(),
+                        "failed to resize cover art; serving original"
+                    );
+                    original_bytes
+                })
+        } else {
+            original_bytes
+        };
+
+        return (
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, content_type.to_string()),
+                (header::CONTENT_LENGTH, bytes.len().to_string()),
+                (
+                    header::CACHE_CONTROL,
+                    "public, max-age=31536000, immutable".to_string(),
+                ), // Cache for 1 year (cover art is content-addressed)
+            ],
+            Body::from(bytes),
+        )
+            .into_response();
+    }
 
     let (file, file_size) =
         match open_file_with_size(&auth, &path, "Failed to open cover art file").await {
@@ -403,11 +491,26 @@ pub async fn get_cover_art(
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::{io::Cursor, path::Path};
+
+    use image::{DynamicImage, GenericImageView, ImageBuffer, ImageFormat, Rgba};
 
     use super::{
-        cover_art_content_type, is_safe_cover_art_id, parse_byte_range, sanitized_filename,
+        cover_art_content_type, cover_art_image_format, is_safe_cover_art_id, parse_byte_range,
+        resize_cover_art_bytes, sanitized_filename,
     };
+
+    fn test_cover_art_bytes(width: u32, height: u32) -> Vec<u8> {
+        let image = DynamicImage::ImageRgba8(ImageBuffer::from_fn(width, height, |x, y| {
+            Rgba([(x % 255) as u8, (y % 255) as u8, 128, 255])
+        }));
+
+        let mut bytes = Cursor::new(Vec::new());
+        image
+            .write_to(&mut bytes, ImageFormat::Png)
+            .expect("test image should encode");
+        bytes.into_inner()
+    }
 
     #[test]
     fn safe_cover_art_id_allows_content_hash_like_values() {
@@ -441,6 +544,41 @@ mod tests {
         assert_eq!(cover_art_content_type("bmp"), "image/bmp");
         assert_eq!(cover_art_content_type("tiff"), "image/tiff");
         assert_eq!(cover_art_content_type("webp"), "image/webp");
+    }
+
+    #[test]
+    fn cover_art_image_format_matches_supported_extensions() {
+        assert_eq!(cover_art_image_format("jpg"), Some(ImageFormat::Jpeg));
+        assert_eq!(cover_art_image_format("jpeg"), Some(ImageFormat::Jpeg));
+        assert_eq!(cover_art_image_format("png"), Some(ImageFormat::Png));
+        assert_eq!(cover_art_image_format("gif"), Some(ImageFormat::Gif));
+        assert_eq!(cover_art_image_format("bmp"), Some(ImageFormat::Bmp));
+        assert_eq!(cover_art_image_format("tiff"), Some(ImageFormat::Tiff));
+        assert_eq!(cover_art_image_format("webp"), Some(ImageFormat::WebP));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cover_art_resize_keeps_original_bytes_when_image_is_small() {
+        let original = test_cover_art_bytes(2, 2);
+        let resized = resize_cover_art_bytes(original.clone(), ImageFormat::Png, 8)
+            .await
+            .expect("small image should be returned unchanged");
+        assert_eq!(resized, original);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cover_art_resize_downscales_large_images_without_upscaling() {
+        let original = test_cover_art_bytes(8, 4);
+        let resized = resize_cover_art_bytes(original.clone(), ImageFormat::Png, 4)
+            .await
+            .expect("large image should resize");
+
+        assert_ne!(resized, original);
+
+        let decoded = image::load_from_memory(&resized).expect("resized image should decode");
+        let (width, height) = decoded.dimensions();
+        assert!(width <= 4);
+        assert!(height <= 4);
     }
 
     #[test]
