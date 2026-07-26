@@ -175,7 +175,7 @@ pub struct ScrobbleParams {
 ///
 /// Parameters:
 /// - `id` (required): The ID of the song being played (can be repeated)
-/// - `time` (optional): Time in milliseconds since the media started playing (can be repeated, one per id)
+/// - `time` (optional): Time in milliseconds since the Unix epoch (can be repeated, one per id)
 /// - `submission` (optional): Whether this is a "scrobble" (true) or a "now playing" notification (false). Default true.
 pub async fn scrobble(
     crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<ScrobbleParams>,

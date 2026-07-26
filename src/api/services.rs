@@ -37,6 +37,20 @@ fn is_lastfm_placeholder_image(url: &str) -> bool {
     url.contains(LASTFM_PLACEHOLDER_IMAGE_MARKER)
 }
 
+/// Convert a Subsonic `time` parameter to a Last.fm timestamp.
+///
+/// Subsonic sends `time` in milliseconds since the Unix epoch, while
+/// Last.fm expects seconds. Values already in seconds are left unchanged.
+const fn normalize_lastfm_timestamp(timestamp: i64) -> i64 {
+    const SECONDS_THRESHOLD: i64 = 10_000_000_000;
+
+    if timestamp > SECONDS_THRESHOLD {
+        timestamp / 1_000
+    } else {
+        timestamp
+    }
+}
+
 async fn download_artist_image(
     artist_id: i32,
     image_url: &str,
@@ -511,7 +525,10 @@ impl MusicLibrary {
         ScrobbleRepository::new(self.pool.clone()).scrobble(user_id, song_id, time, submission)?;
 
         if submission && let Some(song) = self.get_song(song_id)? {
-            let timestamp = time.unwrap_or_else(|| chrono::Utc::now().timestamp());
+            let timestamp = time.map_or_else(
+                || chrono::Utc::now().timestamp(),
+                normalize_lastfm_timestamp,
+            );
             self.submit_lastfm_scrobble(user_id, &song, timestamp);
         }
 
@@ -539,6 +556,10 @@ impl MusicLibrary {
     }
 
     fn submit_lastfm_scrobble(&self, user_id: i32, song: &Song, timestamp: i64) {
+        if !self.lastfm_client.is_configured() {
+            return;
+        }
+
         let Ok(Some(session_key)) =
             UserRepository::new(self.pool.clone()).get_lastfm_session_key(user_id)
         else {
@@ -563,6 +584,10 @@ impl MusicLibrary {
     }
 
     fn update_lastfm_now_playing(&self, user_id: i32, song: &Song) {
+        if !self.lastfm_client.is_configured() {
+            return;
+        }
+
         let Ok(Some(session_key)) =
             UserRepository::new(self.pool.clone()).get_lastfm_session_key(user_id)
         else {
@@ -1165,5 +1190,28 @@ impl RemoteSessions {
             })?;
 
         RemoteControlRepository::new(self.pool.clone()).get_state(session_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_lastfm_timestamp;
+
+    #[test]
+    fn milliseconds_timestamp_is_converted_to_seconds() {
+        // 2024-01-01 00:00:00 UTC in milliseconds.
+        let ms = 1_704_067_200_000_i64;
+        assert_eq!(normalize_lastfm_timestamp(ms), 1_704_067_200);
+    }
+
+    #[test]
+    fn seconds_timestamp_is_left_unchanged() {
+        let seconds = 1_704_067_200_i64;
+        assert_eq!(normalize_lastfm_timestamp(seconds), seconds);
+    }
+
+    #[test]
+    fn zero_timestamp_is_left_unchanged() {
+        assert_eq!(normalize_lastfm_timestamp(0), 0);
     }
 }
