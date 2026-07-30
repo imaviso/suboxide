@@ -12,7 +12,9 @@ use crate::db::{
     RemoteControlRepository, RemoteSession, RemoteState, ScrobbleRepository, SongRepository,
     StarredRepository, UserRepoError, UserRepoErrorKind, UserRepository, UserUpdate,
 };
-use crate::lastfm::{LastFmClient, models::extract_biography, models::extract_image_urls};
+use crate::lastfm::{
+    LastFmClient, LastFmError, models::extract_biography, models::extract_image_urls,
+};
 use crate::models::User;
 use crate::models::music::{
     Album, Artist, ArtistID3Response, ArtistInfo2Response, Song, saturating_i64_to_i32,
@@ -48,6 +50,23 @@ const fn normalize_lastfm_timestamp(timestamp: i64) -> i64 {
         timestamp / 1_000
     } else {
         timestamp
+    }
+}
+
+/// Log a failed Last.fm request, clearing the stored session key when
+/// Last.fm reports it as invalid (error 9) so the user can re-authenticate.
+fn log_lastfm_failure(pool: &DbPool, user_id: i32, error: &LastFmError, operation: &str) {
+    if matches!(error, LastFmError::Api { code: 9, .. }) {
+        tracing::error!(
+            user_id,
+            operation,
+            "Last.fm session key invalid; cleared, re-link via CLI"
+        );
+        if let Err(e) = UserRepository::new(pool.clone()).set_lastfm_session_key(user_id, None) {
+            tracing::warn!(error = %e, "Failed to clear invalid Last.fm session key");
+        }
+    } else {
+        tracing::warn!(error = %error, operation, "Last.fm request failed");
     }
 }
 
@@ -570,13 +589,14 @@ impl MusicLibrary {
         let artist = song.artist_name.clone().unwrap_or_default();
         let track = song.title.clone();
         let album = song.album_name.clone();
+        let pool = self.pool.clone();
 
         tokio::spawn(async move {
             if let Err(e) = client
                 .scrobble(&session_key, &artist, &track, album.as_deref(), timestamp)
                 .await
             {
-                tracing::warn!(error = %e, "Failed to submit scrobble to Last.fm");
+                log_lastfm_failure(&pool, user_id, &e, "scrobble");
             } else {
                 tracing::debug!(artist = %artist, track = %track, "Submitted scrobble to Last.fm");
             }
@@ -599,13 +619,14 @@ impl MusicLibrary {
         let track = song.title.clone();
         let album = song.album_name.clone();
         let duration = Some(song.duration);
+        let pool = self.pool.clone();
 
         tokio::spawn(async move {
             if let Err(e) = client
                 .update_now_playing(&session_key, &artist, &track, album.as_deref(), duration)
                 .await
             {
-                tracing::warn!(error = %e, "Failed to update Last.fm now playing");
+                log_lastfm_failure(&pool, user_id, &e, "update now playing");
             } else {
                 tracing::debug!(artist = %artist, track = %track, "Updated Last.fm now playing");
             }

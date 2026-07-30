@@ -40,6 +40,8 @@ pub enum LastFmError {
     Network(#[from] reqwest::Error),
     #[error("API error {code}: {message}")]
     Api { code: i32, message: String },
+    #[error("scrobble ignored by Last.fm (code {code}): {message}")]
+    Filtered { code: i64, message: String },
     #[error("Invalid response: {0}")]
     InvalidResponse(String),
     #[error("No session key for user")]
@@ -230,7 +232,11 @@ impl LastFmClient {
             .send()
             .await?;
 
-        self.handle_response(response).await
+        let status = response.status();
+        let body = response.text().await?;
+
+        check_lfm_error(status, &body)?;
+        check_scrobble_accepted(&body)
     }
 
     /// Update now playing status on Last.fm.
@@ -267,7 +273,9 @@ impl LastFmClient {
             .send()
             .await?;
 
-        self.handle_response(response).await
+        let status = response.status();
+        let body = response.text().await?;
+        check_lfm_error(status, &body)
     }
 
     /// Get artist information from Last.fm.
@@ -357,37 +365,86 @@ impl LastFmClient {
 
         Ok(image_url)
     }
+}
 
-    /// Handle API response and check for errors.
-    async fn handle_response(&self, response: reqwest::Response) -> Result<()> {
-        let status = response.status();
-        let body: String = response.text().await?;
-
-        if !status.is_success() {
-            if let Ok(error) = serde_json::from_str::<LastFmApiError>(&body) {
-                return Err(LastFmError::Api {
-                    code: error.error,
-                    message: error.message,
-                });
-            }
-            return Err(LastFmError::Api {
-                code: i32::from(status.as_u16()),
-                message: body,
-            });
-        }
-
-        // Check for error in successful response
-        if let Ok(error) = serde_json::from_str::<LastFmApiError>(&body)
-            && error.error != 0
-        {
+/// Check an lfm response for API errors, per the Scrobbling 2.0 spec.
+///
+/// The HTTP status code alone does not indicate success or failure; the
+/// response body must always be inspected for an lfm error element.
+fn check_lfm_error(status: reqwest::StatusCode, body: &str) -> Result<()> {
+    if !status.is_success() {
+        if let Ok(error) = serde_json::from_str::<LastFmApiError>(body) {
             return Err(LastFmError::Api {
                 code: error.error,
                 message: error.message,
             });
         }
-
-        Ok(())
+        return Err(LastFmError::Api {
+            code: i32::from(status.as_u16()),
+            message: body.to_string(),
+        });
     }
+
+    // Check for error in successful response
+    if let Ok(error) = serde_json::from_str::<LastFmApiError>(body)
+        && error.error != 0
+    {
+        return Err(LastFmError::Api {
+            code: error.error,
+            message: error.message,
+        });
+    }
+
+    Ok(())
+}
+
+/// Inspect a track.scrobble response for filtered (ignored) scrobbles.
+///
+/// Last.fm answers ignored scrobbles with HTTP 200 and lfm status "ok",
+/// so an accepted request is not necessarily a stored scrobble.
+fn check_scrobble_accepted(body: &str) -> Result<()> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+        return Ok(());
+    };
+
+    let scrobbles = &value["scrobbles"];
+    if scrobbles.is_null() {
+        return Ok(());
+    }
+
+    if json_i64(&scrobbles["@attr"]["ignored"]).unwrap_or(0) == 0 {
+        return Ok(());
+    }
+
+    let entry = match &scrobbles["scrobble"] {
+        serde_json::Value::Array(list) => list.first(),
+        serde_json::Value::Object(_) => Some(&scrobbles["scrobble"]),
+        _ => None,
+    };
+
+    if let Some(message) = entry.map(|e| &e["ignoredMessage"])
+        && !message.is_null()
+    {
+        return Err(LastFmError::Filtered {
+            code: json_i64(&message["code"]).unwrap_or(0),
+            message: message["#text"]
+                .as_str()
+                .unwrap_or("scrobble ignored")
+                .to_string(),
+        });
+    }
+
+    Err(LastFmError::Filtered {
+        code: 0,
+        message: "scrobble ignored without reason".to_string(),
+    })
+}
+
+/// Last.fm JSON attributes are strings; accept both strings and numbers.
+fn json_i64(value: &serde_json::Value) -> Option<i64> {
+    value
+        .as_i64()
+        .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
 }
 
 /// Last.fm API error structure.
@@ -399,7 +456,9 @@ struct LastFmApiError {
 
 #[cfg(test)]
 mod tests {
-    use super::{LastFmClient, LastFmClientInner};
+    use std::collections::BTreeMap;
+
+    use super::{LastFmClient, LastFmClientInner, LastFmError, check_scrobble_accepted};
 
     #[test]
     fn client_clone_shares_same_inner_state() {
@@ -414,6 +473,45 @@ mod tests {
             panic!("configured client clone must be live");
         };
         assert!(std::ptr::eq(&**client_inner, &**cloned_inner));
+    }
+
+    #[test]
+    fn signature_is_alphabetical_concatenation_plus_secret() {
+        // Vector from the Last.fm signature spec: params ordered by name,
+        // concatenated without separators, secret appended, md5'd.
+        // md5("api_keyfoomethodauth.getSessiontokenbazbar")
+        let client = LastFmClient::new("foo".into(), "bar".into()).unwrap();
+        let mut extra = BTreeMap::new();
+        extra.insert("token".to_string(), "baz".to_string());
+
+        let params = client.build_params("auth.getSession", None, extra).unwrap();
+
+        assert_eq!(params["api_sig"], "b2f52fa6c54c2f0d0f8419e6cefb6edf");
+        // format must be sent but never signed
+        assert_eq!(params["format"], "json");
+    }
+
+    #[test]
+    fn accepted_scrobble_is_ok() {
+        let body = r##"{"scrobbles":{"@attr":{"accepted":"1","ignored":"0"},"scrobble":{"track":{"corrected":"0","#text":"Wanderlust"},"timestamp":"1288728745","ignoredMessage":{"code":"0","#text":""}}}}"##;
+        assert!(check_scrobble_accepted(body).is_ok());
+    }
+
+    #[test]
+    fn ignored_scrobble_is_filtered_error() {
+        let body = r##"{"scrobbles":{"@attr":{"accepted":"0","ignored":"1"},"scrobble":{"artist":{"corrected":"0","#text":"Unknown Artist"},"timestamp":"1288728940","ignoredMessage":{"code":"1","#text":"Artist name failed filter: Unknown Artist"}}}}"##;
+
+        let Err(LastFmError::Filtered { code, message }) = check_scrobble_accepted(body) else {
+            panic!("ignored scrobble must be a filtered error");
+        };
+        assert_eq!(code, 1);
+        assert!(message.contains("Unknown Artist"));
+    }
+
+    #[test]
+    fn non_scrobble_body_is_ok() {
+        assert!(check_scrobble_accepted("{}").is_ok());
+        assert!(check_scrobble_accepted("not json").is_ok());
     }
 
     #[test]
