@@ -636,6 +636,17 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
     )
     .execute(conn)?;
 
+    // Create settings table for server-level key-value configuration
+    diesel::sql_query(
+        r"
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY NOT NULL,
+            value TEXT NOT NULL
+        )
+        ",
+    )
+    .execute(conn)?;
+
     Ok(())
 }
 

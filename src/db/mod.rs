@@ -11,6 +11,7 @@ pub use repo::{
     AlbumRepository, ArtistInfoCacheRepository, ArtistRepository, MusicFolderRepository,
     MusicRepoError, MusicRepoErrorKind, NewUser, NowPlayingEntry, NowPlayingRepository, PlayQueue,
     PlayQueueRepository, Playlist, PlaylistRepository, RatingRepository, RemoteCommand,
-    RemoteControlRepository, RemoteSession, RemoteState, ScrobbleRepository, SongRepository,
+    RemoteControlRepository, RemoteSession, RemoteState, SETTING_LASTFM_API_KEY,
+    SETTING_LASTFM_API_SECRET, ScrobbleRepository, SettingsRepository, SongRepository,
     StarredRepository, UserRepoError, UserRepoErrorKind, UserRepository, UserUpdate,
 };

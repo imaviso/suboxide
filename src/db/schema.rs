@@ -205,6 +205,13 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    settings (key) {
+        key -> Text,
+        value -> Text,
+    }
+}
+
 // Define foreign key relationships
 diesel::joinable!(albums -> artists (artist_id));
 diesel::joinable!(artist_lastfm_info -> artists (artist_id));
@@ -239,4 +246,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     play_queue,
     play_queue_songs,
     artist_lastfm_info,
+    settings,
 );

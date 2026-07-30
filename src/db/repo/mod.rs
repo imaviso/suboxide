@@ -6,6 +6,7 @@ pub mod interaction;
 pub mod music;
 pub mod playlist;
 pub mod remote;
+pub mod settings;
 pub mod user;
 
 // Re-export artist cache types
@@ -33,6 +34,10 @@ pub use playlist::{PlayQueue, PlayQueueRepository, Playlist, PlaylistRepository}
 // Re-export remote control types
 #[doc(inline)]
 pub use remote::{RemoteCommand, RemoteControlRepository, RemoteSession, RemoteState};
+
+// Re-export settings types
+#[doc(inline)]
+pub use settings::{SETTING_LASTFM_API_KEY, SETTING_LASTFM_API_SECRET, SettingsRepository};
 
 // Re-export user types
 #[doc(inline)]

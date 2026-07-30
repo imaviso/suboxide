@@ -34,8 +34,8 @@ RUST_LOG=suboxide=debug cargo run -- serve
 - `src/api/handlers/`: endpoint groups — annotation, media, playlists, playqueue, remote, scanning, system, users, browsing/.
 - `src/api/handlers/browsing/`: directory, indexes, info, lists, retrieval, search.
 - `src/crypto/`: Argon2 password hashing and verification.
-- `src/db/`: connection (pool, migrations), schema, repo/ (user, music, interaction, playlist, remote, artist_cache, error).
-- `src/lastfm/`: reqwest-based Last.fm API client (scrobble, now-playing, artist info).
+- `src/db/`: connection (pool, migrations), schema, repo/ (user, music, interaction, playlist, remote, artist_cache, settings, error).
+- `src/lastfm/`: reqwest-based Last.fm API client (scrobble, now-playing, artist info). Credentials: env `LASTFM_API_KEY`/`LASTFM_API_SECRET` or DB settings via `suboxide lastfm configure` (env wins).
 - `src/models/`: user, music (domain types + Subsonic XML/JSON response structs).
 - `src/paths.rs`: cover art directory resolution.
 - `src/scanner/`: engine (discovery, ingest, auto-scan loop), state (progress, RAII guard), lyrics (LRC parser), types.

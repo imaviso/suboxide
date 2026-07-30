@@ -17,8 +17,9 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use suboxide::app::{AppState, CorsConfig, CorsConfigError, create_router};
 use suboxide::crypto::{PasswordError, hash_password};
 use suboxide::db::{
-    DbConfig, DbPool, MusicFolderRepository, MusicRepoError, NewUser, UserRepoError,
-    UserRepository, UserUpdate, run_migrations,
+    DbConfig, DbPool, MusicFolderRepository, MusicRepoError, NewUser, SETTING_LASTFM_API_KEY,
+    SETTING_LASTFM_API_SECRET, SettingsRepository, UserRepoError, UserRepository, UserUpdate,
+    run_migrations,
 };
 use suboxide::lastfm::{LastFmClient, LastFmError};
 use suboxide::models::music::NewMusicFolder;
@@ -180,6 +181,17 @@ enum FolderCommands {
 
 #[derive(Subcommand)]
 enum LastfmCommands {
+    /// Configure Last.fm API credentials (stored in the database)
+    Configure {
+        /// Last.fm API key (prompted if omitted)
+        #[arg(long)]
+        api_key: Option<String>,
+
+        /// Last.fm API secret (prompted if omitted)
+        #[arg(long)]
+        api_secret: Option<String>,
+    },
+
     /// Set a user's Last.fm session key manually
     Set {
         /// Username of the user
@@ -481,8 +493,10 @@ enum LastfmCommandError {
     UserRepo(#[from] UserRepoError),
     #[error(transparent)]
     LastFm(#[from] LastFmError),
+    #[error(transparent)]
+    MusicRepo(#[from] MusicRepoError),
     #[error(
-        "Last.fm is not configured. Set LASTFM_API_KEY and LASTFM_API_SECRET environment variables."
+        "Last.fm is not configured. Run `suboxide lastfm configure` or set LASTFM_API_KEY and LASTFM_API_SECRET."
     )]
     NotConfigured,
     #[error("Operation cancelled")]
@@ -491,9 +505,46 @@ enum LastfmCommandError {
     Io(#[from] std::io::Error),
 }
 
+/// Read a trimmed line from stdin, `None` when empty.
+fn prompt_value(message: &str) -> Result<Option<String>, std::io::Error> {
+    println!("{message}");
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    let trimmed = input.trim();
+    Ok((!trimmed.is_empty()).then(|| trimmed.to_string()))
+}
+
+fn configure_lastfm_credentials(
+    pool: &DbPool,
+    api_key: Option<String>,
+    api_secret: Option<String>,
+) -> Result<(), LastfmCommandError> {
+    let settings = SettingsRepository::new(pool.clone());
+
+    let api_key = match api_key {
+        Some(key) => key,
+        None => prompt_value("Last.fm API key:")?.ok_or(LastfmCommandError::Cancelled)?,
+    };
+    let api_secret = match api_secret {
+        Some(secret) => secret,
+        None => prompt_value("Last.fm API secret:")?.ok_or(LastfmCommandError::Cancelled)?,
+    };
+
+    settings.set(SETTING_LASTFM_API_KEY, api_key.trim())?;
+    settings.set(SETTING_LASTFM_API_SECRET, api_secret.trim())?;
+    println!("Last.fm credentials stored. Restart the server to apply.");
+    Ok(())
+}
+
 async fn run_lastfm_command(pool: &DbPool, cmd: LastfmCommands) -> Result<(), LastfmCommandError> {
     let repo = UserRepository::new(pool.clone());
     match cmd {
+        LastfmCommands::Configure {
+            api_key,
+            api_secret,
+        } => {
+            configure_lastfm_credentials(pool, api_key, api_secret)?;
+        }
         LastfmCommands::Set {
             username,
             session_key,
@@ -518,10 +569,7 @@ async fn run_lastfm_command(pool: &DbPool, cmd: LastfmCommands) -> Result<(), La
             }
         }
         LastfmCommands::Link { username, token } => {
-            let api_key = std::env::var("LASTFM_API_KEY").unwrap_or_default();
-            let api_secret = std::env::var("LASTFM_API_SECRET").unwrap_or_default();
-
-            let client = LastFmClient::new(api_key.clone(), api_secret)?;
+            let client = load_lastfm_client(pool)?;
             if !client.is_configured() {
                 return Err(LastfmCommandError::NotConfigured);
             }
@@ -541,16 +589,9 @@ async fn run_lastfm_command(pool: &DbPool, cmd: LastfmCommands) -> Result<(), La
                 println!(
                     "\nAfter approving access, you will be redirected to a URL (or see a token)."
                 );
-                println!("Please paste the 'token' parameter from the URL here:");
 
-                let mut input = String::new();
-                std::io::stdin().read_line(&mut input)?;
-                let trimmed = input.trim();
-
-                if trimmed.is_empty() {
-                    return Err(LastfmCommandError::Cancelled);
-                }
-                trimmed.to_string()
+                prompt_value("Please paste the 'token' parameter from the URL here:")?
+                    .ok_or(LastfmCommandError::Cancelled)?
             };
 
             println!("Exchanging token for session...");
@@ -565,10 +606,7 @@ async fn run_lastfm_command(pool: &DbPool, cmd: LastfmCommands) -> Result<(), La
             println!("Last.fm session linked successfully!");
         }
         LastfmCommands::Debug { artist } => {
-            let api_key = std::env::var("LASTFM_API_KEY").unwrap_or_default();
-            let api_secret = std::env::var("LASTFM_API_SECRET").unwrap_or_default();
-
-            let client = LastFmClient::new(api_key, api_secret)?;
+            let client = load_lastfm_client(pool)?;
             if !client.is_configured() {
                 return Err(LastfmCommandError::NotConfigured);
             }
@@ -779,9 +817,22 @@ mod tests {
     }
 }
 
-fn load_lastfm_client() -> Result<LastFmClient, LastFmError> {
-    let api_key = std::env::var("LASTFM_API_KEY").unwrap_or_default();
-    let api_secret = std::env::var("LASTFM_API_SECRET").unwrap_or_default();
+/// Load the Last.fm client, preferring environment variables and falling
+/// back to credentials stored via `suboxide lastfm configure`.
+fn load_lastfm_client(pool: &DbPool) -> Result<LastFmClient, LastFmError> {
+    let settings = SettingsRepository::new(pool.clone());
+
+    let api_key = std::env::var("LASTFM_API_KEY")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .or_else(|| settings.get(SETTING_LASTFM_API_KEY).ok().flatten())
+        .unwrap_or_default();
+    let api_secret = std::env::var("LASTFM_API_SECRET")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .or_else(|| settings.get(SETTING_LASTFM_API_SECRET).ok().flatten())
+        .unwrap_or_default();
+
     LastFmClient::new(api_key, api_secret)
 }
 
@@ -791,13 +842,22 @@ async fn run_server_command_or_exit(
     auto_scan: bool,
     auto_scan_interval: u64,
 ) {
-    let lastfm_client = match load_lastfm_client() {
+    let lastfm_client = match load_lastfm_client(&pool) {
         Ok(client) => client,
         Err(e) => {
             tracing::error!(error = %e, "Last.fm client initialization failed");
             std::process::exit(1);
         }
     };
+
+    if lastfm_client.is_configured() {
+        tracing::info!("Last.fm integration enabled");
+    } else {
+        tracing::info!(
+            "Last.fm not configured; scrobbling disabled. \
+             Run `suboxide lastfm configure` or set LASTFM_API_KEY/LASTFM_API_SECRET."
+        );
+    }
 
     if let Err(e) = run_server(ServerConfig {
         pool,
