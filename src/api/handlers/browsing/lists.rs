@@ -10,10 +10,9 @@ use crate::api::response::SubsonicResponse;
 use crate::api::services::MusicLibrary;
 use crate::db::MusicRepoError;
 use crate::models::music::{
-    Album, AlbumID3Response, AlbumList2Response, AlbumListResponse, ArtistResponse, ChildResponse,
-    GenreResponse, GenresResponse, RandomSongsResponse, SimilarSongs2Response,
-    SimilarSongsResponse, Song, SongsByGenreResponse, StarredResponse, TopSongsResponse,
-    format_subsonic_datetime,
+    Album, AlbumList2Response, AlbumListResponse, ArtistResponse, ChildResponse, GenreResponse,
+    GenresResponse, RandomSongsResponse, SimilarSongs2Response, SimilarSongsResponse, Song,
+    SongsByGenreResponse, StarredResponse, TopSongsResponse, format_subsonic_datetime,
 };
 
 fn album_list_type_for_request(list_type: Option<&str>) -> &str {
@@ -176,27 +175,11 @@ pub async fn get_album_list2(
         Ok(albums) => albums,
         Err(response) => return *response,
     };
-    let user_id = auth.user.id;
 
-    // Batch fetch starred status for all albums
-    let album_ids: Vec<i32> = albums.iter().map(|a| a.id).collect();
-    let starred_map = match auth
-        .music()
-        .get_starred_at_for_albums_batch(user_id, &album_ids)
-    {
-        Ok(v) => v,
-        Err(e) => {
-            return util::service_error(&auth, e);
-        }
+    let album_responses = match util::annotate_albums(&auth, &albums) {
+        Ok(responses) => responses,
+        Err(e) => return util::service_error(&auth, e),
     };
-
-    let album_responses: Vec<AlbumID3Response> = albums
-        .iter()
-        .map(|a| {
-            let starred_at = starred_map.get(&a.id);
-            AlbumID3Response::from_album_with_starred(a, starred_at)
-        })
-        .collect();
     let response = AlbumList2Response {
         albums: album_responses,
     };
@@ -307,7 +290,7 @@ pub async fn get_random_songs(
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let size = params.size.unwrap_or(10).clamp(1, 500);
-    let user_id = auth.user.id;
+    let _user_id = auth.user.id;
 
     let songs = match auth.music().get_random_songs(
         size,
@@ -322,25 +305,10 @@ pub async fn get_random_songs(
         }
     };
 
-    // Batch fetch starred status for all songs
-    let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
-    let starred_songs = match auth
-        .music()
-        .get_starred_at_for_songs_batch(user_id, &song_ids)
-    {
-        Ok(v) => v,
-        Err(e) => {
-            return util::service_error(&auth, e);
-        }
+    let song_responses = match util::annotate_songs(&auth, &songs) {
+        Ok(responses) => responses,
+        Err(e) => return util::service_error(&auth, e),
     };
-
-    let song_responses: Vec<ChildResponse> = songs
-        .iter()
-        .map(|s| {
-            let starred_at = starred_songs.get(&s.id);
-            ChildResponse::from_song_with_starred(s, starred_at)
-        })
-        .collect();
 
     let response = RandomSongsResponse {
         songs: song_responses,
@@ -377,7 +345,7 @@ pub async fn get_songs_by_genre(
 
     let count = params.count.unwrap_or(10).clamp(1, 500);
     let offset = params.offset.unwrap_or(0).max(0);
-    let user_id = auth.user.id;
+    let _user_id = auth.user.id;
 
     let songs = match auth
         .music()
@@ -389,25 +357,10 @@ pub async fn get_songs_by_genre(
         }
     };
 
-    // Batch fetch starred status for all songs
-    let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
-    let starred_songs = match auth
-        .music()
-        .get_starred_at_for_songs_batch(user_id, &song_ids)
-    {
-        Ok(v) => v,
-        Err(e) => {
-            return util::service_error(&auth, e);
-        }
+    let song_responses = match util::annotate_songs(&auth, &songs) {
+        Ok(responses) => responses,
+        Err(e) => return util::service_error(&auth, e),
     };
-
-    let song_responses: Vec<ChildResponse> = songs
-        .iter()
-        .map(|s| {
-            let starred_at = starred_songs.get(&s.id);
-            ChildResponse::from_song_with_starred(s, starred_at)
-        })
-        .collect();
 
     let response = SongsByGenreResponse {
         songs: song_responses,
@@ -442,7 +395,7 @@ pub async fn get_top_songs(
     };
 
     let count = params.count.unwrap_or(50).clamp(1, 500);
-    let user_id = auth.user.id;
+    let _user_id = auth.user.id;
 
     // Get top songs by artist name (ordered by play count)
     let songs = match auth
@@ -455,25 +408,10 @@ pub async fn get_top_songs(
         }
     };
 
-    // Batch fetch starred status for all songs
-    let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
-    let starred_songs = match auth
-        .music()
-        .get_starred_at_for_songs_batch(user_id, &song_ids)
-    {
-        Ok(v) => v,
-        Err(e) => {
-            return util::service_error(&auth, e);
-        }
+    let song_responses = match util::annotate_songs(&auth, &songs) {
+        Ok(responses) => responses,
+        Err(e) => return util::service_error(&auth, e),
     };
-
-    let song_responses: Vec<ChildResponse> = songs
-        .iter()
-        .map(|s| {
-            let starred_at = starred_songs.get(&s.id);
-            ChildResponse::from_song_with_starred(s, starred_at)
-        })
-        .collect();
 
     let response = TopSongsResponse {
         songs: song_responses,
@@ -513,7 +451,7 @@ pub async fn get_similar_songs2(
     };
 
     let count = params.count.unwrap_or(50).clamp(1, 500);
-    let user_id = auth.user.id;
+    let _user_id = auth.user.id;
 
     let songs = match similar_songs_for_seed(auth.music(), seed, count) {
         Ok(Some(songs)) => songs,
@@ -525,25 +463,10 @@ pub async fn get_similar_songs2(
         }
     };
 
-    // Batch fetch starred status for all songs
-    let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
-    let starred_songs = match auth
-        .music()
-        .get_starred_at_for_songs_batch(user_id, &song_ids)
-    {
-        Ok(v) => v,
-        Err(e) => {
-            return util::service_error(&auth, e);
-        }
+    let song_responses = match util::annotate_songs(&auth, &songs) {
+        Ok(responses) => responses,
+        Err(e) => return util::service_error(&auth, e),
     };
-
-    let song_responses: Vec<ChildResponse> = songs
-        .iter()
-        .map(|s| {
-            let starred_at = starred_songs.get(&s.id);
-            ChildResponse::from_song_with_starred(s, starred_at)
-        })
-        .collect();
 
     let response = SimilarSongs2Response {
         songs: song_responses,
@@ -565,7 +488,7 @@ pub async fn get_similar_songs(
     };
 
     let count = params.count.unwrap_or(50).clamp(1, 500);
-    let user_id = auth.user.id;
+    let _user_id = auth.user.id;
 
     let songs = match similar_songs_for_seed(auth.music(), seed, count) {
         Ok(Some(songs)) => songs,
@@ -577,25 +500,10 @@ pub async fn get_similar_songs(
         }
     };
 
-    // Batch fetch starred status for all songs
-    let song_ids: Vec<i32> = songs.iter().map(|s| s.id).collect();
-    let starred_songs = match auth
-        .music()
-        .get_starred_at_for_songs_batch(user_id, &song_ids)
-    {
-        Ok(v) => v,
-        Err(e) => {
-            return util::service_error(&auth, e);
-        }
+    let song_responses = match util::annotate_songs(&auth, &songs) {
+        Ok(responses) => responses,
+        Err(e) => return util::service_error(&auth, e),
     };
-
-    let song_responses: Vec<ChildResponse> = songs
-        .iter()
-        .map(|s| {
-            let starred_at = starred_songs.get(&s.id);
-            ChildResponse::from_song_with_starred(s, starred_at)
-        })
-        .collect();
 
     let response = SimilarSongsResponse {
         songs: song_responses,
@@ -647,10 +555,11 @@ pub async fn get_starred(auth: SubsonicContext) -> impl IntoResponse {
         })
         .collect();
 
-    let song_responses: Vec<ChildResponse> = starred_songs
-        .iter()
-        .map(|(song, starred_at)| ChildResponse::from_song_with_starred(song, Some(starred_at)))
-        .collect();
+    let songs: Vec<Song> = starred_songs.iter().map(|(song, _)| song.clone()).collect();
+    let song_responses = match util::annotate_songs(&auth, &songs) {
+        Ok(responses) => responses,
+        Err(e) => return util::service_error(&auth, e),
+    };
 
     let response = StarredResponse {
         artists: artist_responses,

@@ -16,7 +16,7 @@ use tokio_util::io::ReaderStream;
 use crate::api::auth::SubsonicContext;
 use crate::api::handlers::util;
 use crate::models::music::Song;
-use crate::paths::resolve_cover_art_dir;
+use crate::paths::{resolve_avatars_dir, resolve_cover_art_dir};
 
 /// Validate that a song's path is within one of the configured music folders.
 /// This prevents path traversal attacks where a malicious path in the database
@@ -483,6 +483,74 @@ pub async fn get_cover_art(
                 header::CACHE_CONTROL,
                 "public, max-age=31536000, immutable".to_string(),
             ), // Cache for 1 year (cover art is content-addressed)
+        ],
+        body,
+    )
+        .into_response()
+}
+
+/// Query parameters for the getAvatar endpoint.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(default)]
+pub struct AvatarParams {
+    /// The user whose avatar to retrieve.
+    pub username: Option<String>,
+}
+
+/// Supported avatar file extensions, in lookup order.
+const AVATAR_EXTENSIONS: [&str; 4] = ["png", "jpg", "jpeg", "webp"];
+
+/// Get a user's avatar image.
+///
+/// Avatars are served from the `avatars` directory under the data root,
+/// named `<username>.<ext>` (png, jpg, jpeg, or webp). Returns a Subsonic
+/// not-found error when the user has no avatar file.
+pub async fn get_avatar(
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<AvatarParams>,
+    auth: SubsonicContext,
+) -> impl IntoResponse {
+    let Some(username) = params.username.as_deref().filter(|name| !name.is_empty()) else {
+        return util::missing_param(&auth, "username");
+    };
+
+    // Reject anything that isn't a plain username (prevents path traversal)
+    if !username
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    {
+        return util::not_found(&auth, "Avatar not found");
+    }
+
+    let avatars_dir = resolve_avatars_dir();
+    let avatar = AVATAR_EXTENSIONS
+        .iter()
+        .map(|ext| (avatars_dir.join(format!("{username}.{ext}")), *ext))
+        .find(|(path, _)| path.is_file());
+
+    let Some((path, ext)) = avatar else {
+        return util::not_found(&auth, "Avatar not found");
+    };
+
+    let content_type = match ext {
+        "png" => "image/png",
+        "webp" => "image/webp",
+        _ => "image/jpeg",
+    };
+
+    let (file, file_size) = match open_file_with_size(&auth, &path, "Failed to open avatar").await {
+        Ok(file) => file,
+        Err(response) => return response,
+    };
+
+    let stream = ReaderStream::new(file);
+    let body = Body::from_stream(stream);
+
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, content_type.to_string()),
+            (header::CONTENT_LENGTH, file_size.to_string()),
+            (header::CACHE_CONTROL, "private, max-age=3600".to_string()),
         ],
         body,
     )

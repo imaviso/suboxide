@@ -7,9 +7,7 @@ use crate::api::error::ApiError;
 use crate::api::handlers::browsing::IdParams;
 use crate::api::handlers::util;
 use crate::api::response::SubsonicResponse;
-use crate::models::music::{
-    AlbumID3Response, AlbumWithSongsID3Response, ArtistWithAlbumsID3Response, ChildResponse,
-};
+use crate::models::music::{AlbumWithSongsID3Response, ArtistWithAlbumsID3Response, ChildResponse};
 
 fn album_response(
     auth: &SubsonicContext,
@@ -24,29 +22,24 @@ fn album_response(
         .music()
         .get_starred_at_for_album(auth.user.id, album_id)
         .map_err(|error| ApiError::Generic(error.to_string()))?;
+    let album_annotations = auth
+        .music()
+        .get_album_annotations_batch(auth.user.id, &[album_id])
+        .map_err(|error| ApiError::Generic(error.to_string()))?;
     let songs = auth
         .music()
         .get_songs_by_album(album_id)
         .map_err(|error| ApiError::Generic(error.to_string()))?;
-    let song_ids: Vec<i32> = songs.iter().map(|song| song.id).collect();
-    let starred_songs = auth
-        .music()
-        .get_starred_at_for_songs_batch(auth.user.id, &song_ids)
-        .map_err(|error| ApiError::Generic(error.to_string()))?;
-    let song_responses: Vec<ChildResponse> = songs
-        .iter()
-        .map(|song| {
-            let starred_at = starred_songs.get(&song.id);
-            ChildResponse::from_song_with_starred(song, starred_at)
-        })
-        .collect();
+    let song_responses =
+        util::annotate_songs(auth, &songs).map_err(|error| ApiError::Generic(error.to_string()))?;
 
     Ok(
         AlbumWithSongsID3Response::from_album_and_songs_with_starred(
             &album,
             song_responses,
             album_starred_at.as_ref(),
-        ),
+        )
+        .with_annotations(album_annotations.get(&album_id)),
     )
 }
 
@@ -67,18 +60,8 @@ fn artist_response(
         .music()
         .get_albums_by_artist(artist_id)
         .map_err(|error| ApiError::Generic(error.to_string()))?;
-    let album_ids: Vec<i32> = albums.iter().map(|album| album.id).collect();
-    let starred_map = auth
-        .music()
-        .get_starred_at_for_albums_batch(auth.user.id, &album_ids)
+    let album_responses = util::annotate_albums(auth, &albums)
         .map_err(|error| ApiError::Generic(error.to_string()))?;
-    let album_responses: Vec<AlbumID3Response> = albums
-        .iter()
-        .map(|album| {
-            let starred_at = starred_map.get(&album.id);
-            AlbumID3Response::from_album_with_starred(album, starred_at)
-        })
-        .collect();
 
     Ok(
         ArtistWithAlbumsID3Response::from_artist_and_albums_with_starred(
@@ -99,11 +82,15 @@ fn song_response(auth: &SubsonicContext, song_id: i32) -> Result<ChildResponse, 
         .music()
         .get_starred_at_for_song(auth.user.id, song_id)
         .map_err(|error| ApiError::Generic(error.to_string()))?;
+    let annotations = auth
+        .music()
+        .get_song_annotations_batch(auth.user.id, &[song_id])
+        .map_err(|error| ApiError::Generic(error.to_string()))?;
 
-    Ok(ChildResponse::from_song_with_starred(
-        &song,
-        starred_at.as_ref(),
-    ))
+    Ok(
+        ChildResponse::from_song_with_starred(&song, starred_at.as_ref())
+            .with_annotations(annotations.get(&song_id)),
+    )
 }
 
 /// GET/POST /rest/getAlbum[.view]

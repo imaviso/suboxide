@@ -6,6 +6,62 @@ use serde::Serialize;
 /// Timestamp format used by Subsonic API responses.
 pub const SUBSONIC_DATETIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.3fZ";
 
+/// Replace Latin special letters that have no NFKD decomposition
+/// (ligatures, strokes) with their ASCII equivalents.
+const fn expand_latin_specials(c: char) -> &'static str {
+    match c {
+        'Æ' => "AE",
+        'æ' => "ae",
+        'Œ' => "OE",
+        'œ' => "oe",
+        'ß' => "ss",
+        'Ø' | 'ø' => "o",
+        'Ð' | 'ð' => "d",
+        'Þ' | 'þ' => "th",
+        'Ł' | 'ł' => "l",
+        'Ħ' | 'ħ' => "h",
+        'Ŋ' | 'ŋ' => "n",
+        'Ŧ' | 'ŧ' => "t",
+        _ => "",
+    }
+}
+
+/// Fold text for search matching.
+///
+/// Lowercases, strips diacritics, and collapses whitespace. Stored in
+/// `search_name` columns and applied to search queries so "beyonce"
+/// matches "Beyoncé" (navidrome-compatible behavior).
+#[must_use]
+pub fn normalize_search_text(text: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    use unicode_normalization::char::is_combining_mark;
+
+    let mut expanded = String::with_capacity(text.len());
+    for c in text.chars() {
+        let special = expand_latin_specials(c);
+        if special.is_empty() {
+            expanded.push(c);
+        } else {
+            expanded.push_str(special);
+        }
+    }
+    let folded: String = expanded
+        .nfkd()
+        .filter(|c| !is_combining_mark(*c))
+        .collect::<String>()
+        .to_lowercase();
+    folded.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Normalize a Subsonic search query for matching: trim, strip wrapping
+/// quotes, drop a trailing `*` (prefix-search marker), then fold.
+#[must_use]
+pub fn normalize_search_query(query: &str) -> String {
+    let trimmed = query.trim().trim_matches('"').trim();
+    let without_prefix_marker = trimmed.strip_suffix('*').unwrap_or(trimmed).trim_end();
+    normalize_search_text(without_prefix_marker)
+}
+
 /// Format a UTC naive timestamp in Subsonic's wire format.
 #[must_use]
 pub fn format_subsonic_datetime(datetime: &NaiveDateTime) -> String {
@@ -30,7 +86,25 @@ pub fn saturating_i64_to_i32(value: i64) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::saturating_i64_to_i32;
+    use super::{normalize_search_query, normalize_search_text, saturating_i64_to_i32};
+
+    #[test]
+    fn normalize_search_text_folds_case_accents_and_whitespace() {
+        assert_eq!(normalize_search_text("Beyoncé"), "beyonce");
+        assert_eq!(normalize_search_text("Mötley   Crüe"), "motley crue");
+        assert_eq!(normalize_search_text("Sigur Rós"), "sigur ros");
+        assert_eq!(normalize_search_text("AC/DC"), "ac/dc");
+        assert_eq!(normalize_search_text("  spaced   out  "), "spaced out");
+        assert_eq!(normalize_search_text("Œuvre"), "oeuvre");
+    }
+
+    #[test]
+    fn normalize_search_query_strips_quotes_and_prefix_marker() {
+        assert_eq!(normalize_search_query(" \" Miles Davis \" "), "miles davis");
+        assert_eq!(normalize_search_query("beat*"), "beat");
+        assert_eq!(normalize_search_query("Björk*"), "bjork");
+        assert_eq!(normalize_search_query(""), "");
+    }
 
     #[test]
     fn saturating_i64_to_i32_clamps_positive_overflow() {
@@ -220,24 +294,29 @@ pub struct AlbumID3Response {
     pub year: Option<i32>,
     #[serde(rename = "@genre", skip_serializing_if = "Option::is_none")]
     pub genre: Option<String>,
+    #[serde(rename = "@userRating", skip_serializing_if = "Option::is_none")]
+    pub user_rating: Option<i32>,
+    #[serde(rename = "@averageRating", skip_serializing_if = "Option::is_none")]
+    pub average_rating: Option<f64>,
+    #[serde(rename = "@played", skip_serializing_if = "Option::is_none")]
+    pub played: Option<String>,
+    #[serde(rename = "@sortName", skip_serializing_if = "Option::is_none")]
+    pub sort_name: Option<String>,
+    #[serde(rename = "@musicBrainzId", skip_serializing_if = "Option::is_none")]
+    pub musicbrainz_id: Option<String>,
+}
+
+/// Per-user annotation data for an album (ratings, last played).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AlbumAnnotations {
+    pub user_rating: Option<i32>,
+    pub average_rating: Option<f64>,
+    pub played_at: Option<NaiveDateTime>,
 }
 
 impl From<&Album> for AlbumID3Response {
     fn from(album: &Album) -> Self {
-        Self {
-            id: album.id.to_string(),
-            name: album.name.clone(),
-            artist: album.artist_name.clone(),
-            artist_id: album.artist_id.map(|id| id.to_string()),
-            cover_art: album.cover_art.clone(),
-            song_count: album.song_count,
-            duration: album.duration,
-            play_count: Some(album.play_count),
-            created: format_subsonic_datetime(&album.created_at),
-            starred: None,
-            year: album.year,
-            genre: album.genre.clone(),
-        }
+        Self::from_album_with_starred(album, None)
     }
 }
 
@@ -257,7 +336,23 @@ impl AlbumID3Response {
             starred: starred_at.map(format_subsonic_datetime),
             year: album.year,
             genre: album.genre.clone(),
+            user_rating: None,
+            average_rating: None,
+            played: None,
+            sort_name: album.sort_name.clone(),
+            musicbrainz_id: album.musicbrainz_id.clone(),
         }
+    }
+
+    /// Attach per-user annotation data (ratings, last played).
+    #[must_use]
+    pub fn with_annotations(mut self, annotations: Option<&AlbumAnnotations>) -> Self {
+        if let Some(annotations) = annotations {
+            self.user_rating = annotations.user_rating;
+            self.average_rating = annotations.average_rating;
+            self.played = annotations.played_at.as_ref().map(format_subsonic_datetime);
+        }
+        self
     }
 }
 
@@ -348,38 +443,33 @@ pub struct ChildResponse {
     pub media_type: Option<String>,
     #[serde(rename = "@starred", skip_serializing_if = "Option::is_none")]
     pub starred: Option<String>,
+    #[serde(rename = "@userRating", skip_serializing_if = "Option::is_none")]
+    pub user_rating: Option<i32>,
+    #[serde(rename = "@averageRating", skip_serializing_if = "Option::is_none")]
+    pub average_rating: Option<f64>,
+    #[serde(rename = "@played", skip_serializing_if = "Option::is_none")]
+    pub played: Option<String>,
+    #[serde(rename = "@bookmarkPosition", skip_serializing_if = "Option::is_none")]
+    pub bookmark_position: Option<i64>,
+    #[serde(rename = "@sortName", skip_serializing_if = "Option::is_none")]
+    pub sort_name: Option<String>,
+    #[serde(rename = "@musicBrainzId", skip_serializing_if = "Option::is_none")]
+    pub musicbrainz_id: Option<String>,
+}
+
+/// Per-user annotation data for a song (ratings, last played, bookmark).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SongAnnotations {
+    pub starred_at: Option<NaiveDateTime>,
+    pub user_rating: Option<i32>,
+    pub average_rating: Option<f64>,
+    pub played_at: Option<NaiveDateTime>,
+    pub bookmark_position: Option<i64>,
 }
 
 impl From<&Song> for ChildResponse {
     fn from(song: &Song) -> Self {
-        Self {
-            id: song.id.to_string(),
-            parent: song.album_id.map(|id| id.to_string()),
-            is_dir: false,
-            title: song.title.clone(),
-            album: song.album_name.clone(),
-            artist: song.artist_name.clone(),
-            track: song.track_number,
-            year: song.year,
-            genre: song.genre.clone(),
-            cover_art: song.cover_art.clone(),
-            size: Some(song.file_size),
-            content_type: Some(song.content_type.clone()),
-            suffix: Some(song.suffix.clone()),
-            duration: Some(song.duration),
-            bit_rate: song.bit_rate,
-            bit_depth: song.bit_depth,
-            sampling_rate: song.sampling_rate,
-            channel_count: song.channel_count,
-            path: Some(song.path.clone()),
-            play_count: Some(song.play_count),
-            disc_number: song.disc_number,
-            created: Some(format_subsonic_datetime(&song.created_at)),
-            album_id: song.album_id.map(|id| id.to_string()),
-            artist_id: song.artist_id.map(|id| id.to_string()),
-            media_type: Some("music".to_string()),
-            starred: None,
-        }
+        Self::from_song_with_starred(song, None)
     }
 }
 
@@ -413,7 +503,28 @@ impl ChildResponse {
             artist_id: song.artist_id.map(|id| id.to_string()),
             media_type: Some("music".to_string()),
             starred: starred_at.map(format_subsonic_datetime),
+            user_rating: None,
+            average_rating: None,
+            played: None,
+            bookmark_position: None,
+            sort_name: song.sort_name.clone(),
+            musicbrainz_id: song.musicbrainz_id.clone(),
         }
+    }
+
+    /// Attach per-user annotation data (ratings, last played, bookmark).
+    #[must_use]
+    pub fn with_annotations(mut self, annotations: Option<&SongAnnotations>) -> Self {
+        if let Some(annotations) = annotations {
+            if let Some(starred_at) = annotations.starred_at.as_ref() {
+                self.starred = Some(format_subsonic_datetime(starred_at));
+            }
+            self.user_rating = annotations.user_rating;
+            self.average_rating = annotations.average_rating;
+            self.played = annotations.played_at.as_ref().map(format_subsonic_datetime);
+            self.bookmark_position = annotations.bookmark_position;
+        }
+        self
     }
 }
 
@@ -482,6 +593,16 @@ pub struct AlbumWithSongsID3Response {
     pub year: Option<i32>,
     #[serde(rename = "@genre", skip_serializing_if = "Option::is_none")]
     pub genre: Option<String>,
+    #[serde(rename = "@userRating", skip_serializing_if = "Option::is_none")]
+    pub user_rating: Option<i32>,
+    #[serde(rename = "@averageRating", skip_serializing_if = "Option::is_none")]
+    pub average_rating: Option<f64>,
+    #[serde(rename = "@played", skip_serializing_if = "Option::is_none")]
+    pub played: Option<String>,
+    #[serde(rename = "@sortName", skip_serializing_if = "Option::is_none")]
+    pub sort_name: Option<String>,
+    #[serde(rename = "@musicBrainzId", skip_serializing_if = "Option::is_none")]
+    pub musicbrainz_id: Option<String>,
     #[serde(rename = "song", skip_serializing_if = "Vec::is_empty")]
     pub songs: Vec<ChildResponse>,
 }
@@ -489,21 +610,7 @@ pub struct AlbumWithSongsID3Response {
 impl AlbumWithSongsID3Response {
     #[must_use]
     pub fn from_album_and_songs(album: &Album, songs: Vec<ChildResponse>) -> Self {
-        Self {
-            id: album.id.to_string(),
-            name: album.name.clone(),
-            artist: album.artist_name.clone(),
-            artist_id: album.artist_id.map(|id| id.to_string()),
-            cover_art: album.cover_art.clone(),
-            song_count: album.song_count,
-            duration: album.duration,
-            play_count: Some(album.play_count),
-            created: format_subsonic_datetime(&album.created_at),
-            starred: None,
-            year: album.year,
-            genre: album.genre.clone(),
-            songs,
-        }
+        Self::from_album_and_songs_with_starred(album, songs, None)
     }
 
     #[must_use]
@@ -525,8 +632,24 @@ impl AlbumWithSongsID3Response {
             starred: starred_at.map(format_subsonic_datetime),
             year: album.year,
             genre: album.genre.clone(),
+            user_rating: None,
+            average_rating: None,
+            played: None,
+            sort_name: album.sort_name.clone(),
+            musicbrainz_id: album.musicbrainz_id.clone(),
             songs,
         }
+    }
+
+    /// Attach per-user annotation data (ratings, last played).
+    #[must_use]
+    pub fn with_annotations(mut self, annotations: Option<&AlbumAnnotations>) -> Self {
+        if let Some(annotations) = annotations {
+            self.user_rating = annotations.user_rating;
+            self.average_rating = annotations.average_rating;
+            self.played = annotations.played_at.as_ref().map(format_subsonic_datetime);
+        }
+        self
     }
 }
 
@@ -722,196 +845,66 @@ pub struct SearchResult3Response {
 // Response types for starred (getStarred2)
 // ============================================================================
 
-/// `ChildResponse` with starred timestamp for getStarred2.
-#[derive(Debug, Serialize, Clone)]
-pub struct StarredChildResponse {
-    #[serde(rename = "@id")]
-    pub id: String,
-    #[serde(rename = "@parent", skip_serializing_if = "Option::is_none")]
-    pub parent: Option<String>,
-    #[serde(rename = "@isDir")]
-    pub is_dir: bool,
-    #[serde(rename = "@title")]
-    pub title: String,
-    #[serde(rename = "@album", skip_serializing_if = "Option::is_none")]
-    pub album: Option<String>,
-    #[serde(rename = "@artist", skip_serializing_if = "Option::is_none")]
-    pub artist: Option<String>,
-    #[serde(rename = "@track", skip_serializing_if = "Option::is_none")]
-    pub track: Option<i32>,
-    #[serde(rename = "@year", skip_serializing_if = "Option::is_none")]
-    pub year: Option<i32>,
-    #[serde(rename = "@genre", skip_serializing_if = "Option::is_none")]
-    pub genre: Option<String>,
-    #[serde(rename = "@coverArt", skip_serializing_if = "Option::is_none")]
-    pub cover_art: Option<String>,
-    #[serde(rename = "@size", skip_serializing_if = "Option::is_none")]
-    pub size: Option<i64>,
-    #[serde(rename = "@contentType", skip_serializing_if = "Option::is_none")]
-    pub content_type: Option<String>,
-    #[serde(rename = "@suffix", skip_serializing_if = "Option::is_none")]
-    pub suffix: Option<String>,
-    #[serde(rename = "@duration", skip_serializing_if = "Option::is_none")]
-    pub duration: Option<i32>,
-    #[serde(rename = "@bitRate", skip_serializing_if = "Option::is_none")]
-    pub bit_rate: Option<i32>,
-    #[serde(rename = "@bitDepth", skip_serializing_if = "Option::is_none")]
-    pub bit_depth: Option<i32>,
-    #[serde(rename = "@samplingRate", skip_serializing_if = "Option::is_none")]
-    pub sampling_rate: Option<i32>,
-    #[serde(rename = "@channelCount", skip_serializing_if = "Option::is_none")]
-    pub channel_count: Option<i32>,
-    #[serde(rename = "@path", skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-    #[serde(rename = "@playCount", skip_serializing_if = "Option::is_none")]
-    pub play_count: Option<i32>,
-    #[serde(rename = "@discNumber", skip_serializing_if = "Option::is_none")]
-    pub disc_number: Option<i32>,
-    #[serde(rename = "@created", skip_serializing_if = "Option::is_none")]
-    pub created: Option<String>,
-    #[serde(rename = "@albumId", skip_serializing_if = "Option::is_none")]
-    pub album_id: Option<String>,
-    #[serde(rename = "@artistId", skip_serializing_if = "Option::is_none")]
-    pub artist_id: Option<String>,
-    #[serde(rename = "@type", skip_serializing_if = "Option::is_none")]
-    pub media_type: Option<String>,
-    #[serde(rename = "@starred")]
-    pub starred: String,
-}
-
-impl StarredChildResponse {
-    #[must_use]
-    pub fn from_song_and_starred(song: &Song, starred_at: &chrono::NaiveDateTime) -> Self {
-        Self {
-            id: song.id.to_string(),
-            parent: song.album_id.map(|id| id.to_string()),
-            is_dir: false,
-            title: song.title.clone(),
-            album: song.album_name.clone(),
-            artist: song.artist_name.clone(),
-            track: song.track_number,
-            year: song.year,
-            genre: song.genre.clone(),
-            cover_art: song.cover_art.clone(),
-            size: Some(song.file_size),
-            content_type: Some(song.content_type.clone()),
-            suffix: Some(song.suffix.clone()),
-            duration: Some(song.duration),
-            bit_rate: song.bit_rate,
-            bit_depth: song.bit_depth,
-            sampling_rate: song.sampling_rate,
-            channel_count: song.channel_count,
-            path: Some(song.path.clone()),
-            play_count: Some(song.play_count),
-            disc_number: song.disc_number,
-            created: Some(format_subsonic_datetime(&song.created_at)),
-            album_id: song.album_id.map(|id| id.to_string()),
-            artist_id: song.artist_id.map(|id| id.to_string()),
-            media_type: Some("music".to_string()),
-            starred: format_subsonic_datetime(starred_at),
-        }
-    }
-}
-
-/// `ArtistID3Response` with starred timestamp for getStarred2.
-#[derive(Debug, Serialize, Clone)]
-pub struct StarredArtistID3Response {
-    #[serde(rename = "@id")]
-    pub id: String,
-    #[serde(rename = "@name")]
-    pub name: String,
-    #[serde(rename = "@coverArt", skip_serializing_if = "Option::is_none")]
-    pub cover_art: Option<String>,
-    #[serde(rename = "@artistImageUrl", skip_serializing_if = "Option::is_none")]
-    pub artist_image_url: Option<String>,
-    #[serde(rename = "@albumCount", skip_serializing_if = "Option::is_none")]
-    pub album_count: Option<i32>,
-    #[serde(rename = "@starred")]
-    pub starred: String,
-    #[serde(rename = "@musicBrainzId", skip_serializing_if = "Option::is_none")]
-    pub musicbrainz_id: Option<String>,
-    #[serde(rename = "@sortName", skip_serializing_if = "Option::is_none")]
-    pub sort_name: Option<String>,
-}
-
-impl StarredArtistID3Response {
-    #[must_use]
-    pub fn from_artist_and_starred(
-        artist: &Artist,
-        album_count: Option<i32>,
-        starred_at: &chrono::NaiveDateTime,
-    ) -> Self {
-        Self {
-            id: artist.id.to_string(),
-            name: artist.name.clone(),
-            cover_art: artist.cover_art.clone(),
-            artist_image_url: artist.artist_image_url.clone(),
-            album_count,
-            starred: format_subsonic_datetime(starred_at),
-            musicbrainz_id: artist.musicbrainz_id.clone(),
-            sort_name: artist.sort_name.clone(),
-        }
-    }
-}
-
-/// `AlbumID3Response` with starred timestamp for getStarred2.
-#[derive(Debug, Serialize, Clone)]
-pub struct StarredAlbumID3Response {
-    #[serde(rename = "@id")]
-    pub id: String,
-    #[serde(rename = "@name")]
-    pub name: String,
-    #[serde(rename = "@artist", skip_serializing_if = "Option::is_none")]
-    pub artist: Option<String>,
-    #[serde(rename = "@artistId", skip_serializing_if = "Option::is_none")]
-    pub artist_id: Option<String>,
-    #[serde(rename = "@coverArt", skip_serializing_if = "Option::is_none")]
-    pub cover_art: Option<String>,
-    #[serde(rename = "@songCount")]
-    pub song_count: i32,
-    #[serde(rename = "@duration")]
-    pub duration: i32,
-    #[serde(rename = "@playCount", skip_serializing_if = "Option::is_none")]
-    pub play_count: Option<i32>,
-    #[serde(rename = "@created")]
-    pub created: String,
-    #[serde(rename = "@starred")]
-    pub starred: String,
-    #[serde(rename = "@year", skip_serializing_if = "Option::is_none")]
-    pub year: Option<i32>,
-    #[serde(rename = "@genre", skip_serializing_if = "Option::is_none")]
-    pub genre: Option<String>,
-}
-
-impl StarredAlbumID3Response {
-    #[must_use]
-    pub fn from_album_and_starred(album: &Album, starred_at: &chrono::NaiveDateTime) -> Self {
-        Self {
-            id: album.id.to_string(),
-            name: album.name.clone(),
-            artist: album.artist_name.clone(),
-            artist_id: album.artist_id.map(|id| id.to_string()),
-            cover_art: album.cover_art.clone(),
-            song_count: album.song_count,
-            duration: album.duration,
-            play_count: Some(album.play_count),
-            created: format_subsonic_datetime(&album.created_at),
-            starred: format_subsonic_datetime(starred_at),
-            year: album.year,
-            genre: album.genre.clone(),
-        }
-    }
-}
-
 /// Starred2 response for getStarred2.
 #[derive(Debug, Serialize, Clone)]
 pub struct Starred2Response {
     #[serde(rename = "artist", skip_serializing_if = "Vec::is_empty")]
-    pub artists: Vec<StarredArtistID3Response>,
+    pub artists: Vec<ArtistID3Response>,
     #[serde(rename = "album", skip_serializing_if = "Vec::is_empty")]
-    pub albums: Vec<StarredAlbumID3Response>,
+    pub albums: Vec<AlbumID3Response>,
     #[serde(rename = "song", skip_serializing_if = "Vec::is_empty")]
-    pub songs: Vec<StarredChildResponse>,
+    pub songs: Vec<ChildResponse>,
+}
+
+// ============================================================================
+// Response types for bookmarks (getBookmarks)
+// ============================================================================
+
+/// A bookmark entry: a position within a song.
+#[derive(Debug, Serialize, Clone)]
+pub struct BookmarkResponse {
+    #[serde(rename = "@position")]
+    pub position: i64,
+    #[serde(rename = "@username")]
+    pub username: String,
+    #[serde(rename = "@comment", skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
+    #[serde(rename = "@created")]
+    pub created: String,
+    #[serde(rename = "@changed")]
+    pub changed: String,
+    pub entry: ChildResponse,
+}
+
+/// Bookmarks response for getBookmarks.
+#[derive(Debug, Serialize, Clone)]
+pub struct BookmarksResponse {
+    #[serde(rename = "bookmark", skip_serializing_if = "Vec::is_empty")]
+    pub bookmarks: Vec<BookmarkResponse>,
+}
+
+// ============================================================================
+// Response types for internet radio stations
+// ============================================================================
+
+/// An internet radio station response.
+#[derive(Debug, Serialize, Clone)]
+pub struct InternetRadioStationResponse {
+    #[serde(rename = "@id")]
+    pub id: String,
+    #[serde(rename = "@name")]
+    pub name: String,
+    #[serde(rename = "@streamUrl")]
+    pub stream_url: String,
+    #[serde(rename = "@homePageUrl", skip_serializing_if = "Option::is_none")]
+    pub home_page_url: Option<String>,
+}
+
+/// Internet radio stations response for getInternetRadioStations.
+#[derive(Debug, Serialize, Clone)]
+pub struct InternetRadioStationsResponse {
+    #[serde(rename = "internetRadioStation", skip_serializing_if = "Vec::is_empty")]
+    pub stations: Vec<InternetRadioStationResponse>,
 }
 
 // ============================================================================
@@ -1561,6 +1554,12 @@ impl ChildResponse {
             artist_id: Some(artist.id.to_string()),
             media_type: None,
             starred: None,
+            user_rating: None,
+            average_rating: None,
+            played: None,
+            bookmark_position: None,
+            sort_name: artist.sort_name.clone(),
+            musicbrainz_id: artist.musicbrainz_id.clone(),
         }
     }
 
@@ -1594,6 +1593,12 @@ impl ChildResponse {
             artist_id: album.artist_id.map(|id| id.to_string()),
             media_type: None,
             starred: None,
+            user_rating: None,
+            average_rating: None,
+            played: None,
+            bookmark_position: None,
+            sort_name: album.sort_name.clone(),
+            musicbrainz_id: album.musicbrainz_id.clone(),
         }
     }
 }

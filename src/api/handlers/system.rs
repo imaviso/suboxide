@@ -30,15 +30,6 @@ pub async fn get_open_subsonic_extensions(auth: SubsonicContext) -> impl IntoRes
     SubsonicResponse::open_subsonic_extensions(auth.format, supported_extensions())
 }
 
-/// GET/POST /rest/getBookmarks[.view]
-///
-/// Returns all bookmarks for this user.
-/// A bookmark is a position within a certain media file.
-/// Currently returns an empty list (bookmarks not yet implemented).
-pub async fn get_bookmarks(auth: SubsonicContext) -> impl IntoResponse {
-    SubsonicResponse::bookmarks(auth.format)
-}
-
 /// GET/POST /rest/tokenInfo[.view]
 ///
 /// Returns information about the API key used for authentication.

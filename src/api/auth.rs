@@ -144,12 +144,12 @@ where
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         let format = query_format(parts.uri.query());
         let Some(query) = parts.uri.query() else {
-            return serde_urlencoded::from_str("").map(Self).map_err(|e| {
+            return serde_html_form::from_str("").map(Self).map_err(|e| {
                 error_response(format, &ApiError::Generic(e.to_string())).into_response()
             });
         };
 
-        serde_urlencoded::from_str(query)
+        serde_html_form::from_str(query)
             .map(Self)
             .map_err(|e| error_response(format, &ApiError::Generic(e.to_string())).into_response())
     }
@@ -160,7 +160,7 @@ fn query_format(query: Option<&str>) -> Format {
         return Format::Xml;
     };
 
-    serde_urlencoded::from_str::<Vec<(String, String)>>(query)
+    serde_html_form::from_str::<Vec<(String, String)>>(query)
         .ok()
         .and_then(|params| {
             params

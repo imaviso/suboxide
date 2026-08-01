@@ -8,7 +8,8 @@ pub(crate) mod schema;
 pub use connection::{DbConfig, DbConn, DbPool, DbPoolError, run_migrations};
 #[doc(inline)]
 pub use repo::{
-    AlbumRepository, ArtistInfoCacheRepository, ArtistRepository, MusicFolderRepository,
+    AlbumRepository, ArtistInfoCacheRepository, ArtistRepository, BookmarkEntry,
+    BookmarkRepository, InternetRadioRepository, InternetRadioStation, MusicFolderRepository,
     MusicRepoError, MusicRepoErrorKind, NewUser, NowPlayingEntry, NowPlayingRepository, PlayQueue,
     PlayQueueRepository, Playlist, PlaylistRepository, RatingRepository, RemoteCommand,
     RemoteControlRepository, RemoteSession, RemoteState, SETTING_LASTFM_API_KEY,

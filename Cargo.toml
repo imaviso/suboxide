@@ -40,10 +40,11 @@ rayon = "1.10"
 # Utilities
 dirs = "6"
 urlencoding = "2"
+unicode-normalization = "0.1"
 
 # HTTP client for external APIs
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "form", "query", "charset", "http2"] }
-serde_urlencoded = "0.7"
+serde_html_form = "0.2"
 scraper = "0.25"
 
 # Allocator

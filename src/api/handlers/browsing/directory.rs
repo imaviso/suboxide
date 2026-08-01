@@ -57,7 +57,12 @@ pub async fn get_music_directory(
                 return util::service_error(&auth, e);
             }
         };
-        let children: Vec<ChildResponse> = songs.iter().map(ChildResponse::from).collect();
+        let children = match util::annotate_songs(&auth, &songs) {
+            Ok(children) => children,
+            Err(e) => {
+                return util::service_error(&auth, e);
+            }
+        };
         let response = DirectoryResponse::from_album(&album, children);
         return SubsonicResponse::directory(auth.format, response).into_response();
     }

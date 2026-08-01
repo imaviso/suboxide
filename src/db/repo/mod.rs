@@ -1,8 +1,10 @@
 //! Database repository module.
 
 pub mod artist_cache;
+pub mod bookmark;
 pub mod error;
 pub mod interaction;
+pub mod internet_radio;
 pub mod music;
 pub mod playlist;
 pub mod remote;
@@ -13,6 +15,10 @@ pub mod user;
 #[doc(inline)]
 pub use artist_cache::ArtistInfoCacheRepository;
 
+// Re-export bookmark types
+#[doc(inline)]
+pub use bookmark::{BookmarkEntry, BookmarkRepository};
+
 // Re-export error types
 #[doc(inline)]
 pub use error::{MusicRepoError, MusicRepoErrorKind, UserRepoError, UserRepoErrorKind};
@@ -22,6 +28,10 @@ pub use error::{MusicRepoError, MusicRepoErrorKind, UserRepoError, UserRepoError
 pub use interaction::{
     NowPlayingEntry, NowPlayingRepository, RatingRepository, ScrobbleRepository, StarredRepository,
 };
+
+// Re-export internet radio types
+#[doc(inline)]
+pub use internet_radio::{InternetRadioRepository, InternetRadioStation};
 
 // Re-export music types
 #[doc(inline)]

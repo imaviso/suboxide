@@ -59,6 +59,7 @@ diesel::table! {
         musicbrainz_id -> Nullable<Text>,
         cover_art -> Nullable<Text>,
         artist_image_url -> Nullable<Text>,
+        search_name -> Text,
         created_at -> Timestamp,
         updated_at -> Timestamp,
     }
@@ -75,6 +76,7 @@ diesel::table! {
         genre -> Nullable<Text>,
         cover_art -> Nullable<Text>,
         musicbrainz_id -> Nullable<Text>,
+        search_name -> Text,
         duration -> Integer,
         song_count -> Integer,
         play_count -> Integer,
@@ -109,6 +111,7 @@ diesel::table! {
         genre -> Nullable<Text>,
         cover_art -> Nullable<Text>,
         musicbrainz_id -> Nullable<Text>,
+        search_name -> Text,
         play_count -> Integer,
         file_modified_at -> Nullable<BigInt>,
         created_at -> Timestamp,
@@ -212,6 +215,29 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    bookmarks (id) {
+        id -> Integer,
+        user_id -> Integer,
+        song_id -> Integer,
+        position -> BigInt,
+        comment -> Nullable<Text>,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    internet_radio_stations (id) {
+        id -> Integer,
+        name -> Text,
+        stream_url -> Text,
+        home_page_url -> Nullable<Text>,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
 // Define foreign key relationships
 diesel::joinable!(albums -> artists (artist_id));
 diesel::joinable!(artist_lastfm_info -> artists (artist_id));
@@ -230,6 +256,8 @@ diesel::joinable!(playlist_songs -> songs (song_id));
 diesel::joinable!(play_queue -> users (user_id));
 diesel::joinable!(play_queue_songs -> play_queue (play_queue_id));
 diesel::joinable!(play_queue_songs -> songs (song_id));
+diesel::joinable!(bookmarks -> users (user_id));
+diesel::joinable!(bookmarks -> songs (song_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     users,
@@ -247,4 +275,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     play_queue_songs,
     artist_lastfm_info,
     settings,
+    bookmarks,
+    internet_radio_stations,
 );

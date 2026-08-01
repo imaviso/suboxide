@@ -546,6 +546,54 @@ impl ScrobbleRepository {
             .map(|(scrobble, song)| (Song::from(song), scrobble.played_at))
             .collect())
     }
+
+    /// Get the last played timestamp per song for a user, keyed by song ID.
+    pub fn get_last_played_for_songs_batch(
+        &self,
+        user_id: i32,
+        song_ids: &[i32],
+    ) -> Result<std::collections::HashMap<i32, NaiveDateTime>, MusicRepoError> {
+        if song_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        let mut conn = self.pool.get()?;
+
+        let rows: Vec<(i32, Option<NaiveDateTime>)> = scrobbles::table
+            .filter(scrobbles::user_id.eq(user_id))
+            .filter(scrobbles::submission.eq(true))
+            .filter(scrobbles::song_id.eq_any(song_ids))
+            .group_by(scrobbles::song_id)
+            .select((scrobbles::song_id, diesel::dsl::max(scrobbles::played_at)))
+            .load(&mut conn)?;
+
+        Ok(rows
+            .into_iter()
+            .filter_map(|(id, at)| at.map(|at| (id, at)))
+            .collect())
+    }
+
+    /// Get the last played timestamp per album for a user, keyed by album ID.
+    pub fn get_last_played_for_albums_batch(
+        &self,
+        user_id: i32,
+        album_ids: &[i32],
+    ) -> Result<std::collections::HashMap<i32, NaiveDateTime>, MusicRepoError> {
+        if album_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        let mut conn = self.pool.get()?;
+
+        let rows: Vec<(Option<i32>, Option<NaiveDateTime>)> = scrobbles::table
+            .inner_join(songs::table.on(scrobbles::song_id.eq(songs::id)))
+            .filter(scrobbles::user_id.eq(user_id))
+            .filter(scrobbles::submission.eq(true))
+            .filter(songs::album_id.eq_any(album_ids))
+            .group_by(songs::album_id)
+            .select((songs::album_id, diesel::dsl::max(scrobbles::played_at)))
+            .load(&mut conn)?;
+
+        Ok(rows.into_iter().filter_map(|(id, at)| id.zip(at)).collect())
+    }
 }
 
 /// Database row representation for scrobbles.
@@ -579,6 +627,21 @@ struct ScrobbleRow {
 // ============================================================================
 // Rating Repository
 // ============================================================================
+
+/// Group (entity ID, rating) rows into per-entity average ratings.
+fn average_ratings(rows: Vec<(Option<i32>, i32)>) -> std::collections::HashMap<i32, f64> {
+    let mut sums: std::collections::HashMap<i32, (f64, f64)> = std::collections::HashMap::new();
+    for (id, rating) in rows {
+        if let Some(id) = id {
+            let entry = sums.entry(id).or_default();
+            entry.0 += f64::from(rating);
+            entry.1 += 1.0;
+        }
+    }
+    sums.into_iter()
+        .map(|(id, (sum, count))| (id, sum / count))
+        .collect()
+}
 
 /// Repository for user rating database operations.
 #[derive(Clone, Debug)]
@@ -743,6 +806,88 @@ impl RatingRepository {
             .optional()?;
 
         Ok(result)
+    }
+
+    /// Get ratings for a set of songs for a user, keyed by song ID.
+    pub fn get_song_ratings_batch(
+        &self,
+        user_id: i32,
+        song_ids: &[i32],
+    ) -> Result<std::collections::HashMap<i32, i32>, MusicRepoError> {
+        if song_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        let mut conn = self.pool.get()?;
+
+        let rows: Vec<(Option<i32>, i32)> = user_ratings::table
+            .filter(user_ratings::user_id.eq(user_id))
+            .filter(user_ratings::song_id.eq_any(song_ids))
+            .select((user_ratings::song_id, user_ratings::rating))
+            .load(&mut conn)?;
+
+        Ok(rows
+            .into_iter()
+            .filter_map(|(id, rating)| id.map(|id| (id, rating)))
+            .collect())
+    }
+
+    /// Get ratings for a set of albums for a user, keyed by album ID.
+    pub fn get_album_ratings_batch(
+        &self,
+        user_id: i32,
+        album_ids: &[i32],
+    ) -> Result<std::collections::HashMap<i32, i32>, MusicRepoError> {
+        if album_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        let mut conn = self.pool.get()?;
+
+        let rows: Vec<(Option<i32>, i32)> = user_ratings::table
+            .filter(user_ratings::user_id.eq(user_id))
+            .filter(user_ratings::album_id.eq_any(album_ids))
+            .select((user_ratings::album_id, user_ratings::rating))
+            .load(&mut conn)?;
+
+        Ok(rows
+            .into_iter()
+            .filter_map(|(id, rating)| id.map(|id| (id, rating)))
+            .collect())
+    }
+
+    /// Get average ratings across all users for a set of songs, keyed by song ID.
+    pub fn get_average_song_ratings_batch(
+        &self,
+        song_ids: &[i32],
+    ) -> Result<std::collections::HashMap<i32, f64>, MusicRepoError> {
+        if song_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        let mut conn = self.pool.get()?;
+
+        let rows: Vec<(Option<i32>, i32)> = user_ratings::table
+            .filter(user_ratings::song_id.eq_any(song_ids))
+            .select((user_ratings::song_id, user_ratings::rating))
+            .load(&mut conn)?;
+
+        Ok(average_ratings(rows))
+    }
+
+    /// Get average ratings across all users for a set of albums, keyed by album ID.
+    pub fn get_average_album_ratings_batch(
+        &self,
+        album_ids: &[i32],
+    ) -> Result<std::collections::HashMap<i32, f64>, MusicRepoError> {
+        if album_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        let mut conn = self.pool.get()?;
+
+        let rows: Vec<(Option<i32>, i32)> = user_ratings::table
+            .filter(user_ratings::album_id.eq_any(album_ids))
+            .select((user_ratings::album_id, user_ratings::rating))
+            .load(&mut conn)?;
+
+        Ok(average_ratings(rows))
     }
 
     /// Get highest rated albums for a user with pagination.

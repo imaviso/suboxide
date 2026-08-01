@@ -12,7 +12,7 @@ use tokio::sync::watch;
 use walkdir::WalkDir;
 
 use crate::db::{DbPool, MusicFolderRepository, MusicRepoError};
-use crate::models::music::MusicFolder;
+use crate::models::music::{MusicFolder, normalize_search_text};
 use crate::paths::resolve_cover_art_dir;
 use crate::scanner::state::{ScanPhase, ScanState, ScanStateHandle};
 use crate::scanner::types::{
@@ -751,7 +751,10 @@ impl Scanner {
             conn.transaction::<_, diesel::result::Error, _>(|conn| {
                 for name in &new_artists {
                     diesel::insert_into(artists::table)
-                        .values(artists::name.eq(name))
+                        .values((
+                            artists::name.eq(name),
+                            artists::search_name.eq(normalize_search_text(name)),
+                        ))
                         .on_conflict_do_nothing()
                         .execute(conn)?;
                 }
@@ -807,6 +810,7 @@ impl Scanner {
                             albums::year
                                 .eq(track.year.map(|y| i32::try_from(y).unwrap_or(i32::MAX))),
                             albums::genre.eq(&track.genre),
+                            albums::search_name.eq(normalize_search_text(album_name)),
                         ))
                         .on_conflict_do_nothing()
                         .execute(&mut conn)
@@ -909,11 +913,13 @@ impl Scanner {
         for batch in prepared_tracks.chunks(BATCH_SIZE) {
             conn.transaction::<_, MusicRepoError, _>(|conn| {
                 for prepared in batch {
+                    let search_name = normalize_search_text(&prepared.track.title);
                     let query_result =
                         if prepared.is_update {
                             diesel::update(songs::table.filter(songs::path.eq(&prepared.path_str)))
                                 .set((
                                     songs::title.eq(&prepared.track.title),
+                                    songs::search_name.eq(&search_name),
                                     songs::album_id.eq(prepared.album_id),
                                     songs::artist_id.eq(prepared.artist_id),
                                     songs::artist_name.eq(&prepared.track.artist),
@@ -955,6 +961,7 @@ impl Scanner {
                             diesel::insert_into(songs::table)
                                 .values((
                                     songs::title.eq(&prepared.track.title),
+                                    songs::search_name.eq(&search_name),
                                     songs::album_id.eq(prepared.album_id),
                                     songs::artist_id.eq(prepared.artist_id),
                                     songs::artist_name.eq(&prepared.track.artist),

@@ -15,20 +15,8 @@ fn play_queue_entries(
     auth: &SubsonicContext,
     play_queue: &PlayQueue,
 ) -> Result<Vec<ChildResponse>, ApiError> {
-    let song_ids: Vec<i32> = play_queue.songs.iter().map(|song| song.id).collect();
-    let starred_map = auth
-        .music()
-        .get_starred_at_for_songs_batch(auth.user.id, &song_ids)
-        .map_err(|error| ApiError::Generic(error.to_string()))?;
-
-    Ok(play_queue
-        .songs
-        .iter()
-        .map(|song| {
-            let starred_at = starred_map.get(&song.id);
-            ChildResponse::from_song_with_starred(song, starred_at)
-        })
-        .collect())
+    util::annotate_songs(auth, &play_queue.songs)
+        .map_err(|error| ApiError::Generic(error.to_string()))
 }
 
 fn play_queue_response(

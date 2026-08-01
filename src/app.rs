@@ -10,7 +10,7 @@ use axum::{
     extract::Request,
     http::{HeaderValue, StatusCode},
     middleware::{self, Next},
-    response::Response,
+    response::{IntoResponse, Response},
 };
 use tower::ServiceBuilder;
 use tower_http::compression::CompressionLayer;
@@ -159,7 +159,9 @@ pub fn create_router(state: AppState, cors_config: &CorsConfig) -> Router {
     Router::new()
         .nest(
             "/rest",
-            rest_routes().layer(middleware::from_fn(run_request_on_blocking_thread)),
+            rest_routes()
+                .layer(middleware::from_fn(post_form_to_query_params))
+                .layer(middleware::from_fn(run_request_on_blocking_thread)),
         )
         .layer(CompressionLayer::new())
         .layer(cors_config.layer())
@@ -177,10 +179,12 @@ fn rest_routes() -> Router<AppState> {
         .merge(system_routes())
         .merge(browsing_routes())
         .merge(annotation_routes())
+        .merge(bookmark_routes())
         .merge(playlist_routes())
         .merge(play_queue_routes())
         .merge(remote_routes())
         .merge(media_routes())
+        .merge(radio_routes())
         .merge(user_routes())
         .merge(scanning_routes())
 }
@@ -194,7 +198,6 @@ fn system_routes() -> Router<AppState> {
             handlers::get_open_subsonic_extensions,
         )
         .subsonic_route("/tokenInfo", handlers::token_info)
-        .subsonic_route("/getBookmarks", handlers::get_bookmarks)
 }
 
 fn browsing_routes() -> Router<AppState> {
@@ -232,8 +235,16 @@ fn annotation_routes() -> Router<AppState> {
         .subsonic_route("/unstar", handlers::unstar)
         .subsonic_route("/getStarred2", handlers::get_starred2)
         .subsonic_route("/scrobble", handlers::scrobble)
+        .subsonic_route("/reportPlayback", handlers::report_playback)
         .subsonic_route("/getNowPlaying", handlers::get_now_playing)
         .subsonic_route("/setRating", handlers::set_rating)
+}
+
+fn bookmark_routes() -> Router<AppState> {
+    Router::new()
+        .subsonic_route("/getBookmarks", handlers::get_bookmarks)
+        .subsonic_route("/createBookmark", handlers::create_bookmark)
+        .subsonic_route("/deleteBookmark", handlers::delete_bookmark)
 }
 
 fn playlist_routes() -> Router<AppState> {
@@ -270,6 +281,27 @@ fn media_routes() -> Router<AppState> {
         .subsonic_route("/stream", handlers::stream)
         .subsonic_route("/download", handlers::download)
         .subsonic_route("/getCoverArt", handlers::get_cover_art)
+        .subsonic_route("/getAvatar", handlers::get_avatar)
+}
+
+fn radio_routes() -> Router<AppState> {
+    Router::new()
+        .subsonic_route(
+            "/getInternetRadioStations",
+            handlers::get_internet_radio_stations,
+        )
+        .subsonic_route(
+            "/createInternetRadioStation",
+            handlers::create_internet_radio_station,
+        )
+        .subsonic_route(
+            "/updateInternetRadioStation",
+            handlers::update_internet_radio_station,
+        )
+        .subsonic_route(
+            "/deleteInternetRadioStation",
+            handlers::delete_internet_radio_station,
+        )
 }
 
 fn user_routes() -> Router<AppState> {
@@ -286,6 +318,64 @@ fn scanning_routes() -> Router<AppState> {
     Router::new()
         .subsonic_route("/startScan", handlers::start_scan)
         .subsonic_route("/getScanStatus", handlers::get_scan_status)
+}
+
+/// Maximum accepted form body size (10MB), matching navidrome.
+const MAX_FORM_BODY_BYTES: usize = 10 << 20;
+
+/// Parse `application/x-www-form-urlencoded` POST bodies into query params
+/// (`OpenSubsonic` formPost extension).
+///
+/// Body parameters are placed before query-string parameters so they win
+/// when a handler sees duplicate keys, matching navidrome's behavior.
+async fn post_form_to_query_params(req: Request<Body>, next: Next) -> Response {
+    use axum::http::header;
+
+    if req.method() != axum::http::Method::POST {
+        return next.run(req).await;
+    }
+    let is_form = req
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|content_type| content_type.starts_with("application/x-www-form-urlencoded"));
+    if !is_form {
+        return next.run(req).await;
+    }
+
+    let (mut parts, body) = req.into_parts();
+    let Ok(bytes) = axum::body::to_bytes(body, MAX_FORM_BODY_BYTES).await else {
+        return (StatusCode::PAYLOAD_TOO_LARGE, "form body too large").into_response();
+    };
+
+    // WHATWG form parsing is lossy: invalid sequences are replaced, never errors.
+    let mut pairs: Vec<(String, String)> =
+        serde_html_form::from_bytes::<Vec<(String, String)>>(&bytes).unwrap_or_default();
+    if let Some(query) = parts.uri.query()
+        && let Ok(query_pairs) = serde_html_form::from_str::<Vec<(String, String)>>(query)
+    {
+        pairs.extend(query_pairs);
+    }
+
+    let merged = serde_html_form::to_string(&pairs).unwrap_or_default();
+    let path = parts.uri.path().to_owned();
+    let path_and_query = if merged.is_empty() {
+        path
+    } else {
+        format!("{path}?{merged}")
+    };
+
+    let Ok(path_and_query) = path_and_query.parse::<axum::http::uri::PathAndQuery>() else {
+        return (StatusCode::BAD_REQUEST, "invalid request parameters").into_response();
+    };
+    let mut uri_parts = parts.uri.into_parts();
+    uri_parts.path_and_query = Some(path_and_query);
+    let Ok(uri) = axum::http::Uri::from_parts(uri_parts) else {
+        return (StatusCode::BAD_REQUEST, "invalid request URI").into_response();
+    };
+    parts.uri = uri;
+
+    next.run(Request::from_parts(parts, Body::empty())).await
 }
 
 async fn run_request_on_blocking_thread(req: Request<Body>, next: Next) -> Response {
@@ -319,7 +409,14 @@ async fn handle_middleware_error(error: BoxError) -> (StatusCode, &'static str) 
 
 #[cfg(test)]
 mod tests {
-    use super::cors_origins_from_str;
+    use axum::Router;
+    use axum::body::Body;
+    use axum::extract::Request;
+    use axum::http::{Method, StatusCode, header};
+    use axum::middleware;
+    use tower::ServiceExt;
+
+    use super::{cors_origins_from_str, post_form_to_query_params};
 
     #[test]
     fn cors_origins_from_str_trims_and_ignores_empty_segments() {
@@ -337,5 +434,101 @@ mod tests {
             .expect_err("newline makes header value invalid");
 
         assert_eq!(error.origin(), "https://bad\n.example");
+    }
+
+    fn echo_query_router() -> Router {
+        async fn echo_query(uri: axum::http::Uri) -> String {
+            uri.query().unwrap_or_default().to_string()
+        }
+
+        Router::new()
+            .route("/ping", axum::routing::get(echo_query).post(echo_query))
+            .layer(middleware::from_fn(post_form_to_query_params))
+    }
+
+    #[tokio::test]
+    async fn post_form_body_is_merged_into_query_string() {
+        let response = echo_query_router()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/ping?u=alice")
+                    .header(
+                        header::CONTENT_TYPE,
+                        "application/x-www-form-urlencoded; charset=utf-8",
+                    )
+                    .body(Body::from("p=secret&id=1&id=2"))
+                    .expect("request must build"),
+            )
+            .await
+            .expect("router must respond");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .expect("body must read");
+        // Body params come first so they win on duplicate keys; query params
+        // and repeated keys are preserved.
+        assert_eq!(&*body, b"p=secret&id=1&id=2&u=alice");
+    }
+
+    #[tokio::test]
+    async fn get_requests_and_non_form_posts_pass_through_untouched() {
+        let get_response = echo_query_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/ping?u=alice")
+                    .body(Body::empty())
+                    .expect("request must build"),
+            )
+            .await
+            .expect("router must respond");
+        let body = axum::body::to_bytes(get_response.into_body(), 1024)
+            .await
+            .expect("body must read");
+        assert_eq!(&*body, b"u=alice");
+
+        let json_post = echo_query_router()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/ping?u=alice")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from("{}"))
+                    .expect("request must build"),
+            )
+            .await
+            .expect("router must respond");
+        let body = axum::body::to_bytes(json_post.into_body(), 1024)
+            .await
+            .expect("body must read");
+        assert_eq!(&*body, b"u=alice");
+    }
+
+    #[tokio::test]
+    async fn invalid_form_encoding_is_replaced_lossy() {
+        let response = echo_query_router()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/ping")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    // Invalid UTF-8 in a form value
+                    .body(Body::from(vec![b'f', b'=', 0xFF]))
+                    .expect("request must build"),
+            )
+            .await
+            .expect("router must respond");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .expect("body must read");
+        let body = String::from_utf8(body.to_vec()).expect("body must be UTF-8");
+        assert!(body.starts_with("f="), "unexpected query: {body}");
+        assert!(
+            body.contains("%EF%BF%BD"),
+            "invalid bytes must become replacement chars: {body}"
+        );
     }
 }

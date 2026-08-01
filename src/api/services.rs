@@ -6,18 +6,21 @@ use chrono::NaiveDateTime;
 
 use crate::crypto::password::hash_password;
 use crate::db::{
-    AlbumRepository, ArtistInfoCacheRepository, ArtistRepository, DbPool, MusicFolderRepository,
-    MusicRepoError, MusicRepoErrorKind, NewUser, NowPlayingEntry, NowPlayingRepository, PlayQueue,
-    PlayQueueRepository, PlaylistRepository, RatingRepository, RemoteCommand,
-    RemoteControlRepository, RemoteSession, RemoteState, ScrobbleRepository, SongRepository,
-    StarredRepository, UserRepoError, UserRepoErrorKind, UserRepository, UserUpdate,
+    AlbumRepository, ArtistInfoCacheRepository, ArtistRepository, BookmarkEntry,
+    BookmarkRepository, DbPool, InternetRadioRepository, InternetRadioStation,
+    MusicFolderRepository, MusicRepoError, MusicRepoErrorKind, NewUser, NowPlayingEntry,
+    NowPlayingRepository, PlayQueue, PlayQueueRepository, PlaylistRepository, RatingRepository,
+    RemoteCommand, RemoteControlRepository, RemoteSession, RemoteState, ScrobbleRepository,
+    SongRepository, StarredRepository, UserRepoError, UserRepoErrorKind, UserRepository,
+    UserUpdate,
 };
 use crate::lastfm::{
     LastFmClient, LastFmError, models::extract_biography, models::extract_image_urls,
 };
 use crate::models::User;
 use crate::models::music::{
-    Album, Artist, ArtistID3Response, ArtistInfo2Response, Song, saturating_i64_to_i32,
+    Album, AlbumAnnotations, Artist, ArtistID3Response, ArtistInfo2Response, Song, SongAnnotations,
+    saturating_i64_to_i32,
 };
 use crate::models::user::UserRoles;
 use crate::paths::resolve_cover_art_dir;
@@ -383,28 +386,31 @@ impl MusicLibrary {
     pub(in crate::api) fn search_artists(
         &self,
         query: &str,
+        music_folder_id: Option<i32>,
         offset: i64,
         limit: i64,
     ) -> Result<Vec<Artist>, MusicRepoError> {
-        ArtistRepository::new(self.pool.clone()).search(query, offset, limit)
+        ArtistRepository::new(self.pool.clone()).search(query, music_folder_id, offset, limit)
     }
 
     pub(in crate::api) fn search_albums(
         &self,
         query: &str,
+        music_folder_id: Option<i32>,
         offset: i64,
         limit: i64,
     ) -> Result<Vec<Album>, MusicRepoError> {
-        AlbumRepository::new(self.pool.clone()).search(query, offset, limit)
+        AlbumRepository::new(self.pool.clone()).search(query, music_folder_id, offset, limit)
     }
 
     pub(in crate::api) fn search_songs(
         &self,
         query: &str,
+        music_folder_id: Option<i32>,
         offset: i64,
         limit: i64,
     ) -> Result<Vec<Song>, MusicRepoError> {
-        SongRepository::new(self.pool.clone()).search(query, offset, limit)
+        SongRepository::new(self.pool.clone()).search(query, music_folder_id, offset, limit)
     }
 
     // ========================================================================
@@ -531,6 +537,140 @@ impl MusicLibrary {
     }
 
     // ========================================================================
+    // Song & album annotations (ratings, last played, bookmarks)
+    // ========================================================================
+
+    /// Fetch per-user annotation data for a set of songs, keyed by song ID.
+    pub(in crate::api) fn get_song_annotations_batch(
+        &self,
+        user_id: i32,
+        song_ids: &[i32],
+    ) -> Result<HashMap<i32, SongAnnotations>, MusicRepoError> {
+        let ratings =
+            RatingRepository::new(self.pool.clone()).get_song_ratings_batch(user_id, song_ids)?;
+        let averages =
+            RatingRepository::new(self.pool.clone()).get_average_song_ratings_batch(song_ids)?;
+        let last_played = ScrobbleRepository::new(self.pool.clone())
+            .get_last_played_for_songs_batch(user_id, song_ids)?;
+        let bookmark_positions = BookmarkRepository::new(self.pool.clone())
+            .get_positions_for_songs(user_id, song_ids)?;
+
+        let mut annotations = HashMap::with_capacity(song_ids.len());
+        for song_id in song_ids {
+            let entry = SongAnnotations {
+                starred_at: None,
+                user_rating: ratings.get(song_id).copied(),
+                average_rating: averages.get(song_id).copied(),
+                played_at: last_played.get(song_id).copied(),
+                bookmark_position: bookmark_positions.get(song_id).copied(),
+            };
+            if entry.user_rating.is_some()
+                || entry.average_rating.is_some()
+                || entry.played_at.is_some()
+                || entry.bookmark_position.is_some()
+            {
+                annotations.insert(*song_id, entry);
+            }
+        }
+        Ok(annotations)
+    }
+
+    /// Fetch per-user annotation data for a set of albums, keyed by album ID.
+    pub(in crate::api) fn get_album_annotations_batch(
+        &self,
+        user_id: i32,
+        album_ids: &[i32],
+    ) -> Result<HashMap<i32, AlbumAnnotations>, MusicRepoError> {
+        let ratings =
+            RatingRepository::new(self.pool.clone()).get_album_ratings_batch(user_id, album_ids)?;
+        let averages =
+            RatingRepository::new(self.pool.clone()).get_average_album_ratings_batch(album_ids)?;
+        let last_played = ScrobbleRepository::new(self.pool.clone())
+            .get_last_played_for_albums_batch(user_id, album_ids)?;
+
+        let mut annotations = HashMap::with_capacity(album_ids.len());
+        for album_id in album_ids {
+            let entry = AlbumAnnotations {
+                user_rating: ratings.get(album_id).copied(),
+                average_rating: averages.get(album_id).copied(),
+                played_at: last_played.get(album_id).copied(),
+            };
+            if entry.user_rating.is_some()
+                || entry.average_rating.is_some()
+                || entry.played_at.is_some()
+            {
+                annotations.insert(*album_id, entry);
+            }
+        }
+        Ok(annotations)
+    }
+
+    // ========================================================================
+    // Bookmarks
+    // ========================================================================
+
+    pub(in crate::api) fn get_bookmarks(
+        &self,
+        user_id: i32,
+    ) -> Result<Vec<BookmarkEntry>, MusicRepoError> {
+        BookmarkRepository::new(self.pool.clone()).get_for_user(user_id)
+    }
+
+    pub(in crate::api) fn create_bookmark(
+        &self,
+        user_id: i32,
+        song_id: i32,
+        position: i64,
+        comment: Option<&str>,
+    ) -> Result<(), MusicRepoError> {
+        BookmarkRepository::new(self.pool.clone()).upsert(user_id, song_id, position, comment)
+    }
+
+    pub(in crate::api) fn delete_bookmark(
+        &self,
+        user_id: i32,
+        song_id: i32,
+    ) -> Result<bool, MusicRepoError> {
+        BookmarkRepository::new(self.pool.clone()).delete(user_id, song_id)
+    }
+
+    // ========================================================================
+    // Internet radio stations
+    // ========================================================================
+
+    pub(in crate::api) fn get_internet_radio_stations(
+        &self,
+    ) -> Result<Vec<InternetRadioStation>, MusicRepoError> {
+        InternetRadioRepository::new(self.pool.clone()).find_all()
+    }
+
+    pub(in crate::api) fn create_internet_radio_station(
+        &self,
+        name: &str,
+        stream_url: &str,
+        home_page_url: Option<&str>,
+    ) -> Result<(), MusicRepoError> {
+        InternetRadioRepository::new(self.pool.clone()).create(name, stream_url, home_page_url)
+    }
+
+    pub(in crate::api) fn update_internet_radio_station(
+        &self,
+        id: i32,
+        name: &str,
+        stream_url: &str,
+        home_page_url: Option<&str>,
+    ) -> Result<bool, MusicRepoError> {
+        InternetRadioRepository::new(self.pool.clone()).update(id, name, stream_url, home_page_url)
+    }
+
+    pub(in crate::api) fn delete_internet_radio_station(
+        &self,
+        id: i32,
+    ) -> Result<bool, MusicRepoError> {
+        InternetRadioRepository::new(self.pool.clone()).delete(id)
+    }
+
+    // ========================================================================
     // Scrobble & now playing
     // ========================================================================
 
@@ -574,14 +714,31 @@ impl MusicLibrary {
         NowPlayingRepository::new(self.pool.clone()).get_all_now_playing()
     }
 
+    /// Load the user's Last.fm session key, logging why a request is skipped.
+    fn lastfm_session_key(&self, user_id: i32) -> Option<String> {
+        match UserRepository::new(self.pool.clone()).get_lastfm_session_key(user_id) {
+            Ok(Some(key)) => Some(key),
+            Ok(None) => {
+                tracing::info!(
+                    user_id,
+                    "no Last.fm session key for user; skipping. \
+                     Link with `suboxide lastfm link`"
+                );
+                None
+            }
+            Err(e) => {
+                tracing::warn!(user_id, error = %e, "failed to load Last.fm session key");
+                None
+            }
+        }
+    }
+
     fn submit_lastfm_scrobble(&self, user_id: i32, song: &Song, timestamp: i64) {
         if !self.lastfm_client.is_configured() {
             return;
         }
 
-        let Ok(Some(session_key)) =
-            UserRepository::new(self.pool.clone()).get_lastfm_session_key(user_id)
-        else {
+        let Some(session_key) = self.lastfm_session_key(user_id) else {
             return;
         };
 
@@ -608,9 +765,7 @@ impl MusicLibrary {
             return;
         }
 
-        let Ok(Some(session_key)) =
-            UserRepository::new(self.pool.clone()).get_lastfm_session_key(user_id)
-        else {
+        let Some(session_key) = self.lastfm_session_key(user_id) else {
             return;
         };
 

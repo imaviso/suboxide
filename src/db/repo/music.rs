@@ -338,36 +338,39 @@ impl ArtistRepository {
         Ok(counts.into_iter().collect())
     }
 
-    /// Search artists by name with pagination.
-    /// An empty query returns all artists.
+    /// Search artists by folded name with pagination.
+    /// An empty query returns all artists. When `music_folder_id` is set,
+    /// only artists with songs in that folder are returned.
     pub fn search(
         &self,
         query: &str,
+        music_folder_id: Option<i32>,
         offset: i64,
         limit: i64,
     ) -> Result<Vec<Artist>, MusicRepoError> {
         let mut conn = self.pool.get()?;
 
-        if query.is_empty() {
-            // Return all artists
-            let results = artists::table
-                .select(ArtistRow::as_select())
-                .order(artists::name.asc())
-                .offset(offset)
-                .limit(limit)
-                .load(&mut conn)?;
-            return Ok(results.into_iter().map(Artist::from).collect());
-        }
-
-        let pattern = format!("%{query}%");
-        let results = artists::table
-            .filter(artists::name.like(&pattern))
+        let mut db_query = artists::table
             .select(ArtistRow::as_select())
             .order(artists::name.asc())
             .offset(offset)
             .limit(limit)
-            .load(&mut conn)?;
+            .into_boxed();
 
+        if !query.is_empty() {
+            let pattern = format!("%{}%", crate::models::music::normalize_search_text(query));
+            db_query = db_query.filter(artists::search_name.like(pattern));
+        }
+
+        if let Some(folder_id) = music_folder_id {
+            db_query = db_query.filter(diesel::dsl::exists(
+                songs::table
+                    .filter(songs::music_folder_id.eq(folder_id))
+                    .filter(songs::artist_id.eq(artists::id.nullable())),
+            ));
+        }
+
+        let results = db_query.load(&mut conn)?;
         Ok(results.into_iter().map(Artist::from).collect())
     }
 }
@@ -605,36 +608,39 @@ impl AlbumRepository {
         Ok(results.into_iter().map(Album::from).collect())
     }
 
-    /// Search albums by name with pagination.
-    /// An empty query returns all albums.
+    /// Search albums by folded name with pagination.
+    /// An empty query returns all albums. When `music_folder_id` is set,
+    /// only albums with songs in that folder are returned.
     pub fn search(
         &self,
         query: &str,
+        music_folder_id: Option<i32>,
         offset: i64,
         limit: i64,
     ) -> Result<Vec<Album>, MusicRepoError> {
         let mut conn = self.pool.get()?;
 
-        if query.is_empty() {
-            // Return all albums
-            let results = albums::table
-                .select(AlbumRow::as_select())
-                .order(albums::name.asc())
-                .offset(offset)
-                .limit(limit)
-                .load(&mut conn)?;
-            return Ok(results.into_iter().map(Album::from).collect());
-        }
-
-        let pattern = format!("%{query}%");
-        let results = albums::table
-            .filter(albums::name.like(&pattern))
+        let mut db_query = albums::table
             .select(AlbumRow::as_select())
             .order(albums::name.asc())
             .offset(offset)
             .limit(limit)
-            .load(&mut conn)?;
+            .into_boxed();
 
+        if !query.is_empty() {
+            let pattern = format!("%{}%", crate::models::music::normalize_search_text(query));
+            db_query = db_query.filter(albums::search_name.like(pattern));
+        }
+
+        if let Some(folder_id) = music_folder_id {
+            db_query = db_query.filter(diesel::dsl::exists(
+                songs::table
+                    .filter(songs::music_folder_id.eq(folder_id))
+                    .filter(songs::album_id.eq(albums::id.nullable())),
+            ));
+        }
+
+        let results = db_query.load(&mut conn)?;
         Ok(results.into_iter().map(Album::from).collect())
     }
 
@@ -793,31 +799,29 @@ impl SongRepository {
     pub fn search(
         &self,
         query: &str,
+        music_folder_id: Option<i32>,
         offset: i64,
         limit: i64,
     ) -> Result<Vec<Song>, MusicRepoError> {
         let mut conn = self.pool.get()?;
 
-        if query.is_empty() {
-            // Return all songs
-            let results = songs::table
-                .select(SongRow::as_select())
-                .order(songs::title.asc())
-                .offset(offset)
-                .limit(limit)
-                .load(&mut conn)?;
-            return Ok(results.into_iter().map(Song::from).collect());
-        }
-
-        let pattern = format!("%{query}%");
-        let results = songs::table
-            .filter(songs::title.like(&pattern))
+        let mut db_query = songs::table
             .select(SongRow::as_select())
             .order(songs::title.asc())
             .offset(offset)
             .limit(limit)
-            .load(&mut conn)?;
+            .into_boxed();
 
+        if !query.is_empty() {
+            let pattern = format!("%{}%", crate::models::music::normalize_search_text(query));
+            db_query = db_query.filter(songs::search_name.like(pattern));
+        }
+
+        if let Some(folder_id) = music_folder_id {
+            db_query = db_query.filter(songs::music_folder_id.eq(folder_id));
+        }
+
+        let results = db_query.load(&mut conn)?;
         Ok(results.into_iter().map(Song::from).collect())
     }
 
@@ -1000,5 +1004,155 @@ impl SongRepository {
             .load(&mut conn)?;
 
         Ok(results.into_iter().map(Song::from).collect())
+    }
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::{AlbumRepository, ArtistRepository, SongRepository};
+    use crate::db::schema::{albums, artists, music_folders, songs};
+    use crate::db::{DbConfig, DbPool, run_migrations};
+    use crate::models::music::normalize_search_text;
+    use diesel::prelude::*;
+
+    fn test_pool() -> DbPool {
+        let config = DbConfig {
+            database_url: ":memory:".to_string(),
+            max_connections: 1,
+            ..DbConfig::default()
+        };
+        let pool = config.build_pool().expect("pool must build");
+        run_migrations(&mut pool.get().expect("connection must checkout"))
+            .expect("migrations must run");
+        pool
+    }
+
+    /// Seed two folders, one artist+album per folder, one song each.
+    /// Folder 1 gets accented names, folder 2 plain names.
+    fn seed(pool: &DbPool) -> (i32, i32) {
+        let mut conn = pool.get().expect("connection must checkout");
+
+        for (id, name) in [(1, "lib1"), (2, "lib2")] {
+            diesel::insert_into(music_folders::table)
+                .values((
+                    music_folders::id.eq(id),
+                    music_folders::name.eq(name),
+                    music_folders::path.eq(format!("/music/{name}")),
+                ))
+                .execute(&mut conn)
+                .expect("folder must insert");
+        }
+
+        let artist_names = [(1, "Beyoncé"), (2, "Plain Artist")];
+        for (id, name) in artist_names {
+            diesel::insert_into(artists::table)
+                .values((
+                    artists::id.eq(id),
+                    artists::name.eq(name),
+                    artists::search_name.eq(normalize_search_text(name)),
+                ))
+                .execute(&mut conn)
+                .expect("artist must insert");
+        }
+
+        let album_names = [(1, "Crème de la Crème", 1), (2, "Plain Album", 2)];
+        for (id, name, artist_id) in album_names {
+            diesel::insert_into(albums::table)
+                .values((
+                    albums::id.eq(id),
+                    albums::name.eq(name),
+                    albums::artist_id.eq(artist_id),
+                    albums::search_name.eq(normalize_search_text(name)),
+                ))
+                .execute(&mut conn)
+                .expect("album must insert");
+        }
+
+        let song_names = [(1, "Águas de Março", 1, 1, 1), (2, "Plain Song", 2, 2, 2)];
+        for (id, title, album_id, artist_id, folder_id) in song_names {
+            diesel::insert_into(songs::table)
+                .values((
+                    songs::id.eq(id),
+                    songs::title.eq(title),
+                    songs::search_name.eq(normalize_search_text(title)),
+                    songs::album_id.eq(album_id),
+                    songs::artist_id.eq(artist_id),
+                    songs::music_folder_id.eq(folder_id),
+                    songs::path.eq(format!("/music/lib{folder_id}/{id}.flac")),
+                    songs::parent_path.eq(format!("/music/lib{folder_id}")),
+                    songs::content_type.eq("audio/flac"),
+                    songs::suffix.eq("flac"),
+                ))
+                .execute(&mut conn)
+                .expect("song must insert");
+        }
+
+        (1, 2)
+    }
+
+    #[test]
+    fn search_matches_folded_accents_and_case() {
+        let pool = test_pool();
+        seed(&pool);
+
+        let artists = ArtistRepository::new(pool.clone())
+            .search("beyonce", None, 0, 20)
+            .expect("artist search must succeed");
+        assert_eq!(artists.len(), 1);
+        assert_eq!(artists[0].name, "Beyoncé");
+
+        let albums = AlbumRepository::new(pool.clone())
+            .search("creme de la", None, 0, 20)
+            .expect("album search must succeed");
+        assert_eq!(albums.len(), 1);
+        assert_eq!(albums[0].name, "Crème de la Crème");
+
+        let songs = SongRepository::new(pool.clone())
+            .search("AGUAS DE MARCO", None, 0, 20)
+            .expect("song search must succeed");
+        assert_eq!(songs.len(), 1);
+        assert_eq!(songs[0].title, "Águas de Março");
+    }
+
+    #[test]
+    fn search_filters_by_music_folder() {
+        let pool = test_pool();
+        let (folder1, folder2) = seed(&pool);
+
+        let songs = SongRepository::new(pool.clone())
+            .search("", Some(folder1), 0, 20)
+            .expect("song search must succeed");
+        assert_eq!(songs.len(), 1);
+        assert_eq!(songs[0].title, "Águas de Março");
+
+        // Albums/artists are scoped through their songs' folder
+        let albums = AlbumRepository::new(pool.clone())
+            .search("", Some(folder2), 0, 20)
+            .expect("album search must succeed");
+        assert_eq!(albums.len(), 1);
+        assert_eq!(albums[0].name, "Plain Album");
+
+        let artists = ArtistRepository::new(pool.clone())
+            .search("", Some(folder2), 0, 20)
+            .expect("artist search must succeed");
+        assert_eq!(artists.len(), 1);
+        assert_eq!(artists[0].name, "Plain Artist");
+
+        // Query + folder filter compose
+        let songs = SongRepository::new(pool.clone())
+            .search("aguas", Some(folder2), 0, 20)
+            .expect("song search must succeed");
+        assert!(songs.is_empty());
+    }
+
+    #[test]
+    fn empty_query_returns_all() {
+        let pool = test_pool();
+        seed(&pool);
+
+        let songs = SongRepository::new(pool.clone())
+            .search("", None, 0, 20)
+            .expect("song search must succeed");
+        assert_eq!(songs.len(), 2);
     }
 }

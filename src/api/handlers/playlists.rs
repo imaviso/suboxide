@@ -7,8 +7,7 @@ use crate::api::handlers::util;
 use crate::api::response::SubsonicResponse;
 use crate::db::Playlist;
 use crate::models::music::{
-    ChildResponse, PlaylistResponse, PlaylistWithSongsResponse, PlaylistsResponse, Song,
-    format_subsonic_datetime,
+    PlaylistResponse, PlaylistWithSongsResponse, PlaylistsResponse, Song, format_subsonic_datetime,
 };
 
 fn playlist_with_songs_response(
@@ -16,19 +15,8 @@ fn playlist_with_songs_response(
     playlist: &Playlist,
     songs: &[Song],
 ) -> Result<PlaylistWithSongsResponse, Box<Response>> {
-    let song_ids: Vec<i32> = songs.iter().map(|song| song.id).collect();
-    let starred_map = auth
-        .music()
-        .get_starred_at_for_songs_batch(auth.user.id, &song_ids)
+    let entries = util::annotate_songs(auth, songs)
         .map_err(|error| Box::new(util::service_error(auth, error)))?;
-
-    let entries = songs
-        .iter()
-        .map(|song| {
-            let starred_at = starred_map.get(&song.id);
-            ChildResponse::from_song_with_starred(song, starred_at)
-        })
-        .collect();
     let cover_art = songs.first().and_then(|song| song.cover_art.clone());
 
     Ok(PlaylistWithSongsResponse {

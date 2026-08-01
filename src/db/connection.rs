@@ -216,12 +216,14 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
             musicbrainz_id TEXT,
             cover_art TEXT,
             artist_image_url TEXT,
+            search_name TEXT NOT NULL DEFAULT '',
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         ",
     )
     .execute(conn)?;
+    ensure_column(conn, "artists", "search_name TEXT NOT NULL DEFAULT ''")?;
 
     diesel::sql_query("CREATE INDEX IF NOT EXISTS idx_artists_name ON artists(name)")
         .execute(conn)?;
@@ -239,6 +241,7 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
             genre TEXT,
             cover_art TEXT,
             musicbrainz_id TEXT,
+            search_name TEXT NOT NULL DEFAULT '',
             duration INTEGER NOT NULL DEFAULT 0,
             song_count INTEGER NOT NULL DEFAULT 0,
             play_count INTEGER NOT NULL DEFAULT 0,
@@ -248,6 +251,7 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
         ",
     )
     .execute(conn)?;
+    ensure_column(conn, "albums", "search_name TEXT NOT NULL DEFAULT ''")?;
 
     diesel::sql_query("CREATE INDEX IF NOT EXISTS idx_albums_name ON albums(name)")
         .execute(conn)?;
@@ -283,6 +287,7 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
             genre TEXT,
             cover_art TEXT,
             musicbrainz_id TEXT,
+            search_name TEXT NOT NULL DEFAULT '',
             play_count INTEGER NOT NULL DEFAULT 0,
             file_modified_at BIGINT,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -291,6 +296,7 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
         ",
     )
     .execute(conn)?;
+    ensure_column(conn, "songs", "search_name TEXT NOT NULL DEFAULT ''")?;
 
     diesel::sql_query("CREATE INDEX IF NOT EXISTS idx_songs_title ON songs(title)")
         .execute(conn)?;
@@ -646,6 +652,111 @@ pub fn run_migrations(conn: &mut SqliteConnection) -> Result<(), diesel::result:
         ",
     )
     .execute(conn)?;
+
+    // Create bookmarks table for playback positions within songs
+    diesel::sql_query(
+        r"
+        CREATE TABLE IF NOT EXISTS bookmarks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            song_id INTEGER NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+            position BIGINT NOT NULL DEFAULT 0,
+            comment TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        ",
+    )
+    .execute(conn)?;
+
+    // One bookmark per user and song
+    diesel::sql_query(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_bookmarks_user_song ON bookmarks(user_id, song_id)",
+    )
+    .execute(conn)?;
+
+    // Create internet radio stations table
+    diesel::sql_query(
+        r"
+        CREATE TABLE IF NOT EXISTS internet_radio_stations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+            name TEXT NOT NULL,
+            stream_url TEXT NOT NULL,
+            home_page_url TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        ",
+    )
+    .execute(conn)?;
+
+    backfill_search_names(conn)?;
+
+    Ok(())
+}
+
+/// Add a column to an existing table if it is missing (`SQLite` has no
+/// `ADD COLUMN IF NOT EXISTS`).
+fn ensure_column(
+    conn: &mut SqliteConnection,
+    table: &'static str,
+    column_def: &'static str,
+) -> Result<(), diesel::result::Error> {
+    #[derive(diesel::QueryableByName)]
+    struct ColumnInfo {
+        #[diesel(sql_type = diesel::sql_types::Text)]
+        name: String,
+    }
+
+    let column_name = column_def
+        .split_whitespace()
+        .next()
+        .expect("column definition starts with a name");
+    let columns: Vec<ColumnInfo> =
+        diesel::sql_query(format!("PRAGMA table_info({table})")).load(conn)?;
+
+    if !columns.iter().any(|column| column.name == column_name) {
+        diesel::sql_query(format!("ALTER TABLE {table} ADD COLUMN {column_def}")).execute(conn)?;
+    }
+
+    Ok(())
+}
+
+/// Fill folded `search_name` values for rows that still have the empty
+/// default (e.g. rows that existed before the column was added).
+fn backfill_search_names(conn: &mut SqliteConnection) -> Result<(), diesel::result::Error> {
+    use crate::db::schema::{albums, artists, songs};
+    use crate::models::music::normalize_search_text;
+
+    let artist_rows: Vec<(i32, String)> = artists::table
+        .filter(artists::search_name.eq(""))
+        .select((artists::id, artists::name))
+        .load(conn)?;
+    for (id, name) in artist_rows {
+        diesel::update(artists::table.find(id))
+            .set(artists::search_name.eq(normalize_search_text(&name)))
+            .execute(conn)?;
+    }
+
+    let album_rows: Vec<(i32, String)> = albums::table
+        .filter(albums::search_name.eq(""))
+        .select((albums::id, albums::name))
+        .load(conn)?;
+    for (id, name) in album_rows {
+        diesel::update(albums::table.find(id))
+            .set(albums::search_name.eq(normalize_search_text(&name)))
+            .execute(conn)?;
+    }
+
+    let song_rows: Vec<(i32, String)> = songs::table
+        .filter(songs::search_name.eq(""))
+        .select((songs::id, songs::title))
+        .load(conn)?;
+    for (id, title) in song_rows {
+        diesel::update(songs::table.find(id))
+            .set(songs::search_name.eq(normalize_search_text(&title)))
+            .execute(conn)?;
+    }
 
     Ok(())
 }

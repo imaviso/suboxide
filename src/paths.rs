@@ -5,6 +5,9 @@ use std::path::PathBuf;
 /// Relative path used for cover art storage under the runtime data root.
 pub const COVER_ART_RELATIVE_DIR: &str = "covers";
 
+/// Relative path used for user avatar storage under the runtime data root.
+pub const AVATARS_RELATIVE_DIR: &str = "avatars";
+
 /// Name of the environment variable that stores the runtime data directory.
 pub const SUBOXIDE_DATA_DIR_ENV: &str = "SUBOXIDE_DATA_DIR";
 
@@ -41,11 +44,17 @@ pub fn resolve_cover_art_dir() -> PathBuf {
     cover_art_dir_from_data_dir(resolve_data_dir())
 }
 
+/// Resolve the user avatars directory.
+#[must_use]
+pub fn resolve_avatars_dir() -> PathBuf {
+    resolve_data_dir().join(AVATARS_RELATIVE_DIR)
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
-    use super::{COVER_ART_RELATIVE_DIR, cover_art_dir_from_data_dir};
+    use super::{AVATARS_RELATIVE_DIR, COVER_ART_RELATIVE_DIR, cover_art_dir_from_data_dir};
 
     #[test]
     fn cover_art_dir_from_data_dir_uses_stable_covers_subdirectory() {
@@ -54,5 +63,10 @@ mod tests {
             cover_art_dir_from_data_dir(Path::new("/var/lib/suboxide")),
             Path::new("/var/lib/suboxide/covers")
         );
+    }
+
+    #[test]
+    fn avatars_dir_uses_stable_avatars_subdirectory() {
+        assert_eq!(AVATARS_RELATIVE_DIR, "avatars");
     }
 }

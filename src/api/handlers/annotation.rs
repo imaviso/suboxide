@@ -7,8 +7,8 @@ use crate::api::handlers::util;
 
 use crate::api::response::SubsonicResponse;
 use crate::models::music::{
-    NowPlayingEntryResponse, NowPlayingResponse, Starred2Response, StarredAlbumID3Response,
-    StarredArtistID3Response, StarredChildResponse, saturating_i64_to_i32,
+    AlbumID3Response, ArtistID3Response, ChildResponse, NowPlayingEntryResponse,
+    NowPlayingResponse, Starred2Response, saturating_i64_to_i32,
 };
 
 /// Query parameters for star/unstar.
@@ -114,14 +114,14 @@ pub async fn get_starred2(auth: SubsonicContext) -> impl IntoResponse {
         }
     };
 
-    let artists: Vec<StarredArtistID3Response> = starred_artists
+    let artists: Vec<ArtistID3Response> = starred_artists
         .iter()
         .map(|(artist, starred_at)| {
             let album_count = album_counts.get(&artist.id).copied().unwrap_or(0);
-            StarredArtistID3Response::from_artist_and_starred(
+            ArtistID3Response::from_artist_with_starred(
                 artist,
                 Some(saturating_i64_to_i32(album_count)),
-                starred_at,
+                Some(starred_at),
             )
         })
         .collect();
@@ -132,10 +132,21 @@ pub async fn get_starred2(auth: SubsonicContext) -> impl IntoResponse {
             return util::service_error(&auth, e);
         }
     };
-    let albums: Vec<StarredAlbumID3Response> = starred_albums
+    let album_ids: Vec<i32> = starred_albums.iter().map(|(album, _)| album.id).collect();
+    let album_annotations = match auth
+        .music()
+        .get_album_annotations_batch(user_id, &album_ids)
+    {
+        Ok(v) => v,
+        Err(e) => {
+            return util::service_error(&auth, e);
+        }
+    };
+    let albums: Vec<AlbumID3Response> = starred_albums
         .iter()
         .map(|(album, starred_at)| {
-            StarredAlbumID3Response::from_album_and_starred(album, starred_at)
+            AlbumID3Response::from_album_with_starred(album, Some(starred_at))
+                .with_annotations(album_annotations.get(&album.id))
         })
         .collect();
 
@@ -145,9 +156,19 @@ pub async fn get_starred2(auth: SubsonicContext) -> impl IntoResponse {
             return util::service_error(&auth, e);
         }
     };
-    let songs: Vec<StarredChildResponse> = starred_songs
+    let song_ids: Vec<i32> = starred_songs.iter().map(|(song, _)| song.id).collect();
+    let song_annotations = match auth.music().get_song_annotations_batch(user_id, &song_ids) {
+        Ok(v) => v,
+        Err(e) => {
+            return util::service_error(&auth, e);
+        }
+    };
+    let songs: Vec<ChildResponse> = starred_songs
         .iter()
-        .map(|(song, starred_at)| StarredChildResponse::from_song_and_starred(song, starred_at))
+        .map(|(song, starred_at)| {
+            ChildResponse::from_song_with_starred(song, Some(starred_at))
+                .with_annotations(song_annotations.get(&song.id))
+        })
         .collect();
 
     let response = Starred2Response {
@@ -205,6 +226,91 @@ pub async fn scrobble(
             && let Err(error) = auth.music().set_now_playing(user_id, *song_id, player_id)
         {
             return util::service_error(&auth, error);
+        }
+    }
+
+    SubsonicResponse::empty(auth.format).into_response()
+}
+
+/// Query parameters for reportPlayback.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportPlaybackParams {
+    /// ID of the song being played.
+    pub media_id: Option<String>,
+    /// Media type. Only "song" is supported.
+    pub media_type: Option<String>,
+    /// Current playback position in milliseconds.
+    pub position_ms: Option<i64>,
+    /// Playback state: "playing", "paused", or "stopped".
+    pub state: Option<String>,
+    /// Playback rate multiplier (informational only).
+    pub playback_rate: Option<f64>,
+    /// Whether to skip recording a scrobble on stop.
+    pub ignore_scrobble: Option<bool>,
+}
+
+/// GET/POST /rest/reportPlayback[.view]
+///
+/// Reports playback progress for a song (`OpenSubsonic` playbackReport extension).
+/// "playing" registers a now-playing entry; "stopped" records a scrobble
+/// unless `ignoreScrobble` is set.
+pub async fn report_playback(
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<ReportPlaybackParams>,
+    auth: SubsonicContext,
+) -> impl IntoResponse {
+    let Some(song_id) = params
+        .media_id
+        .as_ref()
+        .and_then(|id| id.parse::<i32>().ok())
+    else {
+        return util::missing_param(&auth, "mediaId");
+    };
+    let Some(media_type) = params.media_type.as_deref() else {
+        return util::missing_param(&auth, "mediaType");
+    };
+    if media_type != "song" {
+        return util::service_error(&auth, format!("Unsupported mediaType: {media_type}"));
+    }
+    let Some(position_ms) = params.position_ms else {
+        return util::missing_param(&auth, "positionMs");
+    };
+    if position_ms < 0 {
+        return util::service_error(&auth, "positionMs must be non-negative");
+    }
+    let Some(state) = params.state.as_deref() else {
+        return util::missing_param(&auth, "state");
+    };
+    if let Some(rate) = params.playback_rate
+        && (!rate.is_finite() || rate <= 0.0)
+    {
+        return util::service_error(&auth, "playbackRate must be a finite positive number");
+    }
+
+    let user_id = auth.user.id;
+    let player_id = if auth.params.c.is_empty() {
+        None
+    } else {
+        Some(auth.params.c.as_str())
+    };
+
+    match state {
+        "playing" => {
+            if let Err(error) = auth.music().set_now_playing(user_id, song_id, player_id) {
+                return util::service_error(&auth, error);
+            }
+        }
+        "paused" => {}
+        "stopped" => {
+            if !params.ignore_scrobble.unwrap_or(false)
+                && let Err(error) = auth.music().scrobble(user_id, song_id, None, true)
+            {
+                return util::service_error(&auth, error);
+            }
+        }
+        _ => {
+            return util::service_error(&auth, format!("Invalid state: {state}"));
         }
     }
 
@@ -292,5 +398,28 @@ pub async fn set_rating(
     match auth.music().set_song_rating(user_id, id, rating) {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
         Err(error) => util::service_error(&auth, error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ScrobbleParams, StarParams};
+
+    #[test]
+    fn vec_params_accept_single_and_repeated_values() {
+        // Subsonic clients send multi-value params both ways; the query
+        // deserializer must accept a single value and repeated keys.
+        let single: StarParams = serde_html_form::from_str("id=1").expect("single id parses");
+        assert_eq!(single.song_id, vec![1]);
+
+        let repeated: StarParams =
+            serde_html_form::from_str("id=1&id=2&albumId=3").expect("repeated ids parse");
+        assert_eq!(repeated.song_id, vec![1, 2]);
+        assert_eq!(repeated.album_id, vec![3]);
+
+        let scrobble: ScrobbleParams =
+            serde_html_form::from_str("id=7&time=1000&id=8&time=2000").expect("pairs parse");
+        assert_eq!(scrobble.song_id, vec![7, 8]);
+        assert_eq!(scrobble.time, vec![1000, 2000]);
     }
 }

@@ -13,12 +13,13 @@ use super::error::ApiError;
 use crate::models::music::{
     AlbumInfoResponse, AlbumList2Response, AlbumListResponse, AlbumWithSongsID3Response,
     ArtistInfo2Response, ArtistInfoResponse, ArtistWithAlbumsID3Response, ArtistsID3Response,
-    ChildResponse, DirectoryResponse, GenresResponse, IndexesResponse, LyricsListResponse,
-    LyricsResponse, MusicFolderResponse, NowPlayingResponse, PlayQueueByIndexResponse,
-    PlayQueueResponse, PlaylistWithSongsResponse, PlaylistsResponse, RandomSongsResponse,
-    RemoteCommandsResponse, RemoteSessionResponse, RemoteStateResponse, SearchResult2Response,
-    SearchResult3Response, SearchResultResponse, SimilarSongs2Response, SimilarSongsResponse,
-    SongsByGenreResponse, Starred2Response, StarredResponse, TokenInfoResponse, TopSongsResponse,
+    BookmarksResponse, ChildResponse, DirectoryResponse, GenresResponse, IndexesResponse,
+    InternetRadioStationsResponse, LyricsListResponse, LyricsResponse, MusicFolderResponse,
+    NowPlayingResponse, PlayQueueByIndexResponse, PlayQueueResponse, PlaylistWithSongsResponse,
+    PlaylistsResponse, RandomSongsResponse, RemoteCommandsResponse, RemoteSessionResponse,
+    RemoteStateResponse, SearchResult2Response, SearchResult3Response, SearchResultResponse,
+    SimilarSongs2Response, SimilarSongsResponse, SongsByGenreResponse, Starred2Response,
+    StarredResponse, TokenInfoResponse, TopSongsResponse,
 };
 use crate::models::user::{UserResponse, UsersResponse};
 use crate::scanner::ScanPhase;
@@ -108,8 +109,11 @@ impl OpenSubsonicExtension {
 pub fn supported_extensions() -> Vec<OpenSubsonicExtension> {
     vec![
         OpenSubsonicExtension::new("apiKeyAuthentication", &[1]),
-        OpenSubsonicExtension::new("songLyrics", &[1]),
+        OpenSubsonicExtension::new("formPost", &[1]),
+        OpenSubsonicExtension::new("indexBasedQueue", &[1]),
+        OpenSubsonicExtension::new("playbackReport", &[1]),
         OpenSubsonicExtension::new("remoteControl", &[1]),
+        OpenSubsonicExtension::new("songLyrics", &[1, 2]),
     ]
 }
 
@@ -540,42 +544,17 @@ mod xml {
         }
     }
 
-    /// Empty bookmarks response for XML format.
-    #[derive(Debug, Serialize)]
-    pub struct Bookmarks {
-        // Empty - no bookmarks implemented yet
+    xml_response! {
+        pub struct BookmarksResponse {
+            #[serde(rename = "bookmarks")]
+            pub bookmarks: super::BookmarksResponse
+        }
     }
 
-    #[derive(Debug, Serialize)]
-    #[serde(rename = "subsonic-response")]
-    pub struct BookmarksResponse {
-        #[serde(rename = "@xmlns")]
-        pub xmlns: &'static str,
-        #[serde(rename = "@status")]
-        pub status: ResponseStatus,
-        #[serde(rename = "@version")]
-        pub version: &'static str,
-        #[serde(rename = "@type")]
-        pub server_type: &'static str,
-        #[serde(rename = "@serverVersion")]
-        pub server_version: &'static str,
-        #[serde(rename = "@openSubsonic")]
-        pub open_subsonic: bool,
-        #[serde(rename = "bookmarks")]
-        pub bookmarks: Bookmarks,
-    }
-
-    impl BookmarksResponse {
-        pub const fn new() -> Self {
-            Self {
-                xmlns: "http://subsonic.org/restapi",
-                status: ResponseStatus::Ok,
-                version: API_VERSION,
-                server_type: SERVER_NAME,
-                server_version: SERVER_VERSION,
-                open_subsonic: true,
-                bookmarks: Bookmarks {},
-            }
+    xml_response! {
+        pub struct InternetRadioStationsResponse {
+            #[serde(rename = "internetRadioStations")]
+            pub internet_radio_stations: super::InternetRadioStationsResponse
         }
     }
 
@@ -696,9 +675,6 @@ mod json {
     use super::Serialize;
 
     #[derive(Debug, Serialize)]
-    pub struct Empty;
-
-    #[derive(Debug, Serialize)]
     pub struct ScanStatusJson {
         pub scanning: bool,
         pub count: u64,
@@ -790,7 +766,8 @@ enum ResponseKind {
     User(UserResponse),
     Users(UsersResponse),
     ScanStatus(ScanStatusData),
-    Bookmarks,
+    Bookmarks(BookmarksResponse),
+    InternetRadioStations(InternetRadioStationsResponse),
     ArtistInfo2(ArtistInfo2Response),
     AlbumInfo(AlbumInfoResponse),
     SimilarSongs2(SimilarSongs2Response),
@@ -846,8 +823,16 @@ impl SubsonicResponse {
     }
 
     #[must_use]
-    pub const fn bookmarks(format: Format) -> Self {
-        Self::new(format, ResponseKind::Bookmarks)
+    pub const fn bookmarks(format: Format, payload: BookmarksResponse) -> Self {
+        Self::new(format, ResponseKind::Bookmarks(payload))
+    }
+
+    #[must_use]
+    pub const fn internet_radio_stations(
+        format: Format,
+        payload: InternetRadioStationsResponse,
+    ) -> Self {
+        Self::new(format, ResponseKind::InternetRadioStations(payload))
     }
 
     response_constructor!(
@@ -992,7 +977,12 @@ impl SubsonicResponse {
             ResponseKind::ScanStatus(data) => {
                 quick_xml::se::to_string(&xml::ScanStatusResponse::from_data(&data))
             }
-            ResponseKind::Bookmarks => quick_xml::se::to_string(&xml::BookmarksResponse::new()),
+            ResponseKind::Bookmarks(bookmarks) => {
+                quick_xml::se::to_string(&xml::BookmarksResponse::new(bookmarks))
+            }
+            ResponseKind::InternetRadioStations(stations) => {
+                quick_xml::se::to_string(&xml::InternetRadioStationsResponse::new(stations))
+            }
             ResponseKind::ArtistInfo2(artist_info2) => {
                 quick_xml::se::to_string(&xml::ArtistInfo2Response::new(artist_info2))
             }
@@ -1115,7 +1105,10 @@ impl SubsonicResponse {
             ResponseKind::ScanStatus(data) => {
                 json_named("scanStatus", json::ScanStatusJson::from_data(&data))
             }
-            ResponseKind::Bookmarks => json_named("bookmarks", json::Empty),
+            ResponseKind::Bookmarks(bookmarks) => json_named("bookmarks", bookmarks),
+            ResponseKind::InternetRadioStations(stations) => {
+                json_named("internetRadioStations", stations)
+            }
             ResponseKind::ArtistInfo2(artist_info2) => json_named("artistInfo2", artist_info2),
             ResponseKind::AlbumInfo(album_info) => json_named("albumInfo", album_info),
             ResponseKind::SimilarSongs2(similar_songs2) => {
@@ -1281,20 +1274,39 @@ mod tests {
 
         assert_eq!(
             names,
-            ["apiKeyAuthentication", "songLyrics", "remoteControl"]
+            [
+                "apiKeyAuthentication",
+                "formPost",
+                "indexBasedQueue",
+                "playbackReport",
+                "remoteControl",
+                "songLyrics",
+            ]
         );
-        assert!(extensions.iter().all(|extension| extension.versions == [1]));
+        assert!(
+            extensions
+                .iter()
+                .all(|extension| !extension.versions.is_empty())
+        );
     }
 
     #[test]
-    fn supported_extensions_do_not_advertise_form_post() {
+    fn supported_extensions_match_implemented_features() {
         let extensions = supported_extensions();
 
+        // songLyrics v2: multiple structured lyrics per song
+        let song_lyrics = extensions
+            .iter()
+            .find(|extension| extension.name == "songLyrics")
+            .expect("songLyrics must be advertised");
+        assert_eq!(song_lyrics.versions, [1, 2]);
+
+        // Every other extension is version 1 only
         assert!(
-            !extensions
+            extensions
                 .iter()
-                .any(|extension| extension.name == "formPost"),
-            "formPost requires reading endpoint parameters from request bodies"
+                .filter(|extension| extension.name != "songLyrics")
+                .all(|extension| extension.versions == [1])
         );
     }
 

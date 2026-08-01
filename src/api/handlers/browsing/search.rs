@@ -11,19 +11,19 @@ use crate::api::error::ApiError;
 use crate::api::handlers::util;
 use crate::api::response::SubsonicResponse;
 use crate::models::music::{
-    AlbumID3Response, ArtistID3Response, ArtistResponse, ChildResponse, SearchMatch,
-    SearchResult2Response, SearchResult3Response, SearchResultResponse, format_subsonic_datetime,
-    saturating_i64_to_i32,
+    ArtistID3Response, ArtistResponse, ChildResponse, SearchMatch, SearchResult2Response,
+    SearchResult3Response, SearchResultResponse, format_subsonic_datetime, saturating_i64_to_i32,
 };
 
-struct SearchLimits<'a> {
-    query: &'a str,
+struct SearchLimits {
+    query: String,
     artist_count: i64,
     artist_offset: i64,
     album_count: i64,
     album_offset: i64,
     song_count: i64,
     song_offset: i64,
+    music_folder_id: Option<i32>,
 }
 
 struct SearchData {
@@ -32,37 +32,56 @@ struct SearchData {
     songs: Vec<crate::models::music::Song>,
 }
 
-struct SearchStars {
-    artists: HashMap<i32, NaiveDateTime>,
-    albums: HashMap<i32, NaiveDateTime>,
-    songs: HashMap<i32, NaiveDateTime>,
+fn search_artist_stars(
+    auth: &SubsonicContext,
+    data: &SearchData,
+) -> Result<HashMap<i32, NaiveDateTime>, Box<Response>> {
+    let artist_ids: Vec<i32> = data.artists.iter().map(|artist| artist.id).collect();
+    auth.music()
+        .get_starred_at_for_artists_batch(auth.user.id, &artist_ids)
+        .map_err(|error| Box::new(util::service_error(auth, error)))
 }
 
-fn search_limits(params: &SearchParamsV2) -> SearchLimits<'_> {
-    let raw_query = params.query.as_deref().unwrap_or("").trim();
+fn search_limits(params: &SearchParamsV2) -> SearchLimits {
     SearchLimits {
-        query: raw_query.trim_matches('"').trim(),
+        query: crate::models::music::normalize_search_query(params.query.as_deref().unwrap_or("")),
         artist_count: params.artist_count.unwrap_or(20).clamp(0, 500),
         artist_offset: params.artist_offset.unwrap_or(0).max(0),
         album_count: params.album_count.unwrap_or(20).clamp(0, 500),
         album_offset: params.album_offset.unwrap_or(0).max(0),
         song_count: params.song_count.unwrap_or(20).clamp(0, 500),
         song_offset: params.song_offset.unwrap_or(0).max(0),
+        music_folder_id: params.music_folder_id,
     }
 }
 
-fn search_data(auth: &SubsonicContext, limits: &SearchLimits<'_>) -> Result<SearchData, ApiError> {
+fn search_data(auth: &SubsonicContext, limits: &SearchLimits) -> Result<SearchData, ApiError> {
     let artists = auth
         .music()
-        .search_artists(limits.query, limits.artist_offset, limits.artist_count)
+        .search_artists(
+            &limits.query,
+            limits.music_folder_id,
+            limits.artist_offset,
+            limits.artist_count,
+        )
         .map_err(|e| ApiError::Generic(e.to_string()))?;
     let albums = auth
         .music()
-        .search_albums(limits.query, limits.album_offset, limits.album_count)
+        .search_albums(
+            &limits.query,
+            limits.music_folder_id,
+            limits.album_offset,
+            limits.album_count,
+        )
         .map_err(|e| ApiError::Generic(e.to_string()))?;
     let songs = auth
         .music()
-        .search_songs(limits.query, limits.song_offset, limits.song_count)
+        .search_songs(
+            &limits.query,
+            limits.music_folder_id,
+            limits.song_offset,
+            limits.song_count,
+        )
         .map_err(|e| ApiError::Generic(e.to_string()))?;
 
     Ok(SearchData {
@@ -72,29 +91,14 @@ fn search_data(auth: &SubsonicContext, limits: &SearchLimits<'_>) -> Result<Sear
     })
 }
 
-fn search_stars(auth: &SubsonicContext, data: &SearchData) -> Result<SearchStars, Box<Response>> {
-    let artist_ids: Vec<i32> = data.artists.iter().map(|artist| artist.id).collect();
+fn search_album_stars(
+    auth: &SubsonicContext,
+    data: &SearchData,
+) -> Result<HashMap<i32, NaiveDateTime>, Box<Response>> {
     let album_ids: Vec<i32> = data.albums.iter().map(|album| album.id).collect();
-    let song_ids: Vec<i32> = data.songs.iter().map(|song| song.id).collect();
-
-    let artists = auth
-        .music()
-        .get_starred_at_for_artists_batch(auth.user.id, &artist_ids)
-        .map_err(|error| Box::new(util::service_error(auth, error)))?;
-    let albums = auth
-        .music()
+    auth.music()
         .get_starred_at_for_albums_batch(auth.user.id, &album_ids)
-        .map_err(|error| Box::new(util::service_error(auth, error)))?;
-    let songs = auth
-        .music()
-        .get_starred_at_for_songs_batch(auth.user.id, &song_ids)
-        .map_err(|error| Box::new(util::service_error(auth, error)))?;
-
-    Ok(SearchStars {
-        artists,
-        albums,
-        songs,
-    })
+        .map_err(|error| Box::new(util::service_error(auth, error)))
 }
 
 /// Query parameters for search3/search2.
@@ -149,7 +153,7 @@ pub async fn search3(
             return util::service_error(&auth, error);
         }
     };
-    let stars = match search_stars(&auth, &data) {
+    let artist_stars = match search_artist_stars(&auth, &data) {
         Ok(stars) => stars,
         Err(response) => return *response,
     };
@@ -160,7 +164,7 @@ pub async fn search3(
         .iter()
         .map(|a| {
             let album_count = artist_album_counts.get(&a.id).copied().unwrap_or(0);
-            let starred_at = stars.artists.get(&a.id);
+            let starred_at = artist_stars.get(&a.id);
             ArtistID3Response::from_artist_with_starred(
                 a,
                 Some(saturating_i64_to_i32(album_count)),
@@ -169,23 +173,14 @@ pub async fn search3(
         })
         .collect();
 
-    let album_responses: Vec<AlbumID3Response> = data
-        .albums
-        .iter()
-        .map(|a| {
-            let starred_at = stars.albums.get(&a.id);
-            AlbumID3Response::from_album_with_starred(a, starred_at)
-        })
-        .collect();
-
-    let song_responses: Vec<ChildResponse> = data
-        .songs
-        .iter()
-        .map(|s| {
-            let starred_at = stars.songs.get(&s.id);
-            ChildResponse::from_song_with_starred(s, starred_at)
-        })
-        .collect();
+    let album_responses = match util::annotate_albums(&auth, &data.albums) {
+        Ok(responses) => responses,
+        Err(error) => return util::service_error(&auth, error),
+    };
+    let song_responses = match util::annotate_songs(&auth, &data.songs) {
+        Ok(responses) => responses,
+        Err(error) => return util::service_error(&auth, error),
+    };
 
     let response = SearchResult3Response {
         artists: artist_responses,
@@ -209,7 +204,11 @@ pub async fn search2(
         Err(error) => return util::api_error(&auth, &error),
     };
 
-    let stars = match search_stars(&auth, &data) {
+    let artist_stars = match search_artist_stars(&auth, &data) {
+        Ok(stars) => stars,
+        Err(response) => return *response,
+    };
+    let album_stars = match search_album_stars(&auth, &data) {
         Ok(stars) => stars,
         Err(response) => return *response,
     };
@@ -219,7 +218,7 @@ pub async fn search2(
         .artists
         .iter()
         .map(|a| {
-            let starred_at = stars.artists.get(&a.id);
+            let starred_at = artist_stars.get(&a.id);
             ArtistResponse::from_artist_with_starred(a, starred_at)
         })
         .collect();
@@ -228,21 +227,17 @@ pub async fn search2(
         .albums
         .iter()
         .map(|a| {
-            let starred_at = stars.albums.get(&a.id);
+            let starred_at = album_stars.get(&a.id);
             let mut response = ChildResponse::from_album_as_dir(a);
             response.starred = starred_at.map(format_subsonic_datetime);
             response
         })
         .collect();
 
-    let song_responses: Vec<ChildResponse> = data
-        .songs
-        .iter()
-        .map(|s| {
-            let starred_at = stars.songs.get(&s.id);
-            ChildResponse::from_song_with_starred(s, starred_at)
-        })
-        .collect();
+    let song_responses = match util::annotate_songs(&auth, &data.songs) {
+        Ok(responses) => responses,
+        Err(error) => return util::service_error(&auth, error),
+    };
 
     let response = SearchResult2Response {
         artists: artist_responses,
@@ -291,10 +286,9 @@ pub async fn search(
         .or(params.title.as_deref())
         .or(params.album.as_deref())
         .or(params.artist.as_deref())
-        .unwrap_or("")
-        .trim();
+        .unwrap_or("");
 
-    let songs = match auth.music().search_songs(query, offset, count) {
+    let songs = match auth.music().search_songs(query, None, offset, count) {
         Ok(songs) => songs,
         Err(error) => {
             return util::service_error(&auth, error);
@@ -322,13 +316,13 @@ mod tests {
     use super::{SearchParamsV2, search_limits};
 
     #[test]
-    fn search_limits_trim_wrapping_quotes_and_outer_whitespace() {
+    fn search_limits_normalize_wrapping_quotes_and_fold_case() {
         let params = SearchParamsV2 {
             query: Some(" \" Miles Davis \" ".to_string()),
             ..SearchParamsV2::default()
         };
 
-        assert_eq!(search_limits(&params).query, "Miles Davis");
+        assert_eq!(search_limits(&params).query, "miles davis");
     }
 
     #[test]
