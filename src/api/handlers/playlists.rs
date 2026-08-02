@@ -7,7 +7,8 @@ use crate::api::handlers::util;
 use crate::api::response::SubsonicResponse;
 use crate::db::Playlist;
 use crate::models::music::{
-    PlaylistResponse, PlaylistWithSongsResponse, PlaylistsResponse, Song, format_subsonic_datetime,
+    EntityId, PlaylistResponse, PlaylistWithSongsResponse, PlaylistsResponse, Song,
+    format_subsonic_datetime, playlist_api_id,
 };
 
 fn playlist_with_songs_response(
@@ -20,7 +21,7 @@ fn playlist_with_songs_response(
     let cover_art = songs.first().and_then(|song| song.cover_art.clone());
 
     Ok(PlaylistWithSongsResponse {
-        id: playlist.id.to_string(),
+        id: playlist_api_id(playlist.id),
         name: playlist.name.clone(),
         comment: playlist.comment.clone(),
         owner: playlist.owner.clone(),
@@ -89,7 +90,7 @@ pub async fn get_playlists(
         .map(|p| {
             let cover_art = cover_arts.get(&p.id).cloned();
             PlaylistResponse {
-                id: p.id.to_string(),
+                id: playlist_api_id(p.id),
                 name: p.name.clone(),
                 comment: p.comment.clone(),
                 owner: p.owner.clone(),
@@ -128,7 +129,7 @@ pub async fn get_playlist(
     let Some(id_str) = params.id.as_ref() else {
         return util::missing_param(&auth, "id");
     };
-    let Ok(playlist_id) = id_str.parse::<i32>() else {
+    let Some(playlist_id) = EntityId::parse_playlist(id_str) else {
         return util::service_error(&auth, format!("Invalid id: {id_str}"));
     };
 
@@ -171,7 +172,7 @@ pub struct CreatePlaylistParams {
     pub name: Option<String>,
     /// IDs of songs to add (can be repeated).
     #[serde(rename = "songId")]
-    pub song_id: Vec<i32>,
+    pub song_id: Vec<String>,
 }
 
 /// GET/POST /rest/createPlaylist[.view]
@@ -191,10 +192,13 @@ pub async fn create_playlist(
     }
 
     let user_id = auth.user.id;
-    let song_ids = params.song_id;
+    let song_ids = match util::parse_song_ids(&auth, &params.song_id, "songId") {
+        Ok(ids) => ids,
+        Err(response) => return *response,
+    };
 
     if let Some(playlist_id_str) = params.playlist_id.as_ref() {
-        let Ok(playlist_id) = playlist_id_str.parse::<i32>() else {
+        let Some(playlist_id) = EntityId::parse_playlist(playlist_id_str) else {
             return util::service_error(&auth, "Invalid playlistId");
         };
 
@@ -287,7 +291,7 @@ pub struct UpdatePlaylistParams {
     pub public: Option<bool>,
     /// Song IDs to add (can be repeated).
     #[serde(rename = "songIdToAdd")]
-    pub song_id_to_add: Vec<i32>,
+    pub song_id_to_add: Vec<String>,
     /// Indices (0-based) of songs to remove (can be repeated).
     #[serde(rename = "songIndexToRemove")]
     pub song_index_to_remove: Vec<i32>,
@@ -317,7 +321,7 @@ pub async fn update_playlist(
     let Some(id_str) = params.playlist_id.as_ref() else {
         return util::missing_param(&auth, "playlistId");
     };
-    let Ok(playlist_id) = id_str.parse::<i32>() else {
+    let Some(playlist_id) = EntityId::parse_playlist(id_str) else {
         return util::service_error(&auth, format!("Invalid playlistId: {id_str}"));
     };
 
@@ -329,12 +333,17 @@ pub async fn update_playlist(
         }
     }
 
+    let song_ids_to_add = match util::parse_song_ids(&auth, &params.song_id_to_add, "songIdToAdd") {
+        Ok(ids) => ids,
+        Err(response) => return *response,
+    };
+
     match auth.music().update_playlist(
         playlist_id,
         params.name.as_deref(),
         params.comment.as_deref(),
         params.public,
-        &params.song_id_to_add,
+        &song_ids_to_add,
         &params.song_index_to_remove,
     ) {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
@@ -364,7 +373,7 @@ pub async fn delete_playlist(
     let Some(id_str) = params.id.as_ref() else {
         return util::missing_param(&auth, "id");
     };
-    let Ok(playlist_id) = id_str.parse::<i32>() else {
+    let Some(playlist_id) = EntityId::parse_playlist(id_str) else {
         return util::service_error(&auth, format!("Invalid id: {id_str}"));
     };
 

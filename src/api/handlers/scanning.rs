@@ -1,10 +1,12 @@
 //! Library scanning API handlers (startScan, getScanStatus)
 
 use axum::response::IntoResponse;
+use serde::Deserialize;
 
 use crate::api::auth::SubsonicContext;
+use crate::api::handlers::util;
 use crate::api::response::{ScanStatusData, SubsonicResponse};
-use crate::scanner::Scanner;
+use crate::scanner::{ScanMode, Scanner};
 
 /// Build a `ScanStatusData` from the current scan state.
 fn build_scan_status_data(auth: &SubsonicContext) -> ScanStatusData {
@@ -18,18 +20,41 @@ fn build_scan_status_data(auth: &SubsonicContext) -> ScanStatusData {
     }
 }
 
+/// Query parameters for startScan.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+#[serde(rename_all = "camelCase")]
+pub struct StartScanParams {
+    /// Whether to re-scan all files regardless of modification time.
+    pub full_scan: Option<bool>,
+}
+
 /// GET/POST /rest/startScan[.view]
 ///
 /// Initiates a media library scan. If a scan is already in progress,
 /// returns the current status without starting a new scan.
+/// Admin only. Without `fullScan`, performs an incremental scan.
 ///
 /// Returns: scanStatus with scanning=true/false and count of items scanned.
-pub async fn start_scan(auth: SubsonicContext) -> impl IntoResponse {
+pub async fn start_scan(
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<StartScanParams>,
+    auth: SubsonicContext,
+) -> impl IntoResponse {
+    if !auth.user.is_admin() {
+        return util::unauthorized(&auth);
+    }
+
     let scan_state = auth.scan_state().clone();
     let pool = auth.pool().clone();
     let Some(guard) = scan_state.try_start() else {
         let data = build_scan_status_data(&auth);
-        return SubsonicResponse::scan_status(auth.format, data);
+        return SubsonicResponse::scan_status(auth.format, data).into_response();
+    };
+
+    let mode = if params.full_scan.unwrap_or(false) {
+        ScanMode::Full
+    } else {
+        ScanMode::Incremental
     };
 
     // Spawn background task to run the scan.
@@ -37,7 +62,7 @@ pub async fn start_scan(auth: SubsonicContext) -> impl IntoResponse {
         let result = tokio::task::spawn_blocking(move || {
             let scanner = Scanner::new(pool);
             let _guard = guard;
-            scanner.scan_all_with_state(Some(&scan_state))
+            scanner.scan_all_with_options(Some(&scan_state), mode)
         })
         .await;
 
@@ -66,7 +91,7 @@ pub async fn start_scan(auth: SubsonicContext) -> impl IntoResponse {
 
     // Return current status (scanning should be true now)
     let data = build_scan_status_data(&auth);
-    SubsonicResponse::scan_status(auth.format, data)
+    SubsonicResponse::scan_status(auth.format, data).into_response()
 }
 
 /// GET/POST /rest/getScanStatus[.view]

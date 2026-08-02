@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 
 use axum::response::IntoResponse;
+use serde::Deserialize;
 
 use crate::api::auth::SubsonicContext;
 use crate::api::handlers::util;
@@ -11,6 +12,26 @@ use crate::models::music::{
     Artist, ArtistID3Response, ArtistResponse, ArtistsID3Response, IndexID3Response, IndexResponse,
     IndexesResponse, MusicFolderResponse, saturating_i64_to_i32,
 };
+
+/// Query parameters for getIndexes/getArtists.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexesParams {
+    /// Only return data if the library changed since this time (epoch millis).
+    pub if_modified_since: Option<i64>,
+}
+
+/// Resolve the library lastModified time in epoch millis: the latest of the
+/// last completed scan and the last artist update.
+fn library_last_modified(auth: &SubsonicContext) -> Result<i64, crate::db::MusicRepoError> {
+    let scan_ms = auth.music().get_last_scan_at_ms()?;
+    let artists_ms = auth
+        .music()
+        .get_artists_last_modified()?
+        .map_or(0, |dt| dt.and_utc().timestamp_millis());
+    Ok(scan_ms.unwrap_or(0).max(artists_ms))
+}
 
 fn artist_index_key(artist: &Artist) -> String {
     let first_char = artist
@@ -50,7 +71,27 @@ pub async fn get_music_folders(auth: SubsonicContext) -> impl IntoResponse {
 ///
 /// Returns an indexed structure of all artists.
 /// This is used by older clients that use the folder-based browsing model.
-pub async fn get_indexes(auth: SubsonicContext) -> impl IntoResponse {
+/// When `ifModifiedSince` is given and the library hasn't changed since,
+/// returns an empty index list with the current `lastModified` time.
+pub async fn get_indexes(
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<IndexesParams>,
+    auth: SubsonicContext,
+) -> impl IntoResponse {
+    let last_modified = match library_last_modified(&auth) {
+        Ok(value) => value,
+        Err(e) => return util::service_error(&auth, e),
+    };
+
+    // Not modified since the client's cached version: return empty indexes
+    if last_modified > 0 && params.if_modified_since.unwrap_or(0) >= last_modified {
+        let response = IndexesResponse {
+            ignored_articles: "The El La Los Las Le Les".to_string(),
+            last_modified,
+            indexes: Vec::new(),
+        };
+        return SubsonicResponse::indexes(auth.format, response).into_response();
+    }
+
     let artists = match auth.music().get_artists() {
         Ok(artists) => artists,
         Err(e) => {
@@ -89,14 +130,6 @@ pub async fn get_indexes(auth: SubsonicContext) -> impl IntoResponse {
         .map(|(name, artists)| IndexResponse { name, artists })
         .collect();
 
-    // Get last modified time (using current timestamp for now)
-    let last_modified = match auth.music().get_artists_last_modified() {
-        Ok(value) => value.map_or(0, |dt| dt.and_utc().timestamp_millis()),
-        Err(e) => {
-            return util::service_error(&auth, e);
-        }
-    };
-
     let response = IndexesResponse {
         ignored_articles: "The El La Los Las Le Les".to_string(),
         last_modified,
@@ -110,7 +143,17 @@ pub async fn get_indexes(auth: SubsonicContext) -> impl IntoResponse {
 ///
 /// Similar to getIndexes, but returns artists using ID3 tags.
 /// This is the preferred endpoint for modern clients.
-pub async fn get_artists(auth: SubsonicContext) -> impl IntoResponse {
+/// Unlike getIndexes, `ifModifiedSince` is ignored (navidrome-compatible).
+pub async fn get_artists(
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<IndexesParams>,
+    auth: SubsonicContext,
+) -> impl IntoResponse {
+    let _ = params.if_modified_since;
+    let last_modified = match library_last_modified(&auth) {
+        Ok(value) => value,
+        Err(e) => return util::service_error(&auth, e),
+    };
+
     let artists = match auth.music().get_artists() {
         Ok(artists) => artists,
         Err(e) => {
@@ -164,6 +207,7 @@ pub async fn get_artists(auth: SubsonicContext) -> impl IntoResponse {
 
     let response = ArtistsID3Response {
         ignored_articles: "The El La Los Las Le Les".to_string(),
+        last_modified,
         indexes,
     };
 

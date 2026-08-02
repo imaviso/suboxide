@@ -107,6 +107,8 @@ fn similar_songs_for_seed(
 }
 
 fn similar_songs_seed(params: &SimilarSongs2Params) -> Result<SimilarSongsSeed, ApiError> {
+    use crate::models::music::EntityId;
+
     let seed_count = usize::from(params.song_id.is_some())
         + usize::from(params.album_id.is_some())
         + usize::from(params.artist_id.is_some());
@@ -115,20 +117,24 @@ fn similar_songs_seed(params: &SimilarSongs2Params) -> Result<SimilarSongsSeed, 
         0 => Err(ApiError::MissingParameter(
             "songId, albumId, or artistId".into(),
         )),
-        1 => params.song_id.map_or_else(
-            || {
-                params.album_id.map_or_else(
-                    || {
-                        params.artist_id.map_or_else(
-                            || unreachable!("seed_count verified exactly one seed"),
-                            |artist_id| Ok(SimilarSongsSeed::Artist(artist_id)),
-                        )
-                    },
-                    |album_id| Ok(SimilarSongsSeed::Album(album_id)),
-                )
-            },
-            |song_id| Ok(SimilarSongsSeed::Song(song_id)),
-        ),
+        1 => {
+            if let Some(id) = params.song_id.as_deref() {
+                return EntityId::parse_song(id)
+                    .map(SimilarSongsSeed::Song)
+                    .ok_or_else(|| ApiError::Generic("Invalid songId".into()));
+            }
+            if let Some(id) = params.album_id.as_deref() {
+                return EntityId::parse_album(id)
+                    .map(SimilarSongsSeed::Album)
+                    .ok_or_else(|| ApiError::Generic("Invalid albumId".into()));
+            }
+            if let Some(id) = params.artist_id.as_deref() {
+                return EntityId::parse_artist(id)
+                    .map(SimilarSongsSeed::Artist)
+                    .ok_or_else(|| ApiError::Generic("Invalid artistId".into()));
+            }
+            unreachable!("seed_count verified exactly one seed")
+        }
         _ => Err(ApiError::Generic(
             "Specify exactly one of songId, albumId, or artistId".into(),
         )),
@@ -426,13 +432,13 @@ pub async fn get_top_songs(
 pub struct SimilarSongs2Params {
     /// The song ID to use as similarity seed.
     #[serde(rename = "songId")]
-    pub song_id: Option<i32>,
+    pub song_id: Option<String>,
     /// The album ID to use as similarity seed.
     #[serde(rename = "albumId")]
-    pub album_id: Option<i32>,
+    pub album_id: Option<String>,
     /// The artist ID to use as similarity seed.
     #[serde(rename = "artistId")]
-    pub artist_id: Option<i32>,
+    pub artist_id: Option<String>,
     /// Max number of similar songs to return. Default 50.
     pub count: Option<i64>,
 }
@@ -609,8 +615,8 @@ mod tests {
         );
 
         let duplicate = similar_songs_seed(&SimilarSongs2Params {
-            song_id: Some(1),
-            album_id: Some(2),
+            song_id: Some("mf-1".to_string()),
+            album_id: Some("al-2".to_string()),
             artist_id: None,
             count: None,
         })
@@ -625,11 +631,23 @@ mod tests {
         let seed = similar_songs_seed(&SimilarSongs2Params {
             song_id: None,
             album_id: None,
-            artist_id: Some(42),
+            artist_id: Some("ar-42".to_string()),
             count: None,
         })
         .expect("single artist seed should parse");
 
         assert!(matches!(seed, SimilarSongsSeed::Artist(42)));
+    }
+
+    #[test]
+    fn similar_songs_seed_rejects_invalid_ids() {
+        let invalid = similar_songs_seed(&SimilarSongs2Params {
+            song_id: Some("bogus".to_string()),
+            album_id: None,
+            artist_id: None,
+            count: None,
+        })
+        .expect_err("invalid id should fail");
+        assert!(matches!(invalid, ApiError::Generic(message) if message == "Invalid songId"));
     }
 }

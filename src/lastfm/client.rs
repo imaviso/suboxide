@@ -472,7 +472,7 @@ mod tests {
         let LastFmClientInner::Live(cloned_inner) = &cloned.inner else {
             panic!("configured client clone must be live");
         };
-        assert!(std::ptr::eq(&**client_inner, &**cloned_inner));
+        assert!(std::ptr::eq(client_inner.as_ref(), cloned_inner.as_ref()));
     }
 
     #[test]
@@ -517,15 +517,21 @@ mod tests {
     #[test]
     fn new_returns_disabled_when_credentials_are_empty() {
         assert!(matches!(
-            LastFmClient::new("".into(), "secret".into()).unwrap().inner,
+            LastFmClient::new(String::new(), "secret".into())
+                .unwrap()
+                .inner,
             LastFmClientInner::Disabled
         ));
         assert!(matches!(
-            LastFmClient::new("key".into(), "".into()).unwrap().inner,
+            LastFmClient::new("key".into(), String::new())
+                .unwrap()
+                .inner,
             LastFmClientInner::Disabled
         ));
         assert!(matches!(
-            LastFmClient::new("".into(), "".into()).unwrap().inner,
+            LastFmClient::new(String::new(), String::new())
+                .unwrap()
+                .inner,
             LastFmClientInner::Disabled
         ));
     }

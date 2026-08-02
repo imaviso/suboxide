@@ -251,6 +251,14 @@ impl Scanner {
             )));
         }
 
+        // Record scan completion time for getIndexes/getArtists lastModified
+        if let Err(e) = crate::db::SettingsRepository::new(self.pool.clone()).set(
+            crate::db::SETTING_LAST_SCAN_AT,
+            &chrono::Utc::now().timestamp_millis().to_string(),
+        ) {
+            eprintln!("Warning: failed to record scan completion time: {e}");
+        }
+
         Ok(total_result)
     }
 

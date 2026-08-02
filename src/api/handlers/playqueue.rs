@@ -9,6 +9,7 @@ use crate::api::response::SubsonicResponse;
 use crate::db::PlayQueue;
 use crate::models::music::{
     ChildResponse, PlayQueueByIndexResponse, PlayQueueResponse, format_subsonic_datetime,
+    song_api_id,
 };
 
 fn play_queue_entries(
@@ -28,7 +29,7 @@ fn play_queue_response(
         current: play_queue
             .current_song
             .as_ref()
-            .map(|song| song.id.to_string()),
+            .map(|song| song_api_id(song.id)),
         position: play_queue.position,
         username: play_queue.username,
         changed: format_subsonic_datetime(&play_queue.changed_at),
@@ -98,9 +99,9 @@ pub async fn get_play_queue(auth: SubsonicContext) -> impl IntoResponse {
 pub struct SavePlayQueueParams {
     /// IDs of songs in the play queue (can be repeated).
     #[serde(rename = "id")]
-    song_id: Vec<i32>,
+    song_id: Vec<String>,
     /// The ID of the currently playing song.
-    current: Option<i32>,
+    current: Option<String>,
     /// Position in milliseconds within the currently playing song.
     position: Option<i64>,
 }
@@ -118,7 +119,17 @@ pub async fn save_play_queue(
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let user_id = auth.user.id;
-    let song_ids = params.song_id;
+    let song_ids = match util::parse_song_ids(&auth, &params.song_id, "id") {
+        Ok(ids) => ids,
+        Err(response) => return *response,
+    };
+    let current = match params.current.as_deref() {
+        Some(current) => match crate::models::music::EntityId::parse_song(current) {
+            Some(id) => Some(id),
+            None => return util::service_error(&auth, format!("Invalid current: {current}")),
+        },
+        None => None,
+    };
 
     let changed_by = if auth.params.c.is_empty() {
         None
@@ -126,13 +137,10 @@ pub async fn save_play_queue(
         Some(auth.params.c.as_str())
     };
 
-    match auth.music().save_play_queue(
-        user_id,
-        &song_ids,
-        params.current,
-        params.position,
-        changed_by,
-    ) {
+    match auth
+        .music()
+        .save_play_queue(user_id, &song_ids, current, params.position, changed_by)
+    {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
         Err(e) => util::service_error(&auth, e),
     }
@@ -177,7 +185,7 @@ pub async fn get_play_queue_by_index(auth: SubsonicContext) -> impl IntoResponse
 pub struct SavePlayQueueByIndexParams {
     /// IDs of songs in the play queue (can be repeated).
     #[serde(rename = "id")]
-    song_id: Vec<i32>,
+    song_id: Vec<String>,
     /// The index of the currently playing song (0-based).
     #[serde(rename = "currentIndex")]
     current_index: Option<usize>,
@@ -201,7 +209,10 @@ pub async fn save_play_queue_by_index(
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let user_id = auth.user.id;
-    let song_ids = params.song_id;
+    let song_ids = match util::parse_song_ids(&auth, &params.song_id, "id") {
+        Ok(ids) => ids,
+        Err(response) => return *response,
+    };
 
     let current_song_id = params
         .current_index

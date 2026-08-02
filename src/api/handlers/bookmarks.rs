@@ -65,7 +65,11 @@ pub async fn create_bookmark(
     crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<CreateBookmarkParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
-    let Some(song_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+    let Some(song_id) = params
+        .id
+        .as_deref()
+        .and_then(crate::models::music::EntityId::parse_song)
+    else {
         return util::missing_param(&auth, "id");
     };
     let Some(position) = params.position else {
@@ -99,7 +103,11 @@ pub async fn delete_bookmark(
     crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<DeleteBookmarkParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
-    let Some(song_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+    let Some(song_id) = params
+        .id
+        .as_deref()
+        .and_then(crate::models::music::EntityId::parse_song)
+    else {
         return util::missing_param(&auth, "id");
     };
 

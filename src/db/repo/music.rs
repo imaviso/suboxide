@@ -1107,7 +1107,7 @@ mod search_tests {
         assert_eq!(albums.len(), 1);
         assert_eq!(albums[0].name, "Crème de la Crème");
 
-        let songs = SongRepository::new(pool.clone())
+        let songs = SongRepository::new(pool)
             .search("AGUAS DE MARCO", None, 0, 20)
             .expect("song search must succeed");
         assert_eq!(songs.len(), 1);
@@ -1139,7 +1139,7 @@ mod search_tests {
         assert_eq!(artists[0].name, "Plain Artist");
 
         // Query + folder filter compose
-        let songs = SongRepository::new(pool.clone())
+        let songs = SongRepository::new(pool)
             .search("aguas", Some(folder2), 0, 20)
             .expect("song search must succeed");
         assert!(songs.is_empty());
@@ -1150,7 +1150,7 @@ mod search_tests {
         let pool = test_pool();
         seed(&pool);
 
-        let songs = SongRepository::new(pool.clone())
+        let songs = SongRepository::new(pool)
             .search("", None, 0, 20)
             .expect("song search must succeed");
         assert_eq!(songs.len(), 2);

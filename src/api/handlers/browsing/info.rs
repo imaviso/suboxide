@@ -16,7 +16,7 @@ use crate::models::music::{
 #[serde(default)]
 pub struct ArtistInfo2Params {
     /// The artist ID.
-    pub id: Option<i32>,
+    pub id: Option<String>,
     /// Max number of similar artists to return.
     pub count: Option<i32>,
     /// Whether to include artists that are not present in the media library.
@@ -33,7 +33,11 @@ pub async fn get_artist_info2(
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
-    let Some(artist_id) = params.id else {
+    let Some(artist_id) = params
+        .id
+        .as_deref()
+        .and_then(crate::models::music::EntityId::parse_artist)
+    else {
         return util::missing_param(&auth, "id");
     };
 
@@ -52,7 +56,7 @@ pub async fn get_artist_info2(
 #[serde(default)]
 pub struct AlbumInfo2Params {
     /// The album ID.
-    pub id: Option<i32>,
+    pub id: Option<String>,
 }
 
 /// GET/POST /rest/getAlbumInfo2[.view]
@@ -64,7 +68,11 @@ pub async fn get_album_info2(
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
-    let Some(album_id) = params.id else {
+    let Some(album_id) = params
+        .id
+        .as_deref()
+        .and_then(crate::models::music::EntityId::parse_album)
+    else {
         return util::missing_param(&auth, "id");
     };
 
@@ -92,7 +100,11 @@ pub async fn get_artist_info(
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
-    let Some(artist_id) = params.id else {
+    let Some(artist_id) = params
+        .id
+        .as_deref()
+        .and_then(crate::models::music::EntityId::parse_artist)
+    else {
         return util::missing_param(&auth, "id");
     };
 
@@ -114,7 +126,11 @@ pub async fn get_album_info(
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     // Get the required 'id' parameter
-    let Some(album_id) = params.id else {
+    let Some(album_id) = params
+        .id
+        .as_deref()
+        .and_then(crate::models::music::EntityId::parse_album)
+    else {
         return util::missing_param(&auth, "id");
     };
 
@@ -193,7 +209,11 @@ pub async fn get_lyrics_by_song_id(
     use crate::scanner::lyrics::{parse_lrc, parse_unsynced};
 
     // Get the required 'id' parameter
-    let Some(song_id) = params.id else {
+    let Some(song_id) = params
+        .id
+        .as_deref()
+        .and_then(crate::models::music::EntityId::parse_song)
+    else {
         return util::missing_param(&auth, "id");
     };
 

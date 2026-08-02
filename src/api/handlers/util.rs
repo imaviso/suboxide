@@ -35,6 +35,21 @@ pub(in crate::api::handlers) fn api_error(auth: &SubsonicContext, error: &ApiErr
     error_response(auth.format, error).into_response()
 }
 
+/// Parse API song ids (`mf-N` or bare integers), erroring on the first
+/// invalid value.
+pub(in crate::api::handlers) fn parse_song_ids(
+    auth: &SubsonicContext,
+    ids: &[String],
+    param_name: &str,
+) -> Result<Vec<i32>, Box<Response>> {
+    ids.iter()
+        .map(|id| {
+            crate::models::music::EntityId::parse_song(id)
+                .ok_or_else(|| Box::new(service_error(auth, format!("Invalid {param_name}: {id}"))))
+        })
+        .collect()
+}
+
 /// Build song responses with starred, rating, last-played, and bookmark data
 /// attached for the current user.
 pub(in crate::api::handlers) fn annotate_songs(

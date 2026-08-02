@@ -205,7 +205,11 @@ pub async fn stream(
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     // Get song ID
-    let Some(song_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+    let Some(song_id) = params
+        .id
+        .as_deref()
+        .and_then(crate::models::music::EntityId::parse_song)
+    else {
         return util::missing_param(&auth, "id");
     };
 
@@ -304,27 +308,22 @@ pub async fn stream(
         .into_response()
 }
 
-/// Download a song file.
+/// Download a song file, or a zip archive for an album/artist/playlist id.
 ///
 /// Similar to stream but with Content-Disposition header for downloading.
+/// `al-`, `ar-`, and `pl-` prefixed ids are served as zip archives
+/// (navidrome-compatible); bare and `mf-` ids serve the song directly.
 pub async fn download(
     crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<StreamParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
-    // Get song ID
-    let Some(song_id) = params.id.as_ref().and_then(|id| id.parse::<i32>().ok()) else {
+    use crate::models::music::EntityId;
+
+    let Some(id_str) = params.id.as_deref() else {
         return util::missing_param(&auth, "id");
     };
-
-    // Look up song in database
-    let song = match auth.music().get_song(song_id) {
-        Ok(Some(song)) => song,
-        Ok(None) => {
-            return util::not_found(&auth, "Song not found");
-        }
-        Err(e) => {
-            return util::service_error(&auth, e);
-        }
+    let Some(entity_id) = EntityId::parse(id_str) else {
+        return util::service_error(&auth, format!("Invalid id: {id_str}"));
     };
 
     // Check that user has download permission
@@ -332,16 +331,143 @@ pub async fn download(
         return util::unauthorized(&auth);
     }
 
+    match entity_id {
+        EntityId::Song(id) => match auth.music().get_song(id) {
+            Ok(Some(song)) => download_song(&auth, &song).await,
+            Ok(None) => util::not_found(&auth, "Song not found"),
+            Err(e) => util::service_error(&auth, e),
+        },
+        EntityId::Album(id) => match auth.music().get_album(id) {
+            Ok(Some(album)) => {
+                let songs = match auth.music().get_songs_by_album(id) {
+                    Ok(songs) => songs,
+                    Err(e) => return util::service_error(&auth, e),
+                };
+                zip_download(&auth, &album.name, album_zip_entries(songs), None)
+            }
+            Ok(None) => util::not_found(&auth, "Album not found"),
+            Err(e) => util::service_error(&auth, e),
+        },
+        EntityId::Artist(id) => match auth.music().get_artist(id) {
+            Ok(Some(artist)) => {
+                let songs = match auth.music().get_songs_by_artist(id) {
+                    Ok(songs) => songs,
+                    Err(e) => return util::service_error(&auth, e),
+                };
+                zip_download(&auth, &artist.name, artist_zip_entries(songs), None)
+            }
+            Ok(None) => util::not_found(&auth, "Artist not found"),
+            Err(e) => util::service_error(&auth, e),
+        },
+        EntityId::Playlist(id) => match auth.music().get_playlist(id) {
+            Ok(Some(playlist)) => {
+                let songs = match auth.music().get_playlist_songs(id) {
+                    Ok(songs) => songs,
+                    Err(e) => return util::service_error(&auth, e),
+                };
+                let (entries, m3u) = playlist_zip_entries(songs, &playlist.name);
+                zip_download(&auth, &playlist.name, entries, Some(m3u))
+            }
+            Ok(None) => util::not_found(&auth, "Playlist not found"),
+            Err(e) => util::service_error(&auth, e),
+        },
+    }
+}
+
+/// Whether the songs span more than one disc number.
+fn is_multi_disc(songs: &[&Song]) -> bool {
+    let mut discs: Vec<i32> = songs.iter().filter_map(|song| song.disc_number).collect();
+    discs.sort_unstable();
+    discs.dedup();
+    discs.len() > 1
+}
+
+/// Build zip entries for an album download.
+fn album_zip_entries(songs: Vec<Song>) -> Vec<(String, Song)> {
+    let refs: Vec<&Song> = songs.iter().collect();
+    let multi_disc = is_multi_disc(&refs);
+    songs
+        .into_iter()
+        .map(|song| (album_zip_entry_name(&song, multi_disc), song))
+        .collect()
+}
+
+/// Build zip entries for an artist download: albums sorted by name, with
+/// per-album multi-disc detection.
+fn artist_zip_entries(mut songs: Vec<Song>) -> Vec<(String, Song)> {
+    use std::collections::HashMap;
+
+    songs.sort_by_key(|song| {
+        (
+            song.album_name.clone().unwrap_or_default(),
+            song.disc_number.unwrap_or(1),
+            song.track_number.unwrap_or(0),
+        )
+    });
+
+    let mut albums: HashMap<String, Vec<&Song>> = HashMap::new();
+    for song in &songs {
+        albums
+            .entry(song.album_name.clone().unwrap_or_default())
+            .or_default()
+            .push(song);
+    }
+    let multi_disc_by_album: HashMap<String, bool> = albums
+        .into_iter()
+        .map(|(album, album_songs)| (album, is_multi_disc(&album_songs)))
+        .collect();
+
+    songs
+        .into_iter()
+        .map(|song| {
+            let multi_disc = multi_disc_by_album
+                .get(&song.album_name.clone().unwrap_or_default())
+                .copied()
+                .unwrap_or(false);
+            (album_zip_entry_name(&song, multi_disc), song)
+        })
+        .collect()
+}
+
+/// Build zip entries and an M3U index for a playlist download.
+fn playlist_zip_entries(
+    songs: Vec<Song>,
+    playlist_name: &str,
+) -> (Vec<(String, Song)>, (String, String)) {
+    use std::fmt::Write as _;
+
+    let mut m3u = format!("#EXTM3U\n#PLAYLIST:{playlist_name}\n");
+    let entries: Vec<(String, Song)> = songs
+        .into_iter()
+        .enumerate()
+        .map(|(index, song)| {
+            let entry_name = playlist_zip_entry_name(&song, index);
+            let _ = write!(
+                m3u,
+                "#EXTINF:{},{artist} - {title}\n{entry_name}\n",
+                song.duration,
+                artist = song.artist_name.as_deref().unwrap_or("Unknown Artist"),
+                title = song.title,
+            );
+            (entry_name, song)
+        })
+        .collect();
+    let m3u_name = format!("{}.m3u", sanitize_zip_component(playlist_name));
+    (entries, (m3u_name, m3u))
+}
+
+/// Serve a single song file as a download attachment.
+async fn download_song(auth: &SubsonicContext, song: &Song) -> axum::response::Response {
     // Validate the song path is within a music folder (prevents path traversal)
-    let Ok(path) = validate_song_path(&song, &auth) else {
-        return util::not_found(&auth, "Audio file not found");
+    let Ok(path) = validate_song_path(song, auth) else {
+        return util::not_found(auth, "Audio file not found");
     };
 
     // Get filename for Content-Disposition and sanitize it to prevent header injection
     let filename = sanitized_filename(&path);
 
     let (file, file_size) =
-        match open_file_with_size(&auth, &path, "Failed to open audio file").await {
+        match open_file_with_size(auth, &path, "Failed to open audio file").await {
             Ok(file) => file,
             Err(response) => return response,
         };
@@ -359,6 +485,110 @@ pub async fn download(
             (
                 header::CONTENT_DISPOSITION,
                 format!("attachment; filename=\"{filename}\""),
+            ),
+        ],
+        body,
+    )
+        .into_response()
+}
+
+/// Sanitize a path component for use inside a zip archive.
+fn sanitize_zip_component(name: &str) -> String {
+    name.chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            c => c,
+        })
+        .collect()
+}
+
+/// Zip entry path for a song in an album archive, navidrome-style:
+/// `<Album>/<filename>`, with a `Disc NN/` subfolder for multi-disc albums.
+fn album_zip_entry_name(song: &Song, multi_disc: bool) -> String {
+    let file = sanitized_filename(Path::new(&song.path));
+    let album_dir = sanitize_zip_component(song.album_name.as_deref().unwrap_or("Unknown Album"));
+    if multi_disc {
+        format!(
+            "{album_dir}/Disc {:02}/{file}",
+            song.disc_number.unwrap_or(1)
+        )
+    } else {
+        format!("{album_dir}/{file}")
+    }
+}
+
+/// Zip entry path for a song in a playlist archive, navidrome-style:
+/// `NN - Artist - Title.ext`.
+fn playlist_zip_entry_name(song: &Song, index: usize) -> String {
+    let artist = sanitize_zip_component(song.artist_name.as_deref().unwrap_or("Unknown Artist"));
+    let title = sanitize_zip_component(&song.title);
+    format!("{:02} - {artist} - {title}.{}", index + 1, song.suffix)
+}
+
+/// Stream a zip archive of the given songs as a download attachment.
+///
+/// The archive is written on a blocking thread into a bounded duplex stream
+/// so large collections don't have to be buffered in memory.
+fn zip_download(
+    auth: &SubsonicContext,
+    name: &str,
+    entries: Vec<(String, Song)>,
+    m3u: Option<(String, String)>,
+) -> axum::response::Response {
+    // Validate all paths up front; entries that fail are skipped
+    let entries: Vec<(String, std::path::PathBuf)> = entries
+        .into_iter()
+        .filter_map(|(entry_name, song)| {
+            validate_song_path(&song, auth)
+                .ok()
+                .map(|path| (entry_name, path))
+        })
+        .collect();
+    if entries.is_empty() {
+        return util::not_found(auth, "Audio files not found");
+    }
+
+    let (writer, reader) = tokio::io::duplex(256 * 1024);
+    tokio::task::spawn_blocking(move || {
+        use std::io::Write as _;
+
+        // Streaming writer: no Seek needed, data descriptors emitted inline
+        let mut zip = zip::ZipWriter::new_stream(tokio_util::io::SyncIoBridge::new(writer));
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+
+        for (entry_name, path) in entries {
+            let Ok(mut file) = std::fs::File::open(&path) else {
+                continue;
+            };
+            if zip.start_file(entry_name, options).is_err() {
+                break;
+            }
+            if std::io::copy(&mut file, &mut zip).is_err() {
+                break;
+            }
+        }
+
+        if let Some((m3u_name, m3u_content)) = m3u
+            && zip.start_file(m3u_name, options).is_ok()
+        {
+            let _ = zip.write_all(m3u_content.as_bytes());
+        }
+
+        let _ = zip.finish();
+    });
+
+    // navidrome replaces commas in the attachment filename
+    let attachment_name = sanitize_zip_component(&name.replace(',', "_"));
+    let body = Body::from_stream(ReaderStream::new(reader));
+
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "application/zip".to_string()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{attachment_name}.zip\""),
             ),
         ],
         body,
@@ -564,9 +794,11 @@ mod tests {
     use image::{DynamicImage, GenericImageView, ImageBuffer, ImageFormat, Rgba};
 
     use super::{
-        cover_art_content_type, cover_art_image_format, is_safe_cover_art_id, parse_byte_range,
-        resize_cover_art_bytes, sanitized_filename,
+        album_zip_entry_name, cover_art_content_type, cover_art_image_format, is_safe_cover_art_id,
+        parse_byte_range, playlist_zip_entry_name, resize_cover_art_bytes, sanitize_zip_component,
+        sanitized_filename,
     };
+    use crate::models::music::Song;
 
     fn test_cover_art_bytes(width: u32, height: u32) -> Vec<u8> {
         let image = DynamicImage::ImageRgba8(ImageBuffer::from_fn(width, height, |x, y| {
@@ -664,5 +896,106 @@ mod tests {
         assert!(parse_byte_range("bytes=bogus-2", 10).is_none());
         assert!(parse_byte_range("bytes=5-2", 10).is_none());
         assert!(parse_byte_range("bytes=10-12", 10).is_none());
+    }
+
+    fn test_song() -> Song {
+        Song {
+            id: 1,
+            title: "Track: One?".to_string(),
+            sort_name: None,
+            album_id: Some(1),
+            artist_id: Some(1),
+            artist_name: Some("The/Artist".to_string()),
+            album_name: Some("My <Album>".to_string()),
+            music_folder_id: 1,
+            path: "/music/Album/01 - Track One.flac".to_string(),
+            parent_path: "/music/Album".to_string(),
+            file_size: 100,
+            content_type: "audio/flac".to_string(),
+            suffix: "flac".to_string(),
+            duration: 60,
+            bit_rate: None,
+            bit_depth: None,
+            sampling_rate: None,
+            channel_count: None,
+            track_number: Some(1),
+            disc_number: Some(1),
+            year: None,
+            genre: None,
+            cover_art: None,
+            musicbrainz_id: None,
+            play_count: 0,
+            created_at: chrono::NaiveDate::from_ymd_opt(2024, 1, 1)
+                .expect("valid date")
+                .and_hms_opt(0, 0, 0)
+                .expect("valid time"),
+            updated_at: chrono::NaiveDate::from_ymd_opt(2024, 1, 1)
+                .expect("valid date")
+                .and_hms_opt(0, 0, 0)
+                .expect("valid time"),
+        }
+    }
+
+    #[test]
+    fn sanitize_zip_component_replaces_illegal_characters() {
+        assert_eq!(
+            sanitize_zip_component("a/b\\c:d*e?f\"g<h>i|j"),
+            "a_b_c_d_e_f_g_h_i_j"
+        );
+        assert_eq!(sanitize_zip_component("plain name"), "plain name");
+    }
+
+    #[test]
+    fn album_zip_entry_uses_album_dir_and_original_filename() {
+        let song = test_song();
+        assert_eq!(
+            album_zip_entry_name(&song, false),
+            "My _Album_/01 - Track One.flac"
+        );
+        assert_eq!(
+            album_zip_entry_name(&song, true),
+            "My _Album_/Disc 01/01 - Track One.flac"
+        );
+    }
+
+    #[test]
+    fn playlist_zip_entry_uses_position_artist_title() {
+        let song = test_song();
+        assert_eq!(
+            playlist_zip_entry_name(&song, 0),
+            "01 - The_Artist - Track_ One_.flac"
+        );
+    }
+
+    #[test]
+    fn streaming_zip_writer_produces_readable_archive() {
+        // The download path uses ZipWriter::new_stream over a non-seekable
+        // writer; verify the produced bytes parse back with entry names.
+        let mut sink = std::io::Cursor::new(Vec::new());
+        {
+            use std::io::Write as _;
+            let mut zip = zip::ZipWriter::new_stream(&mut sink);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            zip.start_file("Album/01 - One.flac", options)
+                .expect("start file");
+            zip.write_all(b"data1").expect("write");
+            zip.start_file("Album/02 - Two.flac", options)
+                .expect("start file");
+            zip.write_all(b"data2").expect("write");
+            zip.finish().expect("finish");
+        }
+
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(sink.into_inner()))
+            .expect("archive must parse");
+        assert_eq!(archive.len(), 2);
+        assert_eq!(
+            archive.by_index(0).expect("entry").name(),
+            "Album/01 - One.flac"
+        );
+        assert_eq!(
+            archive.by_index(1).expect("entry").name(),
+            "Album/02 - Two.flac"
+        );
     }
 }

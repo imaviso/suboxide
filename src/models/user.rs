@@ -92,7 +92,7 @@ impl User {
 mod tests {
     use crate::crypto::password::PasswordErrorKind;
 
-    use super::User;
+    use super::{User, UserRoles};
 
     fn user_with_subsonic_password(password: Option<&str>) -> User {
         User {
@@ -103,7 +103,7 @@ mod tests {
             api_key: None,
             lastfm_session_key: None,
             email: None,
-            roles: Default::default(),
+            roles: UserRoles::default(),
             max_bit_rate: 0,
         }
     }

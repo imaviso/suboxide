@@ -100,7 +100,11 @@ pub async fn get_album(
     crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<IdParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
-    let Some(album_id) = params.id else {
+    let Some(album_id) = params
+        .id
+        .as_deref()
+        .and_then(crate::models::music::EntityId::parse_album)
+    else {
         return util::missing_param(&auth, "id");
     };
 
@@ -118,7 +122,11 @@ pub async fn get_artist(
     crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<IdParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
-    let Some(artist_id) = params.id else {
+    let Some(artist_id) = params
+        .id
+        .as_deref()
+        .and_then(crate::models::music::EntityId::parse_artist)
+    else {
         return util::missing_param(&auth, "id");
     };
 
@@ -136,7 +144,11 @@ pub async fn get_song(
     crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<IdParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
-    let Some(song_id) = params.id else {
+    let Some(song_id) = params
+        .id
+        .as_deref()
+        .and_then(crate::models::music::EntityId::parse_song)
+    else {
         return util::missing_param(&auth, "id");
     };
 

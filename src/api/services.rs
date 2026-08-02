@@ -10,9 +10,9 @@ use crate::db::{
     BookmarkRepository, DbPool, InternetRadioRepository, InternetRadioStation,
     MusicFolderRepository, MusicRepoError, MusicRepoErrorKind, NewUser, NowPlayingEntry,
     NowPlayingRepository, PlayQueue, PlayQueueRepository, PlaylistRepository, RatingRepository,
-    RemoteCommand, RemoteControlRepository, RemoteSession, RemoteState, ScrobbleRepository,
-    SongRepository, StarredRepository, UserRepoError, UserRepoErrorKind, UserRepository,
-    UserUpdate,
+    RemoteCommand, RemoteControlRepository, RemoteSession, RemoteState, SETTING_LAST_SCAN_AT,
+    ScrobbleRepository, SettingsRepository, SongRepository, StarredRepository, UserRepoError,
+    UserRepoErrorKind, UserRepository, UserUpdate,
 };
 use crate::lastfm::{
     LastFmClient, LastFmError, models::extract_biography, models::extract_image_urls,
@@ -156,6 +156,12 @@ impl MusicLibrary {
         &self,
     ) -> Result<Option<NaiveDateTime>, MusicRepoError> {
         ArtistRepository::new(self.pool.clone()).get_last_modified()
+    }
+
+    /// Last library scan completion time in epoch millis (for lastModified).
+    pub(in crate::api) fn get_last_scan_at_ms(&self) -> Result<Option<i64>, MusicRepoError> {
+        let value = SettingsRepository::new(self.pool.clone()).get(SETTING_LAST_SCAN_AT)?;
+        Ok(value.and_then(|value| value.parse::<i64>().ok()))
     }
 
     pub(in crate::api) fn get_artist_album_count(
@@ -315,6 +321,13 @@ impl MusicLibrary {
         album_id: i32,
     ) -> Result<Vec<Song>, MusicRepoError> {
         SongRepository::new(self.pool.clone()).find_by_album(album_id)
+    }
+
+    pub(in crate::api) fn get_songs_by_artist(
+        &self,
+        artist_id: i32,
+    ) -> Result<Vec<Song>, MusicRepoError> {
+        SongRepository::new(self.pool.clone()).find_by_artist(artist_id)
     }
 
     pub(in crate::api) fn get_random_songs(
@@ -799,6 +812,24 @@ impl MusicLibrary {
         rating: i32,
     ) -> Result<(), MusicRepoError> {
         RatingRepository::new(self.pool.clone()).set_song_rating(user_id, song_id, rating)
+    }
+
+    pub(in crate::api) fn set_album_rating(
+        &self,
+        user_id: i32,
+        album_id: i32,
+        rating: i32,
+    ) -> Result<(), MusicRepoError> {
+        RatingRepository::new(self.pool.clone()).set_album_rating(user_id, album_id, rating)
+    }
+
+    pub(in crate::api) fn set_artist_rating(
+        &self,
+        user_id: i32,
+        artist_id: i32,
+        rating: i32,
+    ) -> Result<(), MusicRepoError> {
+        RatingRepository::new(self.pool.clone()).set_artist_rating(user_id, artist_id, rating)
     }
 
     // ========================================================================

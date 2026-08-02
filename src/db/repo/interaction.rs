@@ -491,6 +491,7 @@ impl ScrobbleRepository {
     /// Records a play event for `user_id` and `song_id`. If `time` is `None`,
     /// the current timestamp is used. The `submission` flag distinguishes
     /// durable scrobbles from transient now-playing notifications.
+    /// Submissions also increment the song's (and its album's) play count.
     ///
     /// # Errors
     /// Returns an error if the database connection fails or the insert query fails.
@@ -520,6 +521,19 @@ impl ScrobbleRepository {
                 scrobbles::submission.eq(submission),
             ))
             .execute(&mut conn)?;
+
+        if submission {
+            diesel::sql_query("UPDATE songs SET play_count = play_count + 1 WHERE id = ?")
+                .bind::<diesel::sql_types::Integer, _>(song_id)
+                .execute(&mut conn)?;
+
+            diesel::sql_query(
+                "UPDATE albums SET play_count = play_count + 1
+                 WHERE id = (SELECT album_id FROM songs WHERE id = ?)",
+            )
+            .bind::<diesel::sql_types::Integer, _>(song_id)
+            .execute(&mut conn)?;
+        }
 
         Ok(())
     }

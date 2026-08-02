@@ -47,7 +47,9 @@ pub use remote::{RemoteCommand, RemoteControlRepository, RemoteSession, RemoteSt
 
 // Re-export settings types
 #[doc(inline)]
-pub use settings::{SETTING_LASTFM_API_KEY, SETTING_LASTFM_API_SECRET, SettingsRepository};
+pub use settings::{
+    SETTING_LAST_SCAN_AT, SETTING_LASTFM_API_KEY, SETTING_LASTFM_API_SECRET, SettingsRepository,
+};
 
 // Re-export user types
 #[doc(inline)]

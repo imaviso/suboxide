@@ -20,11 +20,11 @@ use crate::models::music::{
 )]
 pub struct StarParams {
     #[serde(rename = "artistId")]
-    artist_id: Vec<i32>,
+    artist_id: Vec<String>,
     #[serde(rename = "albumId")]
-    album_id: Vec<i32>,
+    album_id: Vec<String>,
     #[serde(rename = "id")]
-    song_id: Vec<i32>,
+    song_id: Vec<String>,
 }
 
 /// GET/POST /rest/star[.view]
@@ -42,17 +42,26 @@ pub async fn star(
     let user_id = auth.user.id;
 
     for artist_id in &params.artist_id {
-        if let Err(error) = auth.music().star_artist(user_id, *artist_id) {
+        let Some(artist_id) = crate::models::music::EntityId::parse_artist(artist_id) else {
+            return util::service_error(&auth, format!("Invalid artistId: {artist_id}"));
+        };
+        if let Err(error) = auth.music().star_artist(user_id, artist_id) {
             return util::service_error(&auth, error);
         }
     }
     for album_id in &params.album_id {
-        if let Err(error) = auth.music().star_album(user_id, *album_id) {
+        let Some(album_id) = crate::models::music::EntityId::parse_album(album_id) else {
+            return util::service_error(&auth, format!("Invalid albumId: {album_id}"));
+        };
+        if let Err(error) = auth.music().star_album(user_id, album_id) {
             return util::service_error(&auth, error);
         }
     }
     for song_id in &params.song_id {
-        if let Err(error) = auth.music().star_song(user_id, *song_id) {
+        let Some(song_id) = crate::models::music::EntityId::parse_song(song_id) else {
+            return util::service_error(&auth, format!("Invalid id: {song_id}"));
+        };
+        if let Err(error) = auth.music().star_song(user_id, song_id) {
             return util::service_error(&auth, error);
         }
     }
@@ -75,17 +84,26 @@ pub async fn unstar(
     let user_id = auth.user.id;
 
     for artist_id in &params.artist_id {
-        if let Err(error) = auth.music().unstar_artist(user_id, *artist_id) {
+        let Some(artist_id) = crate::models::music::EntityId::parse_artist(artist_id) else {
+            return util::service_error(&auth, format!("Invalid artistId: {artist_id}"));
+        };
+        if let Err(error) = auth.music().unstar_artist(user_id, artist_id) {
             return util::service_error(&auth, error);
         }
     }
     for album_id in &params.album_id {
-        if let Err(error) = auth.music().unstar_album(user_id, *album_id) {
+        let Some(album_id) = crate::models::music::EntityId::parse_album(album_id) else {
+            return util::service_error(&auth, format!("Invalid albumId: {album_id}"));
+        };
+        if let Err(error) = auth.music().unstar_album(user_id, album_id) {
             return util::service_error(&auth, error);
         }
     }
     for song_id in &params.song_id {
-        if let Err(error) = auth.music().unstar_song(user_id, *song_id) {
+        let Some(song_id) = crate::models::music::EntityId::parse_song(song_id) else {
+            return util::service_error(&auth, format!("Invalid id: {song_id}"));
+        };
+        if let Err(error) = auth.music().unstar_song(user_id, song_id) {
             return util::service_error(&auth, error);
         }
     }
@@ -184,7 +202,7 @@ pub async fn get_starred2(auth: SubsonicContext) -> impl IntoResponse {
 #[serde(default)]
 pub struct ScrobbleParams {
     #[serde(rename = "id")]
-    song_id: Vec<i32>,
+    song_id: Vec<String>,
     time: Vec<i64>,
     submission: Option<String>,
 }
@@ -216,14 +234,16 @@ pub async fn scrobble(
     };
 
     for (i, song_id) in params.song_id.iter().enumerate() {
+        let Some(song_id) = crate::models::music::EntityId::parse_song(song_id) else {
+            return util::service_error(&auth, format!("Invalid id: {song_id}"));
+        };
         let time = params.time.get(i).copied();
 
-        if let Err(error) = auth.music().scrobble(user_id, *song_id, time, submission) {
+        if let Err(error) = auth.music().scrobble(user_id, song_id, time, submission) {
             return util::service_error(&auth, error);
         }
 
-        if !submission
-            && let Err(error) = auth.music().set_now_playing(user_id, *song_id, player_id)
+        if !submission && let Err(error) = auth.music().set_now_playing(user_id, song_id, player_id)
         {
             return util::service_error(&auth, error);
         }
@@ -251,19 +271,29 @@ pub struct ReportPlaybackParams {
     pub ignore_scrobble: Option<bool>,
 }
 
+/// Whether a stopped playback report should count as a scrobble.
+///
+/// Mirrors navidrome's rule: the track must have been played for at least
+/// 50% of its duration, capped at 4 minutes.
+fn scrobble_threshold_met(position_ms: i64, duration_secs: i32) -> bool {
+    let duration_ms = i64::from(duration_secs.max(0)) * 1000;
+    let threshold = (duration_ms / 2).min(240_000);
+    position_ms >= threshold
+}
+
 /// GET/POST /rest/reportPlayback[.view]
 ///
 /// Reports playback progress for a song (`OpenSubsonic` playbackReport extension).
 /// "playing" registers a now-playing entry; "stopped" records a scrobble
-/// unless `ignoreScrobble` is set.
+/// unless `ignoreScrobble` is set or the 50%/4-minute threshold isn't met.
 pub async fn report_playback(
     crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<ReportPlaybackParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let Some(song_id) = params
         .media_id
-        .as_ref()
-        .and_then(|id| id.parse::<i32>().ok())
+        .as_deref()
+        .and_then(crate::models::music::EntityId::parse_song)
     else {
         return util::missing_param(&auth, "mediaId");
     };
@@ -303,7 +333,14 @@ pub async fn report_playback(
         }
         "paused" => {}
         "stopped" => {
+            let duration_secs = match auth.music().get_song(song_id) {
+                Ok(Some(song)) => song.duration,
+                Ok(None) => return util::not_found(&auth, "Song"),
+                Err(error) => return util::service_error(&auth, error),
+            };
+
             if !params.ignore_scrobble.unwrap_or(false)
+                && scrobble_threshold_met(position_ms, duration_secs)
                 && let Err(error) = auth.music().scrobble(user_id, song_id, None, true)
             {
                 return util::service_error(&auth, error);
@@ -379,7 +416,8 @@ pub async fn set_rating(
     let Some(id_str) = params.id.as_ref() else {
         return util::missing_param(&auth, "id");
     };
-    let Ok(id) = id_str.parse::<i32>() else {
+    // Bare integers are song ids; al-/ar- prefixes rate albums/artists
+    let Some(entity_id) = crate::models::music::EntityId::parse(id_str) else {
         return util::service_error(&auth, format!("Invalid id: {id_str}"));
     };
 
@@ -395,7 +433,22 @@ pub async fn set_rating(
 
     let user_id = auth.user.id;
 
-    match auth.music().set_song_rating(user_id, id, rating) {
+    let result = match entity_id {
+        crate::models::music::EntityId::Song(id) => {
+            auth.music().set_song_rating(user_id, id, rating)
+        }
+        crate::models::music::EntityId::Album(id) => {
+            auth.music().set_album_rating(user_id, id, rating)
+        }
+        crate::models::music::EntityId::Artist(id) => {
+            auth.music().set_artist_rating(user_id, id, rating)
+        }
+        crate::models::music::EntityId::Playlist(_) => {
+            return util::service_error(&auth, format!("Invalid id: {id_str}"));
+        }
+    };
+
+    match result {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
         Err(error) => util::service_error(&auth, error),
     }
@@ -403,23 +456,43 @@ pub async fn set_rating(
 
 #[cfg(test)]
 mod tests {
-    use super::{ScrobbleParams, StarParams};
+    use super::{ScrobbleParams, StarParams, scrobble_threshold_met};
 
     #[test]
     fn vec_params_accept_single_and_repeated_values() {
         // Subsonic clients send multi-value params both ways; the query
         // deserializer must accept a single value and repeated keys.
         let single: StarParams = serde_html_form::from_str("id=1").expect("single id parses");
-        assert_eq!(single.song_id, vec![1]);
+        assert_eq!(single.song_id, vec!["1".to_string()]);
 
         let repeated: StarParams =
             serde_html_form::from_str("id=1&id=2&albumId=3").expect("repeated ids parse");
-        assert_eq!(repeated.song_id, vec![1, 2]);
-        assert_eq!(repeated.album_id, vec![3]);
+        assert_eq!(repeated.song_id, vec!["1".to_string(), "2".to_string()]);
+        assert_eq!(repeated.album_id, vec!["3".to_string()]);
 
         let scrobble: ScrobbleParams =
             serde_html_form::from_str("id=7&time=1000&id=8&time=2000").expect("pairs parse");
-        assert_eq!(scrobble.song_id, vec![7, 8]);
+        assert_eq!(scrobble.song_id, vec!["7".to_string(), "8".to_string()]);
         assert_eq!(scrobble.time, vec![1000, 2000]);
+    }
+
+    #[test]
+    fn scrobble_threshold_requires_half_the_track() {
+        // 4-minute track: threshold is 2 minutes (50%)
+        assert!(!scrobble_threshold_met(119_999, 240));
+        assert!(scrobble_threshold_met(120_000, 240));
+    }
+
+    #[test]
+    fn scrobble_threshold_caps_at_four_minutes() {
+        // 20-minute track: threshold is the 4-minute cap, not 10 minutes
+        assert!(!scrobble_threshold_met(239_999, 1200));
+        assert!(scrobble_threshold_met(240_000, 1200));
+    }
+
+    #[test]
+    fn scrobble_threshold_handles_zero_duration() {
+        assert!(scrobble_threshold_met(0, 0));
+        assert!(!scrobble_threshold_met(-1, 0));
     }
 }

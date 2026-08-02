@@ -20,6 +20,11 @@ pub use music::{
     SimilarSongsResponse, Song, SongAnnotations, SongsByGenreResponse, Starred2Response,
     StarredResponse, StructuredLyrics, TokenInfoResponse, TopSongsResponse,
 };
+#[doc(inline)]
+pub use music::{
+    EntityId, album_api_id, artist_api_id, normalize_search_query, normalize_search_text,
+    playlist_api_id, song_api_id,
+};
 
 // Explicit re-exports from user module
 #[doc(inline)]

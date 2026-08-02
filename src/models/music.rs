@@ -6,6 +6,112 @@ use serde::Serialize;
 /// Timestamp format used by Subsonic API responses.
 pub const SUBSONIC_DATETIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.3fZ";
 
+// ============================================================================
+// API entity ids
+// ============================================================================
+//
+// API-facing ids are namespaced by entity type (navidrome-style) so that ids
+// never collide across tables: `mf-` song (media file), `al-` album,
+// `ar-` artist, `pl-` playlist. Music folder ids stay plain integers.
+
+/// API id for a song (media file).
+#[must_use]
+pub fn song_api_id(id: i32) -> String {
+    format!("mf-{id}")
+}
+
+/// API id for an album.
+#[must_use]
+pub fn album_api_id(id: i32) -> String {
+    format!("al-{id}")
+}
+
+/// API id for an artist.
+#[must_use]
+pub fn artist_api_id(id: i32) -> String {
+    format!("ar-{id}")
+}
+
+/// API id for a playlist.
+#[must_use]
+pub fn playlist_api_id(id: i32) -> String {
+    format!("pl-{id}")
+}
+
+/// A parsed API entity id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntityId {
+    Song(i32),
+    Album(i32),
+    Artist(i32),
+    Playlist(i32),
+}
+
+impl EntityId {
+    /// Parse an API id string. A bare integer means a song id (the Subsonic
+    /// default for endpoints like `stream`); prefixed ids are resolved by
+    /// their namespace prefix.
+    #[must_use]
+    pub fn parse(id: &str) -> Option<Self> {
+        if let Some(rest) = id.strip_prefix("mf-") {
+            return rest.parse().ok().map(Self::Song);
+        }
+        if let Some(rest) = id.strip_prefix("al-") {
+            return rest.parse().ok().map(Self::Album);
+        }
+        if let Some(rest) = id.strip_prefix("ar-") {
+            return rest.parse().ok().map(Self::Artist);
+        }
+        if let Some(rest) = id.strip_prefix("pl-") {
+            return rest.parse().ok().map(Self::Playlist);
+        }
+        id.parse().ok().map(Self::Song)
+    }
+
+    /// Parse an API id that must refer to a song.
+    #[must_use]
+    pub fn parse_song(id: &str) -> Option<i32> {
+        match Self::parse(id) {
+            Some(Self::Song(song_id)) => Some(song_id),
+            _ => None,
+        }
+    }
+
+    /// Parse an API id that must refer to an album.
+    /// Bare integers are accepted as album ids (Subsonic default for
+    /// album-scoped endpoints like `getAlbum`).
+    #[must_use]
+    pub fn parse_album(id: &str) -> Option<i32> {
+        match Self::parse(id) {
+            Some(Self::Album(album_id)) => Some(album_id),
+            Some(Self::Song(raw)) if !id.starts_with("mf-") => Some(raw),
+            _ => None,
+        }
+    }
+
+    /// Parse an API id that must refer to an artist.
+    /// Bare integers are accepted as artist ids.
+    #[must_use]
+    pub fn parse_artist(id: &str) -> Option<i32> {
+        match Self::parse(id) {
+            Some(Self::Artist(artist_id)) => Some(artist_id),
+            Some(Self::Song(raw)) if !id.starts_with("mf-") => Some(raw),
+            _ => None,
+        }
+    }
+
+    /// Parse an API id that must refer to a playlist.
+    /// Bare integers are accepted as playlist ids.
+    #[must_use]
+    pub fn parse_playlist(id: &str) -> Option<i32> {
+        match Self::parse(id) {
+            Some(Self::Playlist(playlist_id)) => Some(playlist_id),
+            Some(Self::Song(raw)) if !id.starts_with("pl-") && !id.starts_with("mf-") => Some(raw),
+            _ => None,
+        }
+    }
+}
+
 /// Replace Latin special letters that have no NFKD decomposition
 /// (ligatures, strokes) with their ASCII equivalents.
 const fn expand_latin_specials(c: char) -> &'static str {
@@ -86,7 +192,70 @@ pub fn saturating_i64_to_i32(value: i64) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_search_query, normalize_search_text, saturating_i64_to_i32};
+    use super::{
+        EntityId, album_api_id, artist_api_id, normalize_search_query, normalize_search_text,
+        playlist_api_id, saturating_i64_to_i32, song_api_id,
+    };
+
+    #[test]
+    fn api_id_helpers_emit_namespaced_ids() {
+        assert_eq!(song_api_id(1), "mf-1");
+        assert_eq!(album_api_id(1), "al-1");
+        assert_eq!(artist_api_id(1), "ar-1");
+        assert_eq!(playlist_api_id(1), "pl-1");
+    }
+
+    #[test]
+    fn entity_id_parse_roundtrips_namespaced_ids() {
+        assert_eq!(EntityId::parse("mf-42"), Some(EntityId::Song(42)));
+        assert_eq!(EntityId::parse("al-42"), Some(EntityId::Album(42)));
+        assert_eq!(EntityId::parse("ar-42"), Some(EntityId::Artist(42)));
+        assert_eq!(EntityId::parse("pl-42"), Some(EntityId::Playlist(42)));
+    }
+
+    #[test]
+    fn entity_id_parse_treats_bare_integers_as_songs() {
+        assert_eq!(EntityId::parse("42"), Some(EntityId::Song(42)));
+        assert_eq!(EntityId::parse(""), None);
+        assert_eq!(EntityId::parse("mf-"), None);
+        assert_eq!(EntityId::parse("bogus"), None);
+    }
+
+    #[test]
+    fn entity_id_parse_song_accepts_mf_prefix_only() {
+        assert_eq!(EntityId::parse_song("mf-42"), Some(42));
+        assert_eq!(EntityId::parse_song("42"), Some(42));
+        assert_eq!(EntityId::parse_song("al-42"), None);
+        assert_eq!(EntityId::parse_song("ar-42"), None);
+        assert_eq!(EntityId::parse_song("pl-42"), None);
+    }
+
+    #[test]
+    fn entity_id_parse_album_accepts_al_prefix_and_bare_ints() {
+        assert_eq!(EntityId::parse_album("al-42"), Some(42));
+        assert_eq!(EntityId::parse_album("42"), Some(42));
+        assert_eq!(EntityId::parse_album("mf-42"), None);
+        assert_eq!(EntityId::parse_album("ar-42"), None);
+        assert_eq!(EntityId::parse_album("pl-42"), None);
+    }
+
+    #[test]
+    fn entity_id_parse_artist_accepts_ar_prefix_and_bare_ints() {
+        assert_eq!(EntityId::parse_artist("ar-42"), Some(42));
+        assert_eq!(EntityId::parse_artist("42"), Some(42));
+        assert_eq!(EntityId::parse_artist("mf-42"), None);
+        assert_eq!(EntityId::parse_artist("al-42"), None);
+        assert_eq!(EntityId::parse_artist("pl-42"), None);
+    }
+
+    #[test]
+    fn entity_id_parse_playlist_accepts_pl_prefix_and_bare_ints() {
+        assert_eq!(EntityId::parse_playlist("pl-42"), Some(42));
+        assert_eq!(EntityId::parse_playlist("42"), Some(42));
+        assert_eq!(EntityId::parse_playlist("mf-42"), None);
+        assert_eq!(EntityId::parse_playlist("al-42"), None);
+        assert_eq!(EntityId::parse_playlist("ar-42"), None);
+    }
 
     #[test]
     fn normalize_search_text_folds_case_accents_and_whitespace() {
@@ -218,7 +387,7 @@ impl ArtistID3Response {
     #[must_use]
     pub fn from_artist(artist: &Artist, album_count: Option<i32>) -> Self {
         Self {
-            id: artist.id.to_string(),
+            id: artist_api_id(artist.id),
             name: artist.name.clone(),
             cover_art: artist.cover_art.clone(),
             artist_image_url: artist.artist_image_url.clone(),
@@ -236,7 +405,7 @@ impl ArtistID3Response {
         starred_at: Option<&NaiveDateTime>,
     ) -> Self {
         Self {
-            id: artist.id.to_string(),
+            id: artist_api_id(artist.id),
             name: artist.name.clone(),
             cover_art: artist.cover_art.clone(),
             artist_image_url: artist.artist_image_url.clone(),
@@ -324,10 +493,10 @@ impl AlbumID3Response {
     #[must_use]
     pub fn from_album_with_starred(album: &Album, starred_at: Option<&NaiveDateTime>) -> Self {
         Self {
-            id: album.id.to_string(),
+            id: album_api_id(album.id),
             name: album.name.clone(),
             artist: album.artist_name.clone(),
-            artist_id: album.artist_id.map(|id| id.to_string()),
+            artist_id: album.artist_id.map(artist_api_id),
             cover_art: album.cover_art.clone(),
             song_count: album.song_count,
             duration: album.duration,
@@ -477,8 +646,8 @@ impl ChildResponse {
     #[must_use]
     pub fn from_song_with_starred(song: &Song, starred_at: Option<&NaiveDateTime>) -> Self {
         Self {
-            id: song.id.to_string(),
-            parent: song.album_id.map(|id| id.to_string()),
+            id: song_api_id(song.id),
+            parent: song.album_id.map(album_api_id),
             is_dir: false,
             title: song.title.clone(),
             album: song.album_name.clone(),
@@ -499,8 +668,8 @@ impl ChildResponse {
             play_count: Some(song.play_count),
             disc_number: song.disc_number,
             created: Some(format_subsonic_datetime(&song.created_at)),
-            album_id: song.album_id.map(|id| id.to_string()),
-            artist_id: song.artist_id.map(|id| id.to_string()),
+            album_id: song.album_id.map(album_api_id),
+            artist_id: song.artist_id.map(artist_api_id),
             media_type: Some("music".to_string()),
             starred: starred_at.map(format_subsonic_datetime),
             user_rating: None,
@@ -562,6 +731,8 @@ pub struct IndexID3Response {
 pub struct ArtistsID3Response {
     #[serde(rename = "@ignoredArticles")]
     pub ignored_articles: String,
+    #[serde(rename = "@lastModified")]
+    pub last_modified: i64,
     #[serde(rename = "index", skip_serializing_if = "Vec::is_empty")]
     pub indexes: Vec<IndexID3Response>,
 }
@@ -620,10 +791,10 @@ impl AlbumWithSongsID3Response {
         starred_at: Option<&NaiveDateTime>,
     ) -> Self {
         Self {
-            id: album.id.to_string(),
+            id: album_api_id(album.id),
             name: album.name.clone(),
             artist: album.artist_name.clone(),
-            artist_id: album.artist_id.map(|id| id.to_string()),
+            artist_id: album.artist_id.map(artist_api_id),
             cover_art: album.cover_art.clone(),
             song_count: album.song_count,
             duration: album.duration,
@@ -680,7 +851,7 @@ impl ArtistWithAlbumsID3Response {
     #[must_use]
     pub fn from_artist_and_albums(artist: &Artist, albums: Vec<AlbumID3Response>) -> Self {
         Self {
-            id: artist.id.to_string(),
+            id: artist_api_id(artist.id),
             name: artist.name.clone(),
             cover_art: artist.cover_art.clone(),
             artist_image_url: artist.artist_image_url.clone(),
@@ -699,7 +870,7 @@ impl ArtistWithAlbumsID3Response {
         starred_at: Option<&NaiveDateTime>,
     ) -> Self {
         Self {
-            id: artist.id.to_string(),
+            id: artist_api_id(artist.id),
             name: artist.name.clone(),
             cover_art: artist.cover_art.clone(),
             artist_image_url: artist.artist_image_url.clone(),
@@ -970,8 +1141,8 @@ impl NowPlayingEntryResponse {
         player_id: Option<String>,
     ) -> Self {
         Self {
-            id: song.id.to_string(),
-            parent: song.album_id.map(|id| id.to_string()),
+            id: song_api_id(song.id),
+            parent: song.album_id.map(album_api_id),
             is_dir: false,
             title: song.title.clone(),
             album: song.album_name.clone(),
@@ -986,8 +1157,8 @@ impl NowPlayingEntryResponse {
             duration: Some(song.duration),
             bit_rate: song.bit_rate,
             path: Some(song.path.clone()),
-            album_id: song.album_id.map(|id| id.to_string()),
-            artist_id: song.artist_id.map(|id| id.to_string()),
+            album_id: song.album_id.map(album_api_id),
+            artist_id: song.artist_id.map(artist_api_id),
             media_type: Some("music".to_string()),
             username,
             minutes_ago,
@@ -1500,7 +1671,7 @@ impl DirectoryResponse {
     #[must_use]
     pub fn from_artist(artist: &Artist, children: Vec<ChildResponse>) -> Self {
         Self {
-            id: artist.id.to_string(),
+            id: artist_api_id(artist.id),
             parent: None,
             name: artist.name.clone(),
             starred: None,
@@ -1513,8 +1684,8 @@ impl DirectoryResponse {
     #[must_use]
     pub fn from_album(album: &Album, children: Vec<ChildResponse>) -> Self {
         Self {
-            id: album.id.to_string(),
-            parent: album.artist_id.map(|id| id.to_string()),
+            id: album_api_id(album.id),
+            parent: album.artist_id.map(artist_api_id),
             name: album.name.clone(),
             starred: None,
             play_count: Some(album.play_count),
@@ -1528,7 +1699,7 @@ impl ChildResponse {
     #[must_use]
     pub fn from_artist_as_dir(artist: &Artist) -> Self {
         Self {
-            id: artist.id.to_string(),
+            id: artist_api_id(artist.id),
             parent: None,
             is_dir: true,
             title: artist.name.clone(),
@@ -1551,7 +1722,7 @@ impl ChildResponse {
             disc_number: None,
             created: Some(format_subsonic_datetime(&artist.created_at)),
             album_id: None,
-            artist_id: Some(artist.id.to_string()),
+            artist_id: Some(artist_api_id(artist.id)),
             media_type: None,
             starred: None,
             user_rating: None,
@@ -1567,8 +1738,8 @@ impl ChildResponse {
     #[must_use]
     pub fn from_album_as_dir(album: &Album) -> Self {
         Self {
-            id: album.id.to_string(),
-            parent: album.artist_id.map(|id| id.to_string()),
+            id: album_api_id(album.id),
+            parent: album.artist_id.map(artist_api_id),
             is_dir: true,
             title: album.name.clone(),
             album: Some(album.name.clone()),
@@ -1589,8 +1760,8 @@ impl ChildResponse {
             play_count: Some(album.play_count),
             disc_number: None,
             created: Some(format_subsonic_datetime(&album.created_at)),
-            album_id: Some(album.id.to_string()),
-            artist_id: album.artist_id.map(|id| id.to_string()),
+            album_id: Some(album_api_id(album.id)),
+            artist_id: album.artist_id.map(artist_api_id),
             media_type: None,
             starred: None,
             user_rating: None,
@@ -1672,8 +1843,8 @@ mod directory_tests {
     fn directory_response_from_album_uses_artist_parent_and_play_count() {
         let response = DirectoryResponse::from_album(&album(), Vec::new());
 
-        assert_eq!(response.id, "22");
-        assert_eq!(response.parent.as_deref(), Some("11"));
+        assert_eq!(response.id, "al-22");
+        assert_eq!(response.parent.as_deref(), Some("ar-11"));
         assert_eq!(response.name, "Album");
         assert_eq!(response.play_count, Some(5));
     }
@@ -1682,11 +1853,11 @@ mod directory_tests {
     fn child_response_from_artist_as_dir_pins_directory_fields() {
         let response = ChildResponse::from_artist_as_dir(&artist());
 
-        assert_eq!(response.id, "11");
+        assert_eq!(response.id, "ar-11");
         assert!(response.is_dir);
         assert_eq!(response.title, "Artist");
         assert_eq!(response.artist.as_deref(), Some("Artist"));
-        assert_eq!(response.artist_id.as_deref(), Some("11"));
+        assert_eq!(response.artist_id.as_deref(), Some("ar-11"));
         assert_eq!(response.cover_art.as_deref(), Some("artist-cover"));
         assert_eq!(
             response.created.as_deref(),
@@ -1700,8 +1871,8 @@ mod directory_tests {
     fn child_response_from_album_as_dir_pins_album_metadata() {
         let response = ChildResponse::from_album_as_dir(&album());
 
-        assert_eq!(response.id, "22");
-        assert_eq!(response.parent.as_deref(), Some("11"));
+        assert_eq!(response.id, "al-22");
+        assert_eq!(response.parent.as_deref(), Some("ar-11"));
         assert!(response.is_dir);
         assert_eq!(response.title, "Album");
         assert_eq!(response.album.as_deref(), Some("Album"));
@@ -1710,8 +1881,8 @@ mod directory_tests {
         assert_eq!(response.genre.as_deref(), Some("Jazz"));
         assert_eq!(response.duration, Some(123));
         assert_eq!(response.play_count, Some(5));
-        assert_eq!(response.album_id.as_deref(), Some("22"));
-        assert_eq!(response.artist_id.as_deref(), Some("11"));
+        assert_eq!(response.album_id.as_deref(), Some("al-22"));
+        assert_eq!(response.artist_id.as_deref(), Some("ar-11"));
     }
 }
 
@@ -1749,7 +1920,7 @@ impl ArtistResponse {
         starred_at: Option<&chrono::NaiveDateTime>,
     ) -> Self {
         Self {
-            id: artist.id.to_string(),
+            id: artist_api_id(artist.id),
             name: artist.name.clone(),
             artist_image_url: artist.artist_image_url.clone(),
             starred: starred_at.map(format_subsonic_datetime),
@@ -1820,8 +1991,8 @@ pub struct SearchMatch {
 impl From<&Song> for SearchMatch {
     fn from(song: &Song) -> Self {
         Self {
-            id: song.id.to_string(),
-            parent: song.album_id.map(|id| id.to_string()),
+            id: song_api_id(song.id),
+            parent: song.album_id.map(album_api_id),
             is_dir: false,
             title: song.title.clone(),
             album: song.album_name.clone(),

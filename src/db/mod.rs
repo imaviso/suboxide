@@ -12,7 +12,8 @@ pub use repo::{
     BookmarkRepository, InternetRadioRepository, InternetRadioStation, MusicFolderRepository,
     MusicRepoError, MusicRepoErrorKind, NewUser, NowPlayingEntry, NowPlayingRepository, PlayQueue,
     PlayQueueRepository, Playlist, PlaylistRepository, RatingRepository, RemoteCommand,
-    RemoteControlRepository, RemoteSession, RemoteState, SETTING_LASTFM_API_KEY,
-    SETTING_LASTFM_API_SECRET, ScrobbleRepository, SettingsRepository, SongRepository,
-    StarredRepository, UserRepoError, UserRepoErrorKind, UserRepository, UserUpdate,
+    RemoteControlRepository, RemoteSession, RemoteState, SETTING_LAST_SCAN_AT,
+    SETTING_LASTFM_API_KEY, SETTING_LASTFM_API_SECRET, ScrobbleRepository, SettingsRepository,
+    SongRepository, StarredRepository, UserRepoError, UserRepoErrorKind, UserRepository,
+    UserUpdate,
 };

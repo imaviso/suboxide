@@ -10,6 +10,8 @@ use crate::db::schema::settings;
 pub const SETTING_LASTFM_API_KEY: &str = "lastfm_api_key";
 /// Setting key for the Last.fm API secret.
 pub const SETTING_LASTFM_API_SECRET: &str = "lastfm_api_secret";
+/// Setting key for the last library scan completion time (epoch millis).
+pub const SETTING_LAST_SCAN_AT: &str = "last_scan_at";
 
 /// Repository for key-value application settings.
 #[derive(Clone, Debug)]
