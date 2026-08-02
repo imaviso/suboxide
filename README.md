@@ -157,18 +157,18 @@ Then, link a user account to Last.fm:
 
 ## API Endpoints
 
-### Implemented (64 endpoints)
+### Implemented (72 endpoints)
 
 | Category | Endpoints |
 |----------|-----------|
 | **System** | `ping`, `getLicense`, `getOpenSubsonicExtensions`, `tokenInfo` |
-| **Browsing** | `getMusicFolders`, `getIndexes`, `getMusicDirectory`, `getArtists`, `getArtist`, `getAlbum`, `getSong`, `getAlbumList`, `getAlbumList2`, `getGenres`, `getArtistInfo`, `getArtistInfo2`, `getAlbumInfo`, `getAlbumInfo2`, `getSimilarSongs`, `getSimilarSongs2`, `getTopSongs`, `getRandomSongs`, `getSongsByGenre` |
-| **Searching** | `search`, `search2`, `search3` |
+| **Browsing** | `getMusicFolders`, `getIndexes`, `getMusicDirectory`, `getArtists`, `getArtist`, `getAlbum`, `getSong`, `getAlbumList`, `getAlbumList2`, `getGenres`, `getArtistInfo`, `getArtistInfo2`, `getAlbumInfo`, `getAlbumInfo2`, `getSimilarSongs`, `getSimilarSongs2`, `getTopSongs`, `getRandomSongs`, `getSongsByGenre`, `search`, `search2`, `search3`, `getLyrics`, `getLyricsBySongId` |
 | **Playlists** | `getPlaylists`, `getPlaylist`, `createPlaylist`, `updatePlaylist`, `deletePlaylist` |
-| **Media Retrieval** | `stream`, `download`, `getCoverArt`, `getLyrics`, `getLyricsBySongId` |
-| **Annotation** | `star`, `unstar`, `getStarred`, `getStarred2`, `scrobble`, `setRating`, `getNowPlaying` |
-| **Bookmarks** | `getBookmarks` |
+| **Media Retrieval** | `stream`, `download`, `getCoverArt`, `getAvatar` |
+| **Annotation** | `star`, `unstar`, `getStarred`, `getStarred2`, `scrobble`, `setRating`, `reportPlayback`, `getNowPlaying` |
+| **Bookmarks** | `getBookmarks`, `createBookmark`, `deleteBookmark` |
 | **Play Queue** | `getPlayQueue`, `savePlayQueue`, `getPlayQueueByIndex`, `savePlayQueueByIndex` |
+| **Internet Radio** | `getInternetRadioStations`, `createInternetRadioStation`, `updateInternetRadioStation`, `deleteInternetRadioStation` |
 | **Remote Control** | `createRemoteSession`, `joinRemoteSession`, `getRemoteSession`, `closeRemoteSession`, `sendRemoteCommand`, `getRemoteCommands`, `updateRemoteState`, `getRemoteState` |
 | **User Management** | `getUser`, `getUsers`, `createUser`, `updateUser`, `deleteUser`, `changePassword` |
 | **Scanning** | `startScan`, `getScanStatus` |
@@ -177,14 +177,20 @@ Then, link a user account to Last.fm:
 
 The server advertises the following extensions from `getOpenSubsonicExtensions`:
 
-- `formPost`
 - `apiKeyAuthentication`
-- `songLyrics`
+- `formPost`
+- `indexBasedQueue`
+- `playbackReport`
 - `remoteControl`
+- `songLyrics`
 
 ### API Notes
 
 - `getAlbumList` and `getAlbumList2` can page through the full album catalog. Use `type=all`, `type=alphabeticalByName`, or omit `type` to browse all albums alphabetically.
+- `download` accepts song, album, artist, and playlist ids. Albums and artists download as a zip archive (with `Disc NN/` subfolders for multi-disc albums); playlists download as numbered tracks plus an M3U playlist file.
+- API ids are namespaced per entity type (navidrome-style): `mf-` for songs, `al-` for albums, `ar-` for artists, `pl-` for playlists. Bare integers are accepted as song ids for backwards compatibility.
+- `getIndexes` honors the `ifModifiedSince` parameter, returning an empty index list with the current `lastModified` when nothing has changed.
+- `startScan` is admin-only; pass `fullScan=true` to rescan the entire library, or omit it for an incremental scan.
 - Remote control support is exposed through the OpenSubsonic `remoteControl` extension. It supports host/controller pairing, queued commands, and playback state synchronization.
 
 ### Authentication

@@ -35,8 +35,8 @@ pub async fn star(
     crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<StarParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
-    if !auth.user.roles.comment_role {
-        return util::unauthorized(&auth);
+    if params.song_id.is_empty() && params.album_id.is_empty() && params.artist_id.is_empty() {
+        return util::missing_param(&auth, "id");
     }
 
     let user_id = auth.user.id;
@@ -77,8 +77,8 @@ pub async fn unstar(
     crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<StarParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
-    if !auth.user.roles.comment_role {
-        return util::unauthorized(&auth);
+    if params.song_id.is_empty() && params.album_id.is_empty() && params.artist_id.is_empty() {
+        return util::missing_param(&auth, "id");
     }
 
     let user_id = auth.user.id;
@@ -227,6 +227,17 @@ pub async fn scrobble(
         .as_deref()
         .is_none_or(|s| s != "false" && s != "0");
 
+    if !params.time.is_empty() && params.time.len() != params.song_id.len() {
+        return util::service_error(
+            &auth,
+            format!(
+                "Wrong number of timestamps: {}, should be {}",
+                params.time.len(),
+                params.song_id.len()
+            ),
+        );
+    }
+
     let player_id = if auth.params.c.is_empty() {
         None
     } else {
@@ -243,7 +254,11 @@ pub async fn scrobble(
             return util::service_error(&auth, error);
         }
 
-        if !submission && let Err(error) = auth.music().set_now_playing(user_id, song_id, player_id)
+        // A "now playing" notification (submission=false) only applies to the
+        // first track, matching navidrome.
+        if !submission
+            && i == 0
+            && let Err(error) = auth.music().set_now_playing(user_id, song_id, player_id)
         {
             return util::service_error(&auth, error);
         }
@@ -409,10 +424,6 @@ pub async fn set_rating(
     crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<SetRatingParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
-    if !auth.user.roles.comment_role {
-        return util::unauthorized(&auth);
-    }
-
     let Some(id_str) = params.id.as_ref() else {
         return util::missing_param(&auth, "id");
     };
@@ -474,6 +485,24 @@ mod tests {
             serde_html_form::from_str("id=7&time=1000&id=8&time=2000").expect("pairs parse");
         assert_eq!(scrobble.song_id, vec!["7".to_string(), "8".to_string()]);
         assert_eq!(scrobble.time, vec![1000, 2000]);
+    }
+
+    #[test]
+    fn star_params_with_no_ids_is_empty() {
+        let empty: StarParams = serde_html_form::from_str("").expect("empty parses");
+        assert!(
+            empty.song_id.is_empty() && empty.album_id.is_empty() && empty.artist_id.is_empty()
+        );
+    }
+
+    #[test]
+    fn scrobble_params_accept_extra_time_without_ids() {
+        // time without matching id is valid at the struct level; the handler
+        // rejects mismatched counts.
+        let scrobble: ScrobbleParams =
+            serde_html_form::from_str("id=1&time=1000&time=2000").expect("mismatch parses");
+        assert_eq!(scrobble.song_id.len(), 1);
+        assert_eq!(scrobble.time.len(), 2);
     }
 
     #[test]
