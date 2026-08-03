@@ -30,13 +30,15 @@ fn album_response(
         .music()
         .get_songs_by_album(album_id)
         .map_err(|error| ApiError::Generic(error.to_string()))?;
-    let song_responses =
-        util::annotate_songs(auth, &songs).map_err(|error| ApiError::Generic(error.to_string()))?;
+    let annotated = auth
+        .music()
+        .annotate_songs_for_user(auth.user.id, songs)
+        .map_err(|error| ApiError::Generic(error.to_string()))?;
 
     Ok(
         AlbumWithSongsID3Response::from_album_and_songs_with_starred(
             &album,
-            song_responses,
+            util::annotate_songs(annotated),
             album_starred_at.as_ref(),
         )
         .with_annotations(album_annotations.get(&album_id)),
@@ -60,13 +62,15 @@ fn artist_response(
         .music()
         .get_albums_by_artist(artist_id)
         .map_err(|error| ApiError::Generic(error.to_string()))?;
-    let album_responses = util::annotate_albums(auth, &albums)
+    let annotated = auth
+        .music()
+        .annotate_albums_for_user(auth.user.id, albums)
         .map_err(|error| ApiError::Generic(error.to_string()))?;
 
     Ok(
         ArtistWithAlbumsID3Response::from_artist_and_albums_with_starred(
             &artist,
-            album_responses,
+            util::annotate_albums(annotated),
             artist_starred_at.as_ref(),
         ),
     )

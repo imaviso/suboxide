@@ -16,7 +16,9 @@ fn play_queue_entries(
     auth: &SubsonicContext,
     play_queue: &PlayQueue,
 ) -> Result<Vec<ChildResponse>, ApiError> {
-    util::annotate_songs(auth, &play_queue.songs)
+    auth.music()
+        .annotate_songs_for_user(auth.user.id, play_queue.songs.clone())
+        .map(util::annotate_songs)
         .map_err(|error| ApiError::Generic(error.to_string()))
 }
 

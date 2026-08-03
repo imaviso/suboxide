@@ -27,19 +27,28 @@ impl fmt::Display for UserRepoErrorKind {
     }
 }
 
-/// Canonical error type for user repository operations.
+/// Canonical error type for repository operations, parameterized by kind.
+///
+/// The two domain error aliases (`MusicRepoError`, `UserRepoError`) share this
+/// implementation; only the kind enum differs.
 #[derive(Debug, Error)]
 #[error("{kind}: {message}")]
-pub struct UserRepoError {
-    kind: UserRepoErrorKind,
+pub struct RepoError<K>
+where
+    K: fmt::Display + Copy,
+{
+    kind: K,
     message: String,
     #[source]
     source: Option<Box<dyn std::error::Error + Send + Sync>>,
 }
 
-impl UserRepoError {
-    /// Create a new user repository error.
-    pub fn new(kind: UserRepoErrorKind, message: impl Into<String>) -> Self {
+impl<K> RepoError<K>
+where
+    K: fmt::Display + Copy,
+{
+    /// Create a new repository error.
+    pub fn new(kind: K, message: impl Into<String>) -> Self {
         Self {
             kind,
             message: message.into(),
@@ -47,9 +56,9 @@ impl UserRepoError {
         }
     }
 
-    /// Create a new user repository error with a source.
+    /// Create a new repository error with a source.
     pub fn with_source(
-        kind: UserRepoErrorKind,
+        kind: K,
         message: impl Into<String>,
         source: impl Into<Box<dyn std::error::Error + Send + Sync>>,
     ) -> Self {
@@ -62,7 +71,7 @@ impl UserRepoError {
 
     /// Returns the error kind.
     #[must_use]
-    pub const fn kind(&self) -> UserRepoErrorKind {
+    pub const fn kind(&self) -> K {
         self.kind
     }
 
@@ -72,6 +81,9 @@ impl UserRepoError {
         &self.message
     }
 }
+
+/// Canonical error type for user repository operations.
+pub type UserRepoError = RepoError<UserRepoErrorKind>;
 
 impl From<diesel::result::Error> for UserRepoError {
     fn from(err: diesel::result::Error) -> Self {
@@ -110,50 +122,7 @@ impl fmt::Display for MusicRepoErrorKind {
 }
 
 /// Canonical error type for music library repository operations.
-#[derive(Debug, Error)]
-#[error("{kind}: {message}")]
-pub struct MusicRepoError {
-    kind: MusicRepoErrorKind,
-    message: String,
-    #[source]
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
-}
-
-impl MusicRepoError {
-    /// Create a new music repository error.
-    pub fn new(kind: MusicRepoErrorKind, message: impl Into<String>) -> Self {
-        Self {
-            kind,
-            message: message.into(),
-            source: None,
-        }
-    }
-
-    /// Create a new music repository error with a source.
-    pub fn with_source(
-        kind: MusicRepoErrorKind,
-        message: impl Into<String>,
-        source: impl Into<Box<dyn std::error::Error + Send + Sync>>,
-    ) -> Self {
-        Self {
-            kind,
-            message: message.into(),
-            source: Some(source.into()),
-        }
-    }
-
-    /// Returns the error kind.
-    #[must_use]
-    pub const fn kind(&self) -> MusicRepoErrorKind {
-        self.kind
-    }
-
-    /// Returns the error message.
-    #[must_use]
-    pub fn message(&self) -> &str {
-        &self.message
-    }
-}
+pub type MusicRepoError = RepoError<MusicRepoErrorKind>;
 
 impl From<diesel::result::Error> for MusicRepoError {
     fn from(err: diesel::result::Error) -> Self {

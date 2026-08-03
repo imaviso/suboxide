@@ -22,12 +22,13 @@
 
 use axum::{
     body::Body,
-    extract::{FromRef, FromRequest, FromRequestParts, Query, Request},
+    extract::{FromRef, FromRequest, FromRequestParts, Request},
     http::request::Parts,
     response::{IntoResponse, Response},
 };
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use serde_html_form as form;
 
 use super::error::ApiError;
 use super::response::{API_VERSION, Format, SubsonicResponse, error_response};
@@ -64,6 +65,67 @@ pub struct AuthParams {
     /// Response format (xml, json, jsonp)
     #[serde(alias = "f")]
     pub f: Option<String>,
+}
+
+/// Normalized ordered Subsonic parameters shared by request extractors.
+#[derive(Clone, Debug)]
+pub(crate) struct NormalizedParams {
+    encoded: String,
+    format: Format,
+    deserialize_error: Option<String>,
+}
+
+impl NormalizedParams {
+    /// Normalize query parameters, preserving a parse error for the extractor.
+    pub(crate) fn from_query(query: Option<&str>) -> Self {
+        let Some(query) = query else {
+            return Self::from_pairs(&[]);
+        };
+
+        match form::from_str::<Vec<(String, String)>>(query) {
+            Ok(pairs) => Self::from_pairs(&pairs),
+            Err(error) => Self {
+                encoded: String::new(),
+                format: Format::Xml,
+                deserialize_error: Some(error.to_string()),
+            },
+        }
+    }
+
+    /// Normalize ordered parameter pairs into the form consumed by handlers.
+    pub(crate) fn from_pairs(pairs: &[(String, String)]) -> Self {
+        let format = pairs
+            .iter()
+            .find_map(|(key, value)| (key == "f").then(|| Format::from_param(Some(value)).ok()))
+            .flatten()
+            .unwrap_or(Format::Xml);
+        let encoded = form::to_string(pairs).unwrap_or_default();
+
+        Self {
+            encoded,
+            format,
+            deserialize_error: None,
+        }
+    }
+
+    /// Return the selected response format, defaulting to XML.
+    #[must_use]
+    pub(crate) const fn format(&self) -> Format {
+        self.format
+    }
+
+    #[cfg(test)]
+    pub(crate) fn encoded(&self) -> &str {
+        &self.encoded
+    }
+
+    /// Deserialize normalized parameters for a typed extractor.
+    pub(crate) fn deserialize<T: DeserializeOwned>(&self) -> Result<T, String> {
+        if let Some(error) = &self.deserialize_error {
+            return Err(error.clone());
+        }
+        form::from_str(&self.encoded).map_err(|error| error.to_string())
+    }
 }
 
 impl AuthParams {
@@ -142,33 +204,18 @@ where
     type Rejection = Response;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        let format = query_format(parts.uri.query());
-        let Some(query) = parts.uri.query() else {
-            return serde_html_form::from_str("").map(Self).map_err(|e| {
-                error_response(format, &ApiError::Generic(e.to_string())).into_response()
-            });
-        };
+        let normalized = parts
+            .extensions
+            .get::<NormalizedParams>()
+            .cloned()
+            .unwrap_or_else(|| NormalizedParams::from_query(parts.uri.query()));
+        let format = normalized.format();
 
-        serde_html_form::from_str(query)
+        normalized
+            .deserialize()
             .map(Self)
-            .map_err(|e| error_response(format, &ApiError::Generic(e.to_string())).into_response())
+            .map_err(|error| error_response(format, &ApiError::Generic(error)).into_response())
     }
-}
-
-fn query_format(query: Option<&str>) -> Format {
-    let Some(query) = query else {
-        return Format::Xml;
-    };
-
-    serde_html_form::from_str::<Vec<(String, String)>>(query)
-        .ok()
-        .and_then(|params| {
-            params
-                .into_iter()
-                .find_map(|(key, value)| (key == "f").then_some(value))
-        })
-        .and_then(|format| Format::from_param(Some(&format)).ok())
-        .unwrap_or(Format::Xml)
 }
 
 /// Authenticated user extractor that also includes the response format.
@@ -295,11 +342,12 @@ where
     async fn from_request(req: Request<Body>, state: &S) -> Result<Self, Self::Rejection> {
         // Extract query parameters first (they exist in both GET and POST)
         let (parts, _body) = req.into_parts();
-        let query_params = Query::<AuthParams>::try_from_uri(&parts.uri)
-            .map(|q| q.0)
-            .unwrap_or_default();
-
-        let mut params = query_params;
+        let normalized = parts
+            .extensions
+            .get::<NormalizedParams>()
+            .cloned()
+            .unwrap_or_else(|| NormalizedParams::from_query(parts.uri.query()));
+        let mut params = normalized.deserialize::<AuthParams>().unwrap_or_default();
         // Support for clients passing credentials in HTTP headers (e.g. SolidSonic)
         // Checks for X-Subsonic-Username, X-Subsonic-Token, and X-Subsonic-Salt
         #[expect(

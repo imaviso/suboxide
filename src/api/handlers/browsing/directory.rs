@@ -98,13 +98,13 @@ fn album_directory(auth: &SubsonicContext, album_id: i32) -> axum::response::Res
             return util::service_error(auth, e);
         }
     };
-    let children = match util::annotate_songs(auth, &songs) {
-        Ok(children) => children,
+    let annotated = match auth.music().annotate_songs_for_user(auth.user.id, songs) {
+        Ok(annotated) => annotated,
         Err(e) => {
             return util::service_error(auth, e);
         }
     };
-    let response = DirectoryResponse::from_album(&album, children);
+    let response = DirectoryResponse::from_album(&album, util::annotate_songs(annotated));
     SubsonicResponse::directory(auth.format, response).into_response()
 }
 

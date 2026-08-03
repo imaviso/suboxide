@@ -173,19 +173,25 @@ pub async fn search3(
         })
         .collect();
 
-    let album_responses = match util::annotate_albums(&auth, &data.albums) {
-        Ok(responses) => responses,
+    let annotated_albums = match auth
+        .music()
+        .annotate_albums_for_user(auth.user.id, data.albums)
+    {
+        Ok(annotated) => annotated,
         Err(error) => return util::service_error(&auth, error),
     };
-    let song_responses = match util::annotate_songs(&auth, &data.songs) {
-        Ok(responses) => responses,
+    let annotated_songs = match auth
+        .music()
+        .annotate_songs_for_user(auth.user.id, data.songs)
+    {
+        Ok(annotated) => annotated,
         Err(error) => return util::service_error(&auth, error),
     };
 
     let response = SearchResult3Response {
         artists: artist_responses,
-        albums: album_responses,
-        songs: song_responses,
+        albums: util::annotate_albums(annotated_albums),
+        songs: util::annotate_songs(annotated_songs),
     };
 
     SubsonicResponse::search_result3(auth.format, response).into_response()
@@ -234,15 +240,18 @@ pub async fn search2(
         })
         .collect();
 
-    let song_responses = match util::annotate_songs(&auth, &data.songs) {
-        Ok(responses) => responses,
+    let annotated_songs = match auth
+        .music()
+        .annotate_songs_for_user(auth.user.id, data.songs)
+    {
+        Ok(annotated) => annotated,
         Err(error) => return util::service_error(&auth, error),
     };
 
     let response = SearchResult2Response {
         artists: artist_responses,
         albums: album_responses,
-        songs: song_responses,
+        songs: util::annotate_songs(annotated_songs),
     };
 
     SubsonicResponse::search_result2(auth.format, response).into_response()

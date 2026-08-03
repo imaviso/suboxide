@@ -13,7 +13,7 @@ where
 {
     /// Register a Subsonic API endpoint with automatic .view suffix.
     /// Both the base path and path.view will be registered with GET and POST methods.
-    /// POST form bodies are converted to query parameters by the formPost
+    /// POST form bodies are normalized with query parameters by the formPost
     /// middleware before reaching handlers.
     ///
     /// # Example

@@ -74,6 +74,7 @@ fn log_lastfm_failure(pool: &DbPool, user_id: i32, error: &LastFmError, operatio
 }
 
 async fn download_artist_image(
+    client: &reqwest::Client,
     artist_id: i32,
     image_url: &str,
 ) -> Result<String, ArtistImageError> {
@@ -98,7 +99,7 @@ async fn download_artist_image(
         return Ok(cover_art_id);
     }
 
-    let response = reqwest::get(image_url).await?;
+    let response = client.get(image_url).send().await?;
     if !response.status().is_success() {
         return Err(ArtistImageError::HttpStatus(response.status()));
     }
@@ -110,20 +111,58 @@ async fn download_artist_image(
     Ok(cover_art_id)
 }
 
+/// Build the shared HTTP client used for external requests (Last.fm metadata,
+/// artist images). A single configured client enables connection reuse and
+/// consistent timeouts.
+fn build_http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0")
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .expect("reqwest client configuration is static and valid")
+}
+
 /// Music library and playback operations.
 #[derive(Clone, Debug)]
 pub struct MusicLibrary {
     pool: DbPool,
     lastfm_client: LastFmClient,
+    http_client: reqwest::Client,
+}
+
+/// A song with current-user annotations attached.
+#[derive(Debug, Clone)]
+pub(in crate::api) struct AnnotatedSong {
+    pub(crate) song: Song,
+    pub(crate) annotations: SongAnnotations,
+}
+
+/// An album with current-user annotations attached.
+#[derive(Debug, Clone)]
+pub(in crate::api) struct AnnotatedAlbum {
+    pub(crate) album: Album,
+    pub(crate) annotations: AlbumAnnotations,
+    pub(crate) starred_at: Option<NaiveDateTime>,
 }
 
 impl MusicLibrary {
-    /// Create a new music library.
+    /// Create a new music library with a shared HTTP client.
     #[must_use]
-    pub const fn new(pool: DbPool, lastfm_client: LastFmClient) -> Self {
+    pub fn new(pool: DbPool, lastfm_client: LastFmClient) -> Self {
+        Self::with_http_client(pool, lastfm_client, build_http_client())
+    }
+
+    /// Create a music library with an explicit shared HTTP client.
+    #[must_use]
+    pub const fn with_http_client(
+        pool: DbPool,
+        lastfm_client: LastFmClient,
+        http_client: reqwest::Client,
+    ) -> Self {
         Self {
             pool,
             lastfm_client,
+            http_client,
         }
     }
 
@@ -552,6 +591,87 @@ impl MusicLibrary {
     // ========================================================================
     // Song & album annotations (ratings, last played, bookmarks)
     // ========================================================================
+
+    /// Attach current-user annotations to a set of songs, preserving input
+    /// order and duplicates.
+    pub(in crate::api) fn annotate_songs_for_user(
+        &self,
+        user_id: i32,
+        songs: Vec<Song>,
+    ) -> Result<Vec<AnnotatedSong>, MusicRepoError> {
+        let song_ids: Vec<i32> = songs.iter().map(|song| song.id).collect();
+        let starred = self.get_starred_at_for_songs_batch(user_id, &song_ids)?;
+        self.annotate_songs_with_starred(user_id, songs, &starred)
+    }
+
+    /// Attach current-user annotations to songs whose starred timestamps are
+    /// already known (e.g. from a starred-items query).
+    pub(in crate::api) fn annotate_songs_with_starred(
+        &self,
+        user_id: i32,
+        songs: Vec<Song>,
+        starred: &HashMap<i32, NaiveDateTime>,
+    ) -> Result<Vec<AnnotatedSong>, MusicRepoError> {
+        let song_ids: Vec<i32> = songs.iter().map(|song| song.id).collect();
+        if song_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let annotations = self.get_song_annotations_batch(user_id, &song_ids)?;
+
+        Ok(songs
+            .into_iter()
+            .map(|song| {
+                let mut entry = annotations.get(&song.id).copied().unwrap_or_default();
+                entry.starred_at = starred.get(&song.id).copied();
+                AnnotatedSong {
+                    song,
+                    annotations: entry,
+                }
+            })
+            .collect())
+    }
+
+    /// Attach current-user annotations to a set of albums, preserving input
+    /// order and duplicates.
+    pub(in crate::api) fn annotate_albums_for_user(
+        &self,
+        user_id: i32,
+        albums: Vec<Album>,
+    ) -> Result<Vec<AnnotatedAlbum>, MusicRepoError> {
+        let album_ids: Vec<i32> = albums.iter().map(|album| album.id).collect();
+        let starred = self.get_starred_at_for_albums_batch(user_id, &album_ids)?;
+        self.annotate_albums_with_starred(user_id, albums, &starred)
+    }
+
+    /// Attach current-user annotations to albums whose starred timestamps are
+    /// already known (e.g. from a starred-items query).
+    pub(in crate::api) fn annotate_albums_with_starred(
+        &self,
+        user_id: i32,
+        albums: Vec<Album>,
+        starred: &HashMap<i32, NaiveDateTime>,
+    ) -> Result<Vec<AnnotatedAlbum>, MusicRepoError> {
+        let album_ids: Vec<i32> = albums.iter().map(|album| album.id).collect();
+        if album_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let annotations = self.get_album_annotations_batch(user_id, &album_ids)?;
+
+        Ok(albums
+            .into_iter()
+            .map(|album| {
+                let entry = annotations.get(&album.id).copied().unwrap_or_default();
+                let starred_at = starred.get(&album.id).copied();
+                AnnotatedAlbum {
+                    album,
+                    annotations: entry,
+                    starred_at,
+                }
+            })
+            .collect())
+    }
 
     /// Fetch per-user annotation data for a set of songs, keyed by song ID.
     pub(in crate::api) fn get_song_annotations_batch(
@@ -1087,7 +1207,7 @@ impl MusicLibrary {
                 }
 
                 if let Some(image_url) = large {
-                    match download_artist_image(artist_id, &image_url).await {
+                    match download_artist_image(&self.http_client, artist_id, &image_url).await {
                         Ok(cover_art_id) => {
                             tracing::debug!(artist = %artist_name, "Downloaded artist image");
                             if let Err(e) = ArtistRepository::new(pool.clone())
@@ -1402,7 +1522,102 @@ impl RemoteSessions {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_lastfm_timestamp;
+    use super::{AnnotatedAlbum, AnnotatedSong, normalize_lastfm_timestamp};
+    use crate::models::music::{Album, AlbumAnnotations, Song, SongAnnotations};
+    use chrono::NaiveDate;
+
+    fn song(id: i32) -> Song {
+        let now = NaiveDate::from_ymd_opt(2024, 1, 1)
+            .expect("valid date")
+            .and_hms_opt(0, 0, 0)
+            .expect("valid time");
+        Song {
+            id,
+            title: format!("Song {id}"),
+            sort_name: None,
+            album_id: Some(1),
+            artist_id: Some(1),
+            artist_name: Some("Artist".into()),
+            album_name: Some("Album".into()),
+            music_folder_id: 1,
+            path: format!("/music/song{id}.flac"),
+            parent_path: "/music".into(),
+            file_size: 100,
+            content_type: "audio/flac".into(),
+            suffix: "flac".into(),
+            duration: 60,
+            bit_rate: None,
+            bit_depth: None,
+            sampling_rate: None,
+            channel_count: None,
+            track_number: Some(1),
+            disc_number: Some(1),
+            year: None,
+            genre: None,
+            cover_art: None,
+            musicbrainz_id: None,
+            play_count: 0,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn album(id: i32) -> Album {
+        let now = NaiveDate::from_ymd_opt(2024, 1, 1)
+            .expect("valid date")
+            .and_hms_opt(0, 0, 0)
+            .expect("valid time");
+        Album {
+            id,
+            name: format!("Album {id}"),
+            sort_name: None,
+            artist_id: Some(1),
+            artist_name: Some("Artist".into()),
+            year: None,
+            genre: None,
+            cover_art: None,
+            musicbrainz_id: None,
+            duration: 120,
+            song_count: 2,
+            play_count: 0,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn annotated_song_preserves_entity_and_annotations() {
+        let item = AnnotatedSong {
+            song: song(7),
+            annotations: SongAnnotations {
+                starred_at: None,
+                user_rating: Some(4),
+                average_rating: Some(3.5),
+                played_at: None,
+                bookmark_position: Some(1200),
+            },
+        };
+        assert_eq!(item.song.id, 7);
+        assert_eq!(item.annotations.user_rating, Some(4));
+        assert_eq!(item.annotations.bookmark_position, Some(1200));
+    }
+
+    #[test]
+    fn annotated_album_preserves_entity_annotations_and_starred_time() {
+        let item = AnnotatedAlbum {
+            album: album(3),
+            annotations: AlbumAnnotations {
+                user_rating: Some(5),
+                average_rating: Some(4.0),
+                played_at: None,
+            },
+            starred_at: None,
+        };
+        assert_eq!(item.album.id, 3);
+        assert_eq!(item.annotations.user_rating, Some(5));
+        assert_eq!(item.annotations.average_rating, Some(4.0));
+        assert!(item.starred_at.is_none());
+    }
 
     #[test]
     fn milliseconds_timestamp_is_converted_to_seconds() {

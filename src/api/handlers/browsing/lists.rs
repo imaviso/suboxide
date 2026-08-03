@@ -182,12 +182,12 @@ pub async fn get_album_list2(
         Err(response) => return *response,
     };
 
-    let album_responses = match util::annotate_albums(&auth, &albums) {
-        Ok(responses) => responses,
+    let annotated = match auth.music().annotate_albums_for_user(auth.user.id, albums) {
+        Ok(annotated) => annotated,
         Err(e) => return util::service_error(&auth, e),
     };
     let response = AlbumList2Response {
-        albums: album_responses,
+        albums: util::annotate_albums(annotated),
     };
 
     SubsonicResponse::album_list2(auth.format, response).into_response()
@@ -311,13 +311,12 @@ pub async fn get_random_songs(
         }
     };
 
-    let song_responses = match util::annotate_songs(&auth, &songs) {
-        Ok(responses) => responses,
+    let annotated = match auth.music().annotate_songs_for_user(auth.user.id, songs) {
+        Ok(annotated) => annotated,
         Err(e) => return util::service_error(&auth, e),
     };
-
     let response = RandomSongsResponse {
-        songs: song_responses,
+        songs: util::annotate_songs(annotated),
     };
 
     SubsonicResponse::random_songs(auth.format, response).into_response()
@@ -363,13 +362,12 @@ pub async fn get_songs_by_genre(
         }
     };
 
-    let song_responses = match util::annotate_songs(&auth, &songs) {
-        Ok(responses) => responses,
+    let annotated = match auth.music().annotate_songs_for_user(auth.user.id, songs) {
+        Ok(annotated) => annotated,
         Err(e) => return util::service_error(&auth, e),
     };
-
     let response = SongsByGenreResponse {
-        songs: song_responses,
+        songs: util::annotate_songs(annotated),
     };
 
     SubsonicResponse::songs_by_genre(auth.format, response).into_response()
@@ -414,13 +412,12 @@ pub async fn get_top_songs(
         }
     };
 
-    let song_responses = match util::annotate_songs(&auth, &songs) {
-        Ok(responses) => responses,
+    let annotated = match auth.music().annotate_songs_for_user(auth.user.id, songs) {
+        Ok(annotated) => annotated,
         Err(e) => return util::service_error(&auth, e),
     };
-
     let response = TopSongsResponse {
-        songs: song_responses,
+        songs: util::annotate_songs(annotated),
     };
 
     SubsonicResponse::top_songs(auth.format, response).into_response()
@@ -469,13 +466,12 @@ pub async fn get_similar_songs2(
         }
     };
 
-    let song_responses = match util::annotate_songs(&auth, &songs) {
-        Ok(responses) => responses,
+    let annotated = match auth.music().annotate_songs_for_user(auth.user.id, songs) {
+        Ok(annotated) => annotated,
         Err(e) => return util::service_error(&auth, e),
     };
-
     let response = SimilarSongs2Response {
-        songs: song_responses,
+        songs: util::annotate_songs(annotated),
     };
 
     SubsonicResponse::similar_songs2(auth.format, response).into_response()
@@ -506,13 +502,12 @@ pub async fn get_similar_songs(
         }
     };
 
-    let song_responses = match util::annotate_songs(&auth, &songs) {
-        Ok(responses) => responses,
+    let annotated = match auth.music().annotate_songs_for_user(auth.user.id, songs) {
+        Ok(annotated) => annotated,
         Err(e) => return util::service_error(&auth, e),
     };
-
     let response = SimilarSongsResponse {
-        songs: song_responses,
+        songs: util::annotate_songs(annotated),
     };
 
     SubsonicResponse::similar_songs(auth.format, response).into_response()
@@ -562,15 +557,15 @@ pub async fn get_starred(auth: SubsonicContext) -> impl IntoResponse {
         .collect();
 
     let songs: Vec<Song> = starred_songs.iter().map(|(song, _)| song.clone()).collect();
-    let song_responses = match util::annotate_songs(&auth, &songs) {
-        Ok(responses) => responses,
+    let annotated = match auth.music().annotate_songs_for_user(user_id, songs) {
+        Ok(annotated) => annotated,
         Err(e) => return util::service_error(&auth, e),
     };
 
     let response = StarredResponse {
         artists: artist_responses,
         albums: album_responses,
-        songs: song_responses,
+        songs: util::annotate_songs(annotated),
     };
 
     SubsonicResponse::starred(auth.format, response).into_response()

@@ -16,8 +16,11 @@ fn playlist_with_songs_response(
     playlist: &Playlist,
     songs: &[Song],
 ) -> Result<PlaylistWithSongsResponse, Box<Response>> {
-    let entries = util::annotate_songs(auth, songs)
+    let annotated = auth
+        .music()
+        .annotate_songs_for_user(auth.user.id, songs.to_vec())
         .map_err(|error| Box::new(util::service_error(auth, error)))?;
+    let entries = util::annotate_songs(annotated);
     let cover_art = songs.first().and_then(|song| song.cover_art.clone());
 
     Ok(PlaylistWithSongsResponse {

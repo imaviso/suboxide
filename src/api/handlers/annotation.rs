@@ -150,23 +150,23 @@ pub async fn get_starred2(auth: SubsonicContext) -> impl IntoResponse {
             return util::service_error(&auth, e);
         }
     };
-    let album_ids: Vec<i32> = starred_albums.iter().map(|(album, _)| album.id).collect();
-    let album_annotations = match auth
-        .music()
-        .get_album_annotations_batch(user_id, &album_ids)
-    {
-        Ok(v) => v,
-        Err(e) => {
-            return util::service_error(&auth, e);
-        }
-    };
-    let albums: Vec<AlbumID3Response> = starred_albums
+    let album_starred: std::collections::HashMap<i32, chrono::NaiveDateTime> = starred_albums
         .iter()
-        .map(|(album, starred_at)| {
-            AlbumID3Response::from_album_with_starred(album, Some(starred_at))
-                .with_annotations(album_annotations.get(&album.id))
-        })
+        .map(|(album, starred_at)| (album.id, *starred_at))
         .collect();
+    let album_songs: Vec<crate::models::music::Album> =
+        starred_albums.into_iter().map(|(album, _)| album).collect();
+    let annotated_albums =
+        match auth
+            .music()
+            .annotate_albums_with_starred(user_id, album_songs, &album_starred)
+        {
+            Ok(v) => v,
+            Err(e) => {
+                return util::service_error(&auth, e);
+            }
+        };
+    let albums: Vec<AlbumID3Response> = util::annotate_albums(annotated_albums);
 
     let starred_songs = match auth.music().get_starred_songs(user_id) {
         Ok(v) => v,
@@ -174,20 +174,23 @@ pub async fn get_starred2(auth: SubsonicContext) -> impl IntoResponse {
             return util::service_error(&auth, e);
         }
     };
-    let song_ids: Vec<i32> = starred_songs.iter().map(|(song, _)| song.id).collect();
-    let song_annotations = match auth.music().get_song_annotations_batch(user_id, &song_ids) {
-        Ok(v) => v,
-        Err(e) => {
-            return util::service_error(&auth, e);
-        }
-    };
-    let songs: Vec<ChildResponse> = starred_songs
+    let song_starred: std::collections::HashMap<i32, chrono::NaiveDateTime> = starred_songs
         .iter()
-        .map(|(song, starred_at)| {
-            ChildResponse::from_song_with_starred(song, Some(starred_at))
-                .with_annotations(song_annotations.get(&song.id))
-        })
+        .map(|(song, starred_at)| (song.id, *starred_at))
         .collect();
+    let songs: Vec<crate::models::music::Song> =
+        starred_songs.into_iter().map(|(song, _)| song).collect();
+    let annotated_songs =
+        match auth
+            .music()
+            .annotate_songs_with_starred(user_id, songs, &song_starred)
+        {
+            Ok(v) => v,
+            Err(e) => {
+                return util::service_error(&auth, e);
+            }
+        };
+    let songs: Vec<ChildResponse> = util::annotate_songs(annotated_songs);
 
     let response = Starred2Response {
         artists,

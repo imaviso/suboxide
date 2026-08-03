@@ -17,6 +17,7 @@ use tower_http::compression::CompressionLayer;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
+use crate::api::auth::NormalizedParams;
 use crate::api::services::{MusicLibrary, RemoteSessions, Users};
 use crate::api::{SubsonicRouterExt, handlers};
 use crate::db::DbPool;
@@ -160,7 +161,7 @@ pub fn create_router(state: AppState, cors_config: &CorsConfig) -> Router {
         .nest(
             "/rest",
             rest_routes()
-                .layer(middleware::from_fn(post_form_to_query_params))
+                .layer(middleware::from_fn(normalize_request_params))
                 .layer(middleware::from_fn(run_request_on_blocking_thread)),
         )
         .layer(CompressionLayer::new())
@@ -323,24 +324,32 @@ fn scanning_routes() -> Router<AppState> {
 /// Maximum accepted form body size (10MB), matching navidrome.
 const MAX_FORM_BODY_BYTES: usize = 10 << 20;
 
-/// Parse `application/x-www-form-urlencoded` POST bodies into query params
-/// (`OpenSubsonic` formPost extension).
+/// Normalize Subsonic query and form parameters into a request extension.
 ///
-/// Body parameters are placed before query-string parameters so they win
-/// when a handler sees duplicate keys, matching navidrome's behavior.
-async fn post_form_to_query_params(req: Request<Body>, next: Next) -> Response {
-    use axum::http::header;
+/// Form-body parameters are placed before query-string parameters so repeated
+/// values and precedence match navidrome's formPost behavior.
+async fn normalize_request_params(req: Request<Body>, next: Next) -> Response {
+    use axum::http::{Method, header};
 
-    if req.method() != axum::http::Method::POST {
-        return next.run(req).await;
+    if req.method() != Method::POST {
+        let (mut parts, body) = req.into_parts();
+        parts
+            .extensions
+            .insert(NormalizedParams::from_query(parts.uri.query()));
+        return next.run(Request::from_parts(parts, body)).await;
     }
+
     let is_form = req
         .headers()
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .is_some_and(|content_type| content_type.starts_with("application/x-www-form-urlencoded"));
     if !is_form {
-        return next.run(req).await;
+        let (mut parts, body) = req.into_parts();
+        parts
+            .extensions
+            .insert(NormalizedParams::from_query(parts.uri.query()));
+        return next.run(Request::from_parts(parts, body)).await;
     }
 
     let (mut parts, body) = req.into_parts();
@@ -357,24 +366,9 @@ async fn post_form_to_query_params(req: Request<Body>, next: Next) -> Response {
         pairs.extend(query_pairs);
     }
 
-    let merged = serde_html_form::to_string(&pairs).unwrap_or_default();
-    let path = parts.uri.path().to_owned();
-    let path_and_query = if merged.is_empty() {
-        path
-    } else {
-        format!("{path}?{merged}")
-    };
-
-    let Ok(path_and_query) = path_and_query.parse::<axum::http::uri::PathAndQuery>() else {
-        return (StatusCode::BAD_REQUEST, "invalid request parameters").into_response();
-    };
-    let mut uri_parts = parts.uri.into_parts();
-    uri_parts.path_and_query = Some(path_and_query);
-    let Ok(uri) = axum::http::Uri::from_parts(uri_parts) else {
-        return (StatusCode::BAD_REQUEST, "invalid request URI").into_response();
-    };
-    parts.uri = uri;
-
+    parts
+        .extensions
+        .insert(NormalizedParams::from_pairs(&pairs));
     next.run(Request::from_parts(parts, Body::empty())).await
 }
 
@@ -416,7 +410,7 @@ mod tests {
     use axum::middleware;
     use tower::ServiceExt;
 
-    use super::{cors_origins_from_str, post_form_to_query_params};
+    use super::{NormalizedParams, cors_origins_from_str, normalize_request_params};
 
     #[test]
     fn cors_origins_from_str_trims_and_ignores_empty_segments() {
@@ -437,13 +431,16 @@ mod tests {
     }
 
     fn echo_query_router() -> Router {
-        async fn echo_query(uri: axum::http::Uri) -> String {
-            uri.query().unwrap_or_default().to_string()
+        async fn echo_query(req: Request) -> String {
+            req.extensions()
+                .get::<NormalizedParams>()
+                .map(|params| params.encoded().to_string())
+                .unwrap_or_default()
         }
 
         Router::new()
             .route("/ping", axum::routing::get(echo_query).post(echo_query))
-            .layer(middleware::from_fn(post_form_to_query_params))
+            .layer(middleware::from_fn(normalize_request_params))
     }
 
     #[tokio::test]
@@ -525,7 +522,7 @@ mod tests {
             .await
             .expect("body must read");
         let body = String::from_utf8(body.to_vec()).expect("body must be UTF-8");
-        assert!(body.starts_with("f="), "unexpected query: {body}");
+        assert!(body.starts_with("f="), "unexpected parameters: {body}");
         assert!(
             body.contains("%EF%BF%BD"),
             "invalid bytes must become replacement chars: {body}"

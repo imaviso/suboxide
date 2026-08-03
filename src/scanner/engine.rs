@@ -14,7 +14,7 @@ use walkdir::WalkDir;
 use crate::db::{DbPool, MusicFolderRepository, MusicRepoError};
 use crate::models::music::{MusicFolder, normalize_search_text};
 use crate::paths::resolve_cover_art_dir;
-use crate::scanner::state::{ScanPhase, ScanState, ScanStateHandle};
+use crate::scanner::state::{ScanPhase, ScanStateHandle};
 use crate::scanner::types::{
     AUDIO_EXTENSIONS, BATCH_SIZE, COVER_ART_FILENAMES, DEFAULT_AUTO_SCAN_INTERVAL_SECS,
     IMAGE_EXTENSIONS, PreparedTrack, ScanError, ScanMode, ScanResult, ScannedTrack,
@@ -191,14 +191,17 @@ impl Scanner {
     /// Scan all enabled music folders with optional progress tracking.
     ///
     /// If a `ScanState` is provided, the count will be updated as tracks are processed.
-    pub fn scan_all_with_state(&self, state: Option<&ScanState>) -> Result<ScanResult, ScanError> {
+    pub fn scan_all_with_state(
+        &self,
+        state: Option<&ScanStateHandle>,
+    ) -> Result<ScanResult, ScanError> {
         self.scan_all_with_options(state, ScanMode::Full)
     }
 
     /// Scan all enabled music folders with optional progress tracking and scan mode.
     pub fn scan_all_with_options(
         &self,
-        state: Option<&ScanState>,
+        state: Option<&ScanStateHandle>,
         mode: ScanMode,
     ) -> Result<ScanResult, ScanError> {
         let folder_repo = MusicFolderRepository::new(self.pool.clone());
@@ -280,7 +283,7 @@ impl Scanner {
     pub fn scan_folder_by_id_with_state_and_mode(
         &self,
         folder_id: i32,
-        state: Option<&ScanState>,
+        state: Option<&ScanStateHandle>,
         mode: ScanMode,
     ) -> Result<ScanResult, ScanError> {
         let folder_repo = MusicFolderRepository::new(self.pool.clone());
@@ -299,7 +302,7 @@ impl Scanner {
     fn scan_folder_with_options(
         &self,
         folder: &MusicFolder,
-        state: Option<&ScanState>,
+        state: Option<&ScanStateHandle>,
         mode: ScanMode,
     ) -> Result<ScanResult, ScanError> {
         let mut result = ScanResult::default();
@@ -690,7 +693,7 @@ impl Scanner {
         folder: &MusicFolder,
         tracks: Vec<ScannedTrack>,
         existing_songs: &HashMap<String, ExistingSong>,
-        state: Option<&ScanState>,
+        state: Option<&ScanStateHandle>,
         initial_tracks_skipped: usize,
     ) -> Result<ScanResult, ScanError> {
         use crate::db::schema::{albums, artists, songs};
@@ -1036,7 +1039,7 @@ impl Scanner {
                     dirty_album_ids.insert(album_id);
                 }
                 if let Some(state) = state {
-                    state.increment_count();
+                    state.set_count(state.get_count() + 1);
                 }
             }
         }

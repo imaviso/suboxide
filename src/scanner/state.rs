@@ -41,13 +41,49 @@ impl ScanStateHandle {
     pub fn try_start(&self) -> Option<ScanGuard<'static>> {
         self.0.try_start_owned(Arc::clone(&self.0))
     }
-}
 
-impl std::ops::Deref for ScanStateHandle {
-    type Target = ScanState;
+    /// Check if a scan is currently in progress.
+    #[must_use]
+    pub fn is_scanning(&self) -> bool {
+        self.0.is_scanning()
+    }
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
+    /// Get a consistent scan progress snapshot.
+    #[must_use]
+    pub fn snapshot(&self) -> ScanSnapshot {
+        self.0.snapshot()
+    }
+
+    /// Get the current item count.
+    #[must_use]
+    pub fn get_count(&self) -> u64 {
+        self.0.get_count()
+    }
+
+    /// Get the total item count (0 if unknown).
+    #[must_use]
+    pub fn get_total(&self) -> u64 {
+        self.0.get_total()
+    }
+
+    /// Set the number of processed items.
+    pub fn set_count(&self, value: u64) {
+        self.0.set_count(value);
+    }
+
+    /// Set the total number of items to scan (0 if unknown).
+    pub fn set_total(&self, value: u64) {
+        self.0.set_total(value);
+    }
+
+    /// Set the current scan phase.
+    pub fn set_phase(&self, phase: ScanPhase) {
+        self.0.set_phase(phase);
+    }
+
+    /// Set the current folder being scanned.
+    pub fn set_current_folder(&self, folder: Option<String>) {
+        self.0.set_current_folder(folder);
     }
 }
 
