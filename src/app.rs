@@ -160,9 +160,7 @@ pub fn create_router(state: AppState, cors_config: &CorsConfig) -> Router {
     Router::new()
         .nest(
             "/rest",
-            rest_routes()
-                .layer(middleware::from_fn(normalize_request_params))
-                .layer(middleware::from_fn(run_request_on_blocking_thread)),
+            rest_routes().layer(middleware::from_fn(normalize_request_params)),
         )
         .layer(CompressionLayer::new())
         .layer(cors_config.layer())
@@ -370,35 +368,6 @@ async fn normalize_request_params(req: Request<Body>, next: Next) -> Response {
         .extensions
         .insert(NormalizedParams::from_pairs(&pairs));
     next.run(Request::from_parts(parts, Body::empty())).await
-}
-
-/// Handlers that perform only cheap, allocation-free work and never touch the
-/// database. They stay on the async runtime instead of consuming a blocking
-/// thread.
-const ASYNC_ONLY_PATHS: &[&str] = &["/rest/ping", "/rest/getLicense"];
-
-async fn run_request_on_blocking_thread(req: Request<Body>, next: Next) -> Response {
-    let Ok(handle) = tokio::runtime::Handle::try_current() else {
-        return next.run(req).await;
-    };
-
-    // Cheap endpoints do not need blocking-thread capacity.
-    let path = req.uri().path();
-    let async_only = ASYNC_ONLY_PATHS
-        .iter()
-        .any(|prefix| path == *prefix || path.strip_suffix(".view") == Some(*prefix));
-    if async_only {
-        return next.run(req).await;
-    }
-
-    if matches!(
-        handle.runtime_flavor(),
-        tokio::runtime::RuntimeFlavor::MultiThread
-    ) {
-        tokio::task::block_in_place(|| handle.block_on(next.run(req)))
-    } else {
-        next.run(req).await
-    }
 }
 
 async fn handle_middleware_error(error: BoxError) -> (StatusCode, &'static str) {

@@ -77,63 +77,60 @@ pub async fn get_indexes(
     crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<IndexesParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
-    let last_modified = match library_last_modified(&auth) {
-        Ok(value) => value,
-        Err(e) => return util::service_error(&auth, e),
-    };
+    let if_modified_since = params.if_modified_since;
+    let blocking_auth = auth.clone();
+    let response = match util::run_blocking(
+        &auth,
+        move || -> Result<IndexesResponse, crate::db::MusicRepoError> {
+            let last_modified = library_last_modified(&blocking_auth)?;
 
-    // Not modified since the client's cached version: return empty indexes
-    if last_modified > 0 && params.if_modified_since.unwrap_or(0) >= last_modified {
-        let response = IndexesResponse {
-            ignored_articles: "The El La Los Las Le Les".to_string(),
-            last_modified,
-            indexes: Vec::new(),
-        };
-        return SubsonicResponse::indexes(auth.format, response).into_response();
-    }
+            // Not modified since the client's cached version: return empty indexes
+            if last_modified > 0 && if_modified_since.unwrap_or(0) >= last_modified {
+                return Ok(IndexesResponse {
+                    ignored_articles: "The El La Los Las Le Les".to_string(),
+                    last_modified,
+                    indexes: Vec::new(),
+                });
+            }
 
-    let artists = match auth.music().get_artists() {
-        Ok(artists) => artists,
-        Err(e) => {
-            return util::service_error(&auth, e);
-        }
-    };
-    let user_id = auth.user.id;
+            let artists = blocking_auth.music().get_artists()?;
+            let user_id = blocking_auth.user.id;
 
-    // Get starred status for all artists in a single batch query
-    let artist_ids: Vec<i32> = artists.iter().map(|a| a.id).collect();
-    let starred_map = match auth
-        .music()
-        .get_starred_at_for_artists_batch(user_id, &artist_ids)
+            // Get starred status for all artists in a single batch query
+            let artist_ids: Vec<i32> = artists.iter().map(|a| a.id).collect();
+            let starred_map = blocking_auth
+                .music()
+                .get_starred_at_for_artists_batch(user_id, &artist_ids)?;
+
+            // Group artists by first letter
+            let mut index_map: BTreeMap<String, Vec<ArtistResponse>> = BTreeMap::new();
+
+            for artist in &artists {
+                let starred_at = starred_map.get(&artist.id);
+
+                index_map
+                    .entry(artist_index_key(artist))
+                    .or_default()
+                    .push(ArtistResponse::from_artist_with_starred(artist, starred_at));
+            }
+
+            // Convert to response format
+            let indexes: Vec<IndexResponse> = index_map
+                .into_iter()
+                .map(|(name, artists)| IndexResponse { name, artists })
+                .collect();
+
+            Ok(IndexesResponse {
+                ignored_articles: "The El La Los Las Le Les".to_string(),
+                last_modified,
+                indexes,
+            })
+        },
+    )
+    .await
     {
-        Ok(starred_map) => starred_map,
-        Err(e) => {
-            return util::service_error(&auth, e);
-        }
-    };
-
-    // Group artists by first letter
-    let mut index_map: BTreeMap<String, Vec<ArtistResponse>> = BTreeMap::new();
-
-    for artist in &artists {
-        let starred_at = starred_map.get(&artist.id);
-
-        index_map
-            .entry(artist_index_key(artist))
-            .or_default()
-            .push(ArtistResponse::from_artist_with_starred(artist, starred_at));
-    }
-
-    // Convert to response format
-    let indexes: Vec<IndexResponse> = index_map
-        .into_iter()
-        .map(|(name, artists)| IndexResponse { name, artists })
-        .collect();
-
-    let response = IndexesResponse {
-        ignored_articles: "The El La Los Las Le Les".to_string(),
-        last_modified,
-        indexes,
+        Ok(response) => response,
+        Err(error) => return *error,
     };
 
     SubsonicResponse::indexes(auth.format, response).into_response()
@@ -149,66 +146,60 @@ pub async fn get_artists(
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let _ = params.if_modified_since;
-    let last_modified = match library_last_modified(&auth) {
-        Ok(value) => value,
-        Err(e) => return util::service_error(&auth, e),
-    };
+    let blocking_auth = auth.clone();
+    let response = match util::run_blocking(
+        &auth,
+        move || -> Result<ArtistsID3Response, crate::db::MusicRepoError> {
+            let last_modified = library_last_modified(&blocking_auth)?;
 
-    let artists = match auth.music().get_artists() {
-        Ok(artists) => artists,
-        Err(e) => {
-            return util::service_error(&auth, e);
-        }
-    };
-    let user_id = auth.user.id;
+            let artists = blocking_auth.music().get_artists()?;
+            let user_id = blocking_auth.user.id;
 
-    // Get album counts for all artists in a single batch query
-    let artist_ids: Vec<i32> = artists.iter().map(|a| a.id).collect();
-    let album_counts = match auth.music().get_artist_album_counts_batch(&artist_ids) {
-        Ok(album_counts) => album_counts,
-        Err(e) => {
-            return util::service_error(&auth, e);
-        }
-    };
+            // Get album counts for all artists in a single batch query
+            let artist_ids: Vec<i32> = artists.iter().map(|a| a.id).collect();
+            let album_counts = blocking_auth
+                .music()
+                .get_artist_album_counts_batch(&artist_ids)?;
 
-    // Get starred status for all artists in a single batch query
-    let starred_map = match auth
-        .music()
-        .get_starred_at_for_artists_batch(user_id, &artist_ids)
+            // Get starred status for all artists in a single batch query
+            let starred_map = blocking_auth
+                .music()
+                .get_starred_at_for_artists_batch(user_id, &artist_ids)?;
+
+            // Group artists by first letter
+            let mut index_map: BTreeMap<String, Vec<ArtistID3Response>> = BTreeMap::new();
+
+            for artist in &artists {
+                // Get album count and starred status from batch results
+                let album_count = album_counts.get(&artist.id).copied().unwrap_or(0);
+                let starred_at = starred_map.get(&artist.id);
+
+                index_map.entry(artist_index_key(artist)).or_default().push(
+                    ArtistID3Response::from_artist_with_starred(
+                        artist,
+                        Some(saturating_i64_to_i32(album_count)),
+                        starred_at,
+                    ),
+                );
+            }
+
+            // Convert to response format
+            let indexes: Vec<IndexID3Response> = index_map
+                .into_iter()
+                .map(|(name, artists)| IndexID3Response { name, artists })
+                .collect();
+
+            Ok(ArtistsID3Response {
+                ignored_articles: "The El La Los Las Le Les".to_string(),
+                last_modified,
+                indexes,
+            })
+        },
+    )
+    .await
     {
-        Ok(starred_map) => starred_map,
-        Err(e) => {
-            return util::service_error(&auth, e);
-        }
-    };
-
-    // Group artists by first letter
-    let mut index_map: BTreeMap<String, Vec<ArtistID3Response>> = BTreeMap::new();
-
-    for artist in &artists {
-        // Get album count and starred status from batch results
-        let album_count = album_counts.get(&artist.id).copied().unwrap_or(0);
-        let starred_at = starred_map.get(&artist.id);
-
-        index_map.entry(artist_index_key(artist)).or_default().push(
-            ArtistID3Response::from_artist_with_starred(
-                artist,
-                Some(saturating_i64_to_i32(album_count)),
-                starred_at,
-            ),
-        );
-    }
-
-    // Convert to response format
-    let indexes: Vec<IndexID3Response> = index_map
-        .into_iter()
-        .map(|(name, artists)| IndexID3Response { name, artists })
-        .collect();
-
-    let response = ArtistsID3Response {
-        ignored_articles: "The El La Los Las Le Les".to_string(),
-        last_modified,
-        indexes,
+        Ok(response) => response,
+        Err(error) => return *error,
     };
 
     SubsonicResponse::artists(auth.format, response).into_response()

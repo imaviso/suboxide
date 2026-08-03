@@ -296,27 +296,34 @@ pub async fn get_random_songs(
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let size = params.size.unwrap_or(10).clamp(1, 500);
-    let _user_id = auth.user.id;
+    let genre = params.genre.clone();
+    let from_year = params.from_year;
+    let to_year = params.to_year;
+    let music_folder_id = params.music_folder_id;
+    let blocking_auth = auth.clone();
+    let response = match util::run_blocking(
+        &auth,
+        move || -> Result<RandomSongsResponse, crate::db::MusicRepoError> {
+            let songs = blocking_auth.music().get_random_songs(
+                size,
+                genre.as_deref(),
+                from_year,
+                to_year,
+                music_folder_id,
+            )?;
 
-    let songs = match auth.music().get_random_songs(
-        size,
-        params.genre.as_deref(),
-        params.from_year,
-        params.to_year,
-        params.music_folder_id,
-    ) {
-        Ok(v) => v,
-        Err(e) => {
-            return util::service_error(&auth, e);
-        }
-    };
-
-    let annotated = match auth.music().annotate_songs_for_user(auth.user.id, songs) {
-        Ok(annotated) => annotated,
-        Err(e) => return util::service_error(&auth, e),
-    };
-    let response = RandomSongsResponse {
-        songs: util::annotate_songs(annotated),
+            let annotated = blocking_auth
+                .music()
+                .annotate_songs_for_user(blocking_auth.user.id, songs)?;
+            Ok(RandomSongsResponse {
+                songs: util::annotate_songs(annotated),
+            })
+        },
+    )
+    .await
+    {
+        Ok(response) => response,
+        Err(error) => return *error,
     };
 
     SubsonicResponse::random_songs(auth.format, response).into_response()
@@ -344,30 +351,34 @@ pub async fn get_songs_by_genre(
     crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<SongsByGenreParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
-    let Some(genre) = params.genre.as_deref() else {
+    let Some(genre) = params.genre.clone() else {
         return util::missing_param(&auth, "genre");
     };
 
     let count = params.count.unwrap_or(10).clamp(1, 500);
     let offset = params.offset.unwrap_or(0).max(0);
-    let _user_id = auth.user.id;
+    let music_folder_id = params.music_folder_id;
+    let blocking_auth = auth.clone();
+    let response = match util::run_blocking(
+        &auth,
+        move || -> Result<SongsByGenreResponse, crate::db::MusicRepoError> {
+            let songs =
+                blocking_auth
+                    .music()
+                    .get_songs_by_genre(&genre, count, offset, music_folder_id)?;
 
-    let songs = match auth
-        .music()
-        .get_songs_by_genre(genre, count, offset, params.music_folder_id)
+            let annotated = blocking_auth
+                .music()
+                .annotate_songs_for_user(blocking_auth.user.id, songs)?;
+            Ok(SongsByGenreResponse {
+                songs: util::annotate_songs(annotated),
+            })
+        },
+    )
+    .await
     {
-        Ok(v) => v,
-        Err(e) => {
-            return util::service_error(&auth, e);
-        }
-    };
-
-    let annotated = match auth.music().annotate_songs_for_user(auth.user.id, songs) {
-        Ok(annotated) => annotated,
-        Err(e) => return util::service_error(&auth, e),
-    };
-    let response = SongsByGenreResponse {
-        songs: util::annotate_songs(annotated),
+        Ok(response) => response,
+        Err(error) => return *error,
     };
 
     SubsonicResponse::songs_by_genre(auth.format, response).into_response()
