@@ -109,7 +109,8 @@ fn similar_songs_for_seed(
 fn similar_songs_seed(params: &SimilarSongs2Params) -> Result<SimilarSongsSeed, ApiError> {
     use crate::models::music::EntityId;
 
-    let seed_count = usize::from(params.song_id.is_some())
+    let seed_count = usize::from(params.id.is_some())
+        + usize::from(params.song_id.is_some())
         + usize::from(params.album_id.is_some())
         + usize::from(params.artist_id.is_some());
 
@@ -118,6 +119,14 @@ fn similar_songs_seed(params: &SimilarSongs2Params) -> Result<SimilarSongsSeed, 
             "songId, albumId, or artistId".into(),
         )),
         1 => {
+            if let Some(id) = params.id.as_deref() {
+                return match EntityId::parse(id) {
+                    Some(EntityId::Song(id)) => Ok(SimilarSongsSeed::Song(id)),
+                    Some(EntityId::Album(id)) => Ok(SimilarSongsSeed::Album(id)),
+                    Some(EntityId::Artist(id)) => Ok(SimilarSongsSeed::Artist(id)),
+                    _ => Err(ApiError::Generic("Invalid id".into())),
+                };
+            }
             if let Some(id) = params.song_id.as_deref() {
                 return EntityId::parse_song(id)
                     .map(SimilarSongsSeed::Song)
@@ -434,10 +443,12 @@ pub async fn get_top_songs(
     SubsonicResponse::top_songs(auth.format, response).into_response()
 }
 
-/// Query parameters for getSimilarSongs2.
+/// Query parameters for getSimilarSongs/getSimilarSongs2.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct SimilarSongs2Params {
+    /// The song, album, or artist ID to use as similarity seed.
+    pub id: Option<String>,
     /// The song ID to use as similarity seed.
     #[serde(rename = "songId")]
     pub song_id: Option<String>,
@@ -624,6 +635,7 @@ mod tests {
             song_id: Some("mf-1".to_string()),
             album_id: Some("al-2".to_string()),
             artist_id: None,
+            id: None,
             count: None,
         })
         .expect_err("multiple seeds should fail");
@@ -633,11 +645,50 @@ mod tests {
     }
 
     #[test]
+    fn similar_songs_seed_accepts_generic_id() {
+        let song = similar_songs_seed(&SimilarSongs2Params {
+            id: Some("mf-42".to_string()),
+            ..SimilarSongs2Params::default()
+        })
+        .expect("song id should parse");
+        assert!(matches!(song, SimilarSongsSeed::Song(42)));
+
+        let album = similar_songs_seed(&SimilarSongs2Params {
+            id: Some("al-7".to_string()),
+            ..SimilarSongs2Params::default()
+        })
+        .expect("album id should parse");
+        assert!(matches!(album, SimilarSongsSeed::Album(7)));
+
+        let artist = similar_songs_seed(&SimilarSongs2Params {
+            id: Some("ar-3".to_string()),
+            ..SimilarSongs2Params::default()
+        })
+        .expect("artist id should parse");
+        assert!(matches!(artist, SimilarSongsSeed::Artist(3)));
+
+        let bare = similar_songs_seed(&SimilarSongs2Params {
+            id: Some("9".to_string()),
+            ..SimilarSongs2Params::default()
+        })
+        .expect("bare integer should default to song");
+        assert!(matches!(bare, SimilarSongsSeed::Song(9)));
+
+        let invalid = similar_songs_seed(&SimilarSongs2Params {
+            id: Some("bogus".to_string()),
+            ..SimilarSongs2Params::default()
+        })
+        .expect_err("invalid id should fail");
+        assert!(matches!(invalid, ApiError::Generic(message) if message == "Invalid id"));
+    }
+
+    #[test]
     fn similar_songs_seed_preserves_selected_seed_id() {
         let seed = similar_songs_seed(&SimilarSongs2Params {
             song_id: None,
             album_id: None,
             artist_id: Some("ar-42".to_string()),
+            id: None,
             count: None,
         })
         .expect("single artist seed should parse");
@@ -651,6 +702,7 @@ mod tests {
             song_id: Some("bogus".to_string()),
             album_id: None,
             artist_id: None,
+            id: None,
             count: None,
         })
         .expect_err("invalid id should fail");
