@@ -219,9 +219,13 @@ impl Scanner {
                 s.set_current_folder(Some(folder.name.clone()));
             }
 
-            println!(
-                "Scanning folder: {} ({}) [mode: {:?}]",
-                folder.name, folder.path, mode
+            tracing::event!(
+                name: "scan.folder.started",
+                tracing::Level::INFO,
+                folder.name = %folder.name,
+                folder.path = %folder.path,
+                scan.mode = ?mode,
+                "scanning folder"
             );
             match self.scan_folder_with_options(folder, state, mode) {
                 Ok(result) => {
@@ -236,7 +240,13 @@ impl Scanner {
                     total_result.cover_art_saved += result.cover_art_saved;
                 }
                 Err(e) => {
-                    eprintln!("Error scanning folder {}: {}", folder.name, e);
+                    tracing::event!(
+                        name: "scan.folder.failed",
+                        tracing::Level::ERROR,
+                        folder.name = %folder.name,
+                        error = %e,
+                        "error scanning folder"
+                    );
                     return Err(e);
                 }
             }
@@ -259,7 +269,12 @@ impl Scanner {
             crate::db::SETTING_LAST_SCAN_AT,
             &chrono::Utc::now().timestamp_millis().to_string(),
         ) {
-            eprintln!("Warning: failed to record scan completion time: {e}");
+            tracing::event!(
+                name: "scan.last_scan_write_failed",
+                tracing::Level::WARN,
+                error = %e,
+                "failed to record scan completion time"
+            );
         }
 
         Ok(total_result)
@@ -291,9 +306,13 @@ impl Scanner {
             .find_by_id(folder_id)?
             .ok_or_else(|| ScanError::FolderNotFound(folder_id.to_string()))?;
 
-        println!(
-            "Scanning folder: {} ({}) [mode: {:?}]",
-            folder.name, folder.path, mode
+        tracing::event!(
+            name: "scan.folder.started",
+            tracing::Level::INFO,
+            folder.name = %folder.name,
+            folder.path = %folder.path,
+            scan.mode = ?mode,
+            "scanning folder"
         );
         self.scan_folder_with_options(&folder, state, mode)
     }
@@ -339,10 +358,14 @@ impl Scanner {
             s.set_phase(ScanPhase::Processing);
         }
 
-        println!("  Found {} audio files on disk", result.tracks_found);
-        if skipped_unchanged > 0 {
-            println!("  Skipping {skipped_unchanged} unchanged files");
-        }
+        tracing::event!(
+            name: "scan.folder.discovered",
+            tracing::Level::INFO,
+            folder.name = %folder.name,
+            tracks.found = result.tracks_found,
+            tracks.skipped_unchanged = skipped_unchanged,
+            "discovered audio files"
+        );
 
         // Read metadata in parallel for files that need processing.
         let folder_path_str = folder.path.clone();
@@ -352,7 +375,13 @@ impl Scanner {
                 |file| match Self::read_track_metadata_static(file, &folder_path_str) {
                     Ok(track) => Some(track),
                     Err(e) => {
-                        eprintln!("  Warning: Failed to read {}: {}", file.path.display(), e);
+                        tracing::event!(
+                            name: "scan.track.metadata_failed",
+                            tracing::Level::WARN,
+                            file.path = %file.path.display(),
+                            error = %e,
+                            "failed to read track metadata"
+                        );
                         None
                     }
                 },
@@ -371,9 +400,12 @@ impl Scanner {
                 .iter()
                 .filter_map(|path| existing_songs.get(path).and_then(|song| song.album_id))
                 .collect();
-            println!(
-                "  Removing {} deleted files from database",
-                deleted_paths.len()
+            tracing::event!(
+                name: "scan.folder.removing_deleted",
+                tracing::Level::INFO,
+                folder.name = %folder.name,
+                tracks.removed = deleted_paths.len(),
+                "removing deleted files from database"
             );
             result.tracks_removed = self.remove_deleted_songs(&deleted_paths)?;
             self.update_album_stats_for_ids(&dirty_album_ids)?;
@@ -511,10 +543,12 @@ impl Scanner {
                 let metadata = match fs::metadata(&path) {
                     Ok(metadata) => metadata,
                     Err(e) => {
-                        eprintln!(
-                            "  Warning: Failed to read metadata {}: {}",
-                            path.display(),
-                            e
+                        tracing::event!(
+                            name: "scan.discovery.metadata_failed",
+                            tracing::Level::WARN,
+                            file.path = %path.display(),
+                            error = %e,
+                            "failed to read file metadata"
                         );
                         return None;
                     }
@@ -884,7 +918,13 @@ impl Scanner {
                                         .set(albums::cover_art.eq(&cover_art_hash))
                                         .execute(&mut conn)
                                 {
-                                    eprintln!("  Warning: Failed to update album cover art: {e}");
+                                    tracing::event!(
+                                        name: "scan.cover_art.album_update_failed",
+                                        tracing::Level::WARN,
+                                        album.id = album_id,
+                                        error = %e,
+                                        "failed to update album cover art"
+                                    );
                                     None
                                 } else {
                                     album_cover_art_cache
@@ -894,7 +934,12 @@ impl Scanner {
                                 }
                             }
                             Err(e) => {
-                                eprintln!("  Warning: Failed to save cover art: {e}");
+                                tracing::event!(
+                                    name: "scan.cover_art.save_failed",
+                                    tracing::Level::WARN,
+                                    error = %e,
+                                    "failed to save cover art"
+                                );
                                 None
                             }
                         }
