@@ -1051,7 +1051,14 @@ impl SubsonicResponse {
                     error = %e,
                     "xml serialization failed"
                 );
-                let body = r#"<?xml version="1.0" encoding="UTF-8"?><subsonic-response xmlns="http://subsonic.org/restapi" status="failed" version="1.16.1" type="suboxide"><error code="0" message="Internal server error"/></subsonic-response>"#;
+                let body = format!(
+                    r#"<?xml version="1.0" encoding="UTF-8"?>{}"#,
+                    quick_xml::se::to_string(&xml::ErrorResponse::new(
+                        0,
+                        "Internal server error".into()
+                    ))
+                    .unwrap_or_default()
+                );
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     [(header::CONTENT_TYPE, "application/xml; charset=utf-8")],
@@ -1197,10 +1204,12 @@ fn json_error(code: u32, message: String) -> Result<serde_json::Value, serde_jso
 }
 
 fn json_internal_error_response() -> Response {
+    let body = json_error(0, "Internal server error".into())
+        .map_or_else(|_| String::new(), |value| value.to_string());
     (
         StatusCode::INTERNAL_SERVER_ERROR,
         [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
-        r#"{"subsonic-response":{"status":"failed","version":"1.16.1","type":"suboxide","error":{"code":0,"message":"Internal server error"}}}"#,
+        body,
     )
         .into_response()
 }
