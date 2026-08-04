@@ -43,7 +43,7 @@ pub async fn get_user(
             SubsonicResponse::user(auth.format, response).into_response()
         }
         Ok(None) => util::not_found(&auth, "User not found"),
-        Err(error) => util::service_error(&auth, error),
+        Err(error) => util::user_repo_error(&auth, error),
     }
 }
 
@@ -59,7 +59,7 @@ pub async fn get_users(auth: SubsonicContext) -> impl IntoResponse {
     let users = match auth.users().get_all_users() {
         Ok(users) => users,
         Err(error) => {
-            return util::service_error(&auth, error);
+            return util::user_repo_error(&auth, error);
         }
     };
     let user_responses: Vec<UserResponse> = users.iter().map(UserResponse::from).collect();
@@ -106,7 +106,7 @@ pub async fn delete_user(
     match auth.users().delete_user(username) {
         Ok(true) => SubsonicResponse::empty(auth.format).into_response(),
         Ok(false) => util::not_found(&auth, "User not found"),
-        Err(error) => util::service_error(&auth, error),
+        Err(error) => util::user_repo_error(&auth, error),
     }
 }
 
@@ -155,7 +155,7 @@ pub async fn change_password(
 
     match auth.users().change_password(username, &decoded_password) {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
-        Err(error) => util::service_error(&auth, error),
+        Err(error) => util::user_repo_error(&auth, error),
     }
 }
 
@@ -254,7 +254,7 @@ pub async fn create_user(
         .create_user(username, &decoded_password, email, &roles)
     {
         Ok(_) => SubsonicResponse::empty(auth.format).into_response(),
-        Err(error) => util::service_error(&auth, error),
+        Err(error) => util::user_repo_error(&auth, error),
     }
 }
 
@@ -321,7 +321,7 @@ pub async fn update_user(
             return util::api_error(&auth, &ApiError::WrongCredentials);
         };
         if let Err(error) = auth.users().change_password(username, &password) {
-            return util::service_error(&auth, error);
+            return util::user_repo_error(&auth, error);
         }
     }
 
@@ -347,6 +347,6 @@ pub async fn update_user(
     match auth.users().update_user(&update) {
         Ok(true) => SubsonicResponse::empty(auth.format).into_response(),
         Ok(false) => util::not_found(&auth, "User"),
-        Err(error) => util::service_error(&auth, error),
+        Err(error) => util::user_repo_error(&auth, error),
     }
 }

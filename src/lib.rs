@@ -2,6 +2,7 @@
 
 pub mod api;
 pub mod app;
+pub mod cover_art;
 pub mod crypto;
 pub mod db;
 pub mod lastfm;

@@ -13,7 +13,7 @@ use crate::models::music::{InternetRadioStationResponse, InternetRadioStationsRe
 pub async fn get_internet_radio_stations(auth: SubsonicContext) -> impl IntoResponse {
     let stations = match auth.music().get_internet_radio_stations() {
         Ok(stations) => stations,
-        Err(error) => return util::service_error(&auth, error),
+        Err(error) => return util::repo_error(&auth, error),
     };
 
     let stations: Vec<InternetRadioStationResponse> = stations
@@ -75,7 +75,7 @@ pub async fn create_internet_radio_station(
         params.home_page_url.as_deref(),
     ) {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
-        Err(error) => util::service_error(&auth, error),
+        Err(error) => util::repo_error(&auth, error),
     }
 }
 
@@ -110,7 +110,7 @@ pub async fn update_internet_radio_station(
     ) {
         Ok(true) => SubsonicResponse::empty(auth.format).into_response(),
         Ok(false) => util::not_found(&auth, "Internet radio station"),
-        Err(error) => util::service_error(&auth, error),
+        Err(error) => util::repo_error(&auth, error),
     }
 }
 
@@ -142,6 +142,6 @@ pub async fn delete_internet_radio_station(
     match auth.music().delete_internet_radio_station(id) {
         Ok(true) => SubsonicResponse::empty(auth.format).into_response(),
         Ok(false) => util::not_found(&auth, "Internet radio station"),
-        Err(error) => util::service_error(&auth, error),
+        Err(error) => util::repo_error(&auth, error),
     }
 }

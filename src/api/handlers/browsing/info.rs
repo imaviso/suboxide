@@ -45,7 +45,7 @@ pub async fn get_artist_info2(
     let response = match auth.music().get_artist_info_with_cache(artist_id) {
         Ok(response) => response,
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     };
     SubsonicResponse::artist_info2(auth.format, response).into_response()
@@ -83,7 +83,7 @@ pub async fn get_album_info2(
             return util::not_found(&auth, "Album");
         }
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     };
 
@@ -112,7 +112,7 @@ pub async fn get_artist_info(
     let response = match auth.music().get_artist_info_non_id3_with_cache(artist_id) {
         Ok(response) => response,
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     };
     SubsonicResponse::artist_info(auth.format, response).into_response()
@@ -141,7 +141,7 @@ pub async fn get_album_info(
             return util::not_found(&auth, "Album");
         }
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     };
 
@@ -176,14 +176,14 @@ pub async fn get_lyrics(
         let maybe_song = match auth.music().find_song_by_artist_and_title(artist, title) {
             Ok(song) => song,
             Err(e) => {
-                return util::service_error(&auth, e);
+                return util::repo_error(&auth, e);
             }
         };
         if let Some(song) = maybe_song {
             let extracted = match auth.music().get_song_lyrics(song.id) {
                 Ok(extracted) => extracted,
                 Err(e) => {
-                    return util::service_error(&auth, e);
+                    return util::repo_error(&auth, e);
                 }
             };
             if let Some(lyrics) = extracted.first() {
@@ -224,7 +224,7 @@ pub async fn get_lyrics_by_song_id(
             return util::not_found(&auth, "Song not found");
         }
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     };
 
@@ -232,7 +232,7 @@ pub async fn get_lyrics_by_song_id(
     let extracted = match auth.music().get_song_lyrics(song_id) {
         Ok(extracted) => extracted,
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     };
 

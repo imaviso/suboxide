@@ -46,7 +46,7 @@ pub async fn star(
             return util::service_error(&auth, format!("Invalid artistId: {artist_id}"));
         };
         if let Err(error) = auth.music().star_artist(user_id, artist_id) {
-            return util::service_error(&auth, error);
+            return util::repo_error(&auth, error);
         }
     }
     for album_id in &params.album_id {
@@ -54,7 +54,7 @@ pub async fn star(
             return util::service_error(&auth, format!("Invalid albumId: {album_id}"));
         };
         if let Err(error) = auth.music().star_album(user_id, album_id) {
-            return util::service_error(&auth, error);
+            return util::repo_error(&auth, error);
         }
     }
     for song_id in &params.song_id {
@@ -62,7 +62,7 @@ pub async fn star(
             return util::service_error(&auth, format!("Invalid id: {song_id}"));
         };
         if let Err(error) = auth.music().star_song(user_id, song_id) {
-            return util::service_error(&auth, error);
+            return util::repo_error(&auth, error);
         }
     }
 
@@ -88,7 +88,7 @@ pub async fn unstar(
             return util::service_error(&auth, format!("Invalid artistId: {artist_id}"));
         };
         if let Err(error) = auth.music().unstar_artist(user_id, artist_id) {
-            return util::service_error(&auth, error);
+            return util::repo_error(&auth, error);
         }
     }
     for album_id in &params.album_id {
@@ -96,7 +96,7 @@ pub async fn unstar(
             return util::service_error(&auth, format!("Invalid albumId: {album_id}"));
         };
         if let Err(error) = auth.music().unstar_album(user_id, album_id) {
-            return util::service_error(&auth, error);
+            return util::repo_error(&auth, error);
         }
     }
     for song_id in &params.song_id {
@@ -104,7 +104,7 @@ pub async fn unstar(
             return util::service_error(&auth, format!("Invalid id: {song_id}"));
         };
         if let Err(error) = auth.music().unstar_song(user_id, song_id) {
-            return util::service_error(&auth, error);
+            return util::repo_error(&auth, error);
         }
     }
 
@@ -121,14 +121,14 @@ pub async fn get_starred2(auth: SubsonicContext) -> impl IntoResponse {
     let starred_artists = match auth.music().get_starred_artists(user_id) {
         Ok(v) => v,
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     };
     let artist_ids: Vec<i32> = starred_artists.iter().map(|(a, _)| a.id).collect();
     let album_counts = match auth.music().get_artist_album_counts_batch(&artist_ids) {
         Ok(v) => v,
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     };
 
@@ -147,7 +147,7 @@ pub async fn get_starred2(auth: SubsonicContext) -> impl IntoResponse {
     let starred_albums = match auth.music().get_starred_albums(user_id) {
         Ok(v) => v,
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     };
     let album_starred: std::collections::HashMap<i32, chrono::NaiveDateTime> = starred_albums
@@ -163,7 +163,7 @@ pub async fn get_starred2(auth: SubsonicContext) -> impl IntoResponse {
         {
             Ok(v) => v,
             Err(e) => {
-                return util::service_error(&auth, e);
+                return util::repo_error(&auth, e);
             }
         };
     let albums: Vec<AlbumID3Response> = util::annotate_albums(annotated_albums);
@@ -171,7 +171,7 @@ pub async fn get_starred2(auth: SubsonicContext) -> impl IntoResponse {
     let starred_songs = match auth.music().get_starred_songs(user_id) {
         Ok(v) => v,
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     };
     let song_starred: std::collections::HashMap<i32, chrono::NaiveDateTime> = starred_songs
@@ -187,7 +187,7 @@ pub async fn get_starred2(auth: SubsonicContext) -> impl IntoResponse {
         {
             Ok(v) => v,
             Err(e) => {
-                return util::service_error(&auth, e);
+                return util::repo_error(&auth, e);
             }
         };
     let songs: Vec<ChildResponse> = util::annotate_songs(annotated_songs);
@@ -254,7 +254,7 @@ pub async fn scrobble(
         let time = params.time.get(i).copied();
 
         if let Err(error) = auth.music().scrobble(user_id, song_id, time, submission) {
-            return util::service_error(&auth, error);
+            return util::repo_error(&auth, error);
         }
 
         // A "now playing" notification (submission=false) only applies to the
@@ -263,7 +263,7 @@ pub async fn scrobble(
             && i == 0
             && let Err(error) = auth.music().set_now_playing(user_id, song_id, player_id)
         {
-            return util::service_error(&auth, error);
+            return util::repo_error(&auth, error);
         }
     }
 
@@ -346,7 +346,7 @@ pub async fn report_playback(
     match state {
         "playing" => {
             if let Err(error) = auth.music().set_now_playing(user_id, song_id, player_id) {
-                return util::service_error(&auth, error);
+                return util::repo_error(&auth, error);
             }
         }
         "paused" => {}
@@ -354,14 +354,14 @@ pub async fn report_playback(
             let duration_secs = match auth.music().get_song(song_id) {
                 Ok(Some(song)) => song.duration,
                 Ok(None) => return util::not_found(&auth, "Song"),
-                Err(error) => return util::service_error(&auth, error),
+                Err(error) => return util::repo_error(&auth, error),
             };
 
             if !params.ignore_scrobble.unwrap_or(false)
                 && scrobble_threshold_met(position_ms, duration_secs)
                 && let Err(error) = auth.music().scrobble(user_id, song_id, None, true)
             {
-                return util::service_error(&auth, error);
+                return util::repo_error(&auth, error);
             }
         }
         _ => {
@@ -379,7 +379,7 @@ pub async fn get_now_playing(auth: SubsonicContext) -> impl IntoResponse {
     let entries = match auth.music().get_now_playing() {
         Ok(v) => v,
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     };
 
@@ -464,7 +464,7 @@ pub async fn set_rating(
 
     match result {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
-        Err(error) => util::service_error(&auth, error),
+        Err(error) => util::repo_error(&auth, error),
     }
 }
 

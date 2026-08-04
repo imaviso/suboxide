@@ -57,7 +57,7 @@ fn albums_for_list_type(
             )));
         }
     }
-    .map_err(|error| Box::new(util::service_error(auth, error)))
+    .map_err(|error| Box::new(util::repo_error(auth, error)))
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -193,7 +193,7 @@ pub async fn get_album_list2(
 
     let annotated = match auth.music().annotate_albums_for_user(auth.user.id, albums) {
         Ok(annotated) => annotated,
-        Err(e) => return util::service_error(&auth, e),
+        Err(e) => return util::repo_error(&auth, e),
     };
     let response = AlbumList2Response {
         albums: util::annotate_albums(annotated),
@@ -228,7 +228,7 @@ pub async fn get_album_list(
     {
         Ok(v) => v,
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     };
 
@@ -259,7 +259,7 @@ pub async fn get_genres(auth: SubsonicContext) -> impl IntoResponse {
     let genres = match auth.music().get_genres() {
         Ok(v) => v,
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     };
     let genre_responses: Vec<GenreResponse> = genres
@@ -428,13 +428,13 @@ pub async fn get_top_songs(
     {
         Ok(v) => v,
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     };
 
     let annotated = match auth.music().annotate_songs_for_user(auth.user.id, songs) {
         Ok(annotated) => annotated,
-        Err(e) => return util::service_error(&auth, e),
+        Err(e) => return util::repo_error(&auth, e),
     };
     let response = TopSongsResponse {
         songs: util::annotate_songs(annotated),
@@ -484,13 +484,13 @@ pub async fn get_similar_songs2(
             return util::not_found(&auth, "Item");
         }
         Err(error) => {
-            return util::service_error(&auth, error);
+            return util::repo_error(&auth, error);
         }
     };
 
     let annotated = match auth.music().annotate_songs_for_user(auth.user.id, songs) {
         Ok(annotated) => annotated,
-        Err(e) => return util::service_error(&auth, e),
+        Err(e) => return util::repo_error(&auth, e),
     };
     let response = SimilarSongs2Response {
         songs: util::annotate_songs(annotated),
@@ -520,13 +520,13 @@ pub async fn get_similar_songs(
             return util::not_found(&auth, "Item");
         }
         Err(error) => {
-            return util::service_error(&auth, error);
+            return util::repo_error(&auth, error);
         }
     };
 
     let annotated = match auth.music().annotate_songs_for_user(auth.user.id, songs) {
         Ok(annotated) => annotated,
-        Err(e) => return util::service_error(&auth, e),
+        Err(e) => return util::repo_error(&auth, e),
     };
     let response = SimilarSongsResponse {
         songs: util::annotate_songs(annotated),
@@ -545,19 +545,19 @@ pub async fn get_starred(auth: SubsonicContext) -> impl IntoResponse {
     let starred_artists = match auth.music().get_starred_artists(user_id) {
         Ok(v) => v,
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     };
     let starred_albums = match auth.music().get_starred_albums(user_id) {
         Ok(v) => v,
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     };
     let starred_songs = match auth.music().get_starred_songs(user_id) {
         Ok(v) => v,
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     };
 
@@ -581,7 +581,7 @@ pub async fn get_starred(auth: SubsonicContext) -> impl IntoResponse {
     let songs: Vec<Song> = starred_songs.iter().map(|(song, _)| song.clone()).collect();
     let annotated = match auth.music().annotate_songs_for_user(user_id, songs) {
         Ok(annotated) => annotated,
-        Err(e) => return util::service_error(&auth, e),
+        Err(e) => return util::repo_error(&auth, e),
     };
 
     let response = StarredResponse {

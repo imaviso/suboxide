@@ -39,7 +39,7 @@ fn search_artist_stars(
     let artist_ids: Vec<i32> = data.artists.iter().map(|artist| artist.id).collect();
     auth.music()
         .get_starred_at_for_artists_batch(auth.user.id, &artist_ids)
-        .map_err(|error| Box::new(util::service_error(auth, error)))
+        .map_err(|error| Box::new(util::repo_error(auth, error)))
 }
 
 fn search_limits(params: &SearchParamsV2) -> SearchLimits {
@@ -64,7 +64,7 @@ fn search_data(auth: &SubsonicContext, limits: &SearchLimits) -> Result<SearchDa
             limits.artist_offset,
             limits.artist_count,
         )
-        .map_err(|e| ApiError::Generic(e.to_string()))?;
+        .map_err(ApiError::from)?;
     let albums = auth
         .music()
         .search_albums(
@@ -73,7 +73,7 @@ fn search_data(auth: &SubsonicContext, limits: &SearchLimits) -> Result<SearchDa
             limits.album_offset,
             limits.album_count,
         )
-        .map_err(|e| ApiError::Generic(e.to_string()))?;
+        .map_err(ApiError::from)?;
     let songs = auth
         .music()
         .search_songs(
@@ -82,7 +82,7 @@ fn search_data(auth: &SubsonicContext, limits: &SearchLimits) -> Result<SearchDa
             limits.song_offset,
             limits.song_count,
         )
-        .map_err(|e| ApiError::Generic(e.to_string()))?;
+        .map_err(ApiError::from)?;
 
     Ok(SearchData {
         artists,
@@ -98,7 +98,7 @@ fn search_album_stars(
     let album_ids: Vec<i32> = data.albums.iter().map(|album| album.id).collect();
     auth.music()
         .get_starred_at_for_albums_batch(auth.user.id, &album_ids)
-        .map_err(|error| Box::new(util::service_error(auth, error)))
+        .map_err(|error| Box::new(util::repo_error(auth, error)))
 }
 
 /// Query parameters for search3/search2.
@@ -150,7 +150,7 @@ pub async fn search3(
     let artist_album_counts = match auth.music().get_artist_album_counts_batch(&artist_ids) {
         Ok(counts) => counts,
         Err(error) => {
-            return util::service_error(&auth, error);
+            return util::repo_error(&auth, error);
         }
     };
     let artist_stars = match search_artist_stars(&auth, &data) {
@@ -178,14 +178,14 @@ pub async fn search3(
         .annotate_albums_for_user(auth.user.id, data.albums)
     {
         Ok(annotated) => annotated,
-        Err(error) => return util::service_error(&auth, error),
+        Err(error) => return util::repo_error(&auth, error),
     };
     let annotated_songs = match auth
         .music()
         .annotate_songs_for_user(auth.user.id, data.songs)
     {
         Ok(annotated) => annotated,
-        Err(error) => return util::service_error(&auth, error),
+        Err(error) => return util::repo_error(&auth, error),
     };
 
     let response = SearchResult3Response {
@@ -245,7 +245,7 @@ pub async fn search2(
         .annotate_songs_for_user(auth.user.id, data.songs)
     {
         Ok(annotated) => annotated,
-        Err(error) => return util::service_error(&auth, error),
+        Err(error) => return util::repo_error(&auth, error),
     };
 
     let response = SearchResult2Response {
@@ -300,7 +300,7 @@ pub async fn search(
     let songs = match auth.music().search_songs(query, None, offset, count) {
         Ok(songs) => songs,
         Err(error) => {
-            return util::service_error(&auth, error);
+            return util::repo_error(&auth, error);
         }
     };
 

@@ -38,14 +38,14 @@ pub async fn get_music_directory(
             let folders = match auth.music().get_music_folders() {
                 Ok(folders) => folders,
                 Err(e) => {
-                    return util::service_error(&auth, e);
+                    return util::repo_error(&auth, e);
                 }
             };
 
             let maybe_album = match auth.music().get_album(id) {
                 Ok(album) => album,
                 Err(e) => {
-                    return util::service_error(&auth, e);
+                    return util::repo_error(&auth, e);
                 }
             };
             if maybe_album.is_some() {
@@ -55,7 +55,7 @@ pub async fn get_music_directory(
             let maybe_artist = match auth.music().get_artist(id) {
                 Ok(artist) => artist,
                 Err(e) => {
-                    return util::service_error(&auth, e);
+                    return util::repo_error(&auth, e);
                 }
             };
             if maybe_artist.is_some() {
@@ -66,7 +66,7 @@ pub async fn get_music_directory(
                 let artists = match auth.music().get_artists_by_music_folder(folder.id) {
                     Ok(artists) => artists,
                     Err(e) => {
-                        return util::service_error(&auth, e);
+                        return util::repo_error(&auth, e);
                     }
                 };
                 let children: Vec<ChildResponse> = artists
@@ -89,19 +89,19 @@ fn album_directory(auth: &SubsonicContext, album_id: i32) -> axum::response::Res
         Ok(Some(album)) => album,
         Ok(None) => return util::not_found(auth, "Directory"),
         Err(e) => {
-            return util::service_error(auth, e);
+            return util::repo_error(auth, e);
         }
     };
     let songs = match auth.music().get_songs_by_album(album_id) {
         Ok(songs) => songs,
         Err(e) => {
-            return util::service_error(auth, e);
+            return util::repo_error(auth, e);
         }
     };
     let annotated = match auth.music().annotate_songs_for_user(auth.user.id, songs) {
         Ok(annotated) => annotated,
         Err(e) => {
-            return util::service_error(auth, e);
+            return util::repo_error(auth, e);
         }
     };
     let response = DirectoryResponse::from_album(&album, util::annotate_songs(annotated));
@@ -114,13 +114,13 @@ fn artist_directory(auth: &SubsonicContext, artist_id: i32) -> axum::response::R
         Ok(Some(artist)) => artist,
         Ok(None) => return util::not_found(auth, "Directory"),
         Err(e) => {
-            return util::service_error(auth, e);
+            return util::repo_error(auth, e);
         }
     };
     let albums = match auth.music().get_albums_by_artist(artist_id) {
         Ok(albums) => albums,
         Err(e) => {
-            return util::service_error(auth, e);
+            return util::repo_error(auth, e);
         }
     };
     let children: Vec<ChildResponse> = albums

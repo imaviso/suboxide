@@ -17,7 +17,7 @@ use crate::models::music::{
 pub async fn get_bookmarks(auth: SubsonicContext) -> impl IntoResponse {
     let entries = match auth.music().get_bookmarks(auth.user.id) {
         Ok(entries) => entries,
-        Err(error) => return util::service_error(&auth, error),
+        Err(error) => return util::repo_error(&auth, error),
     };
 
     let song_ids: Vec<i32> = entries.iter().map(|entry| entry.song.id).collect();
@@ -26,7 +26,7 @@ pub async fn get_bookmarks(auth: SubsonicContext) -> impl IntoResponse {
         .get_song_annotations_batch(auth.user.id, &song_ids)
     {
         Ok(annotations) => annotations,
-        Err(error) => return util::service_error(&auth, error),
+        Err(error) => return util::repo_error(&auth, error),
     };
 
     let bookmarks: Vec<BookmarkResponse> = entries
@@ -84,7 +84,7 @@ pub async fn create_bookmark(
         .create_bookmark(auth.user.id, song_id, position, params.comment.as_deref())
     {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
-        Err(error) => util::service_error(&auth, error),
+        Err(error) => util::repo_error(&auth, error),
     }
 }
 
@@ -113,6 +113,6 @@ pub async fn delete_bookmark(
 
     match auth.music().delete_bookmark(auth.user.id, song_id) {
         Ok(_) => SubsonicResponse::empty(auth.format).into_response(),
-        Err(error) => util::service_error(&auth, error),
+        Err(error) => util::repo_error(&auth, error),
     }
 }

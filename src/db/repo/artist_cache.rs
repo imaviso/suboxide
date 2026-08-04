@@ -3,7 +3,7 @@
 use diesel::prelude::*;
 
 use crate::db::DbPool;
-use crate::db::repo::error::UserRepoError;
+use crate::db::repo::error::MusicRepoError;
 use crate::lastfm::models::LastFmArtistCache;
 use chrono::NaiveDateTime;
 
@@ -27,7 +27,7 @@ impl ArtistInfoCacheRepository {
     pub fn get_cached(
         &self,
         target_artist_id: i32,
-    ) -> Result<Option<LastFmArtistCache>, UserRepoError> {
+    ) -> Result<Option<LastFmArtistCache>, MusicRepoError> {
         use crate::db::schema::artist_lastfm_info::dsl::{
             artist_id, artist_lastfm_info, biography, large_image_url, last_fm_url,
             medium_image_url, similar_artists, small_image_url, updated_at,
@@ -86,7 +86,7 @@ impl ArtistInfoCacheRepository {
     pub fn get_valid_cache(
         &self,
         target_artist_id: i32,
-    ) -> Result<Option<LastFmArtistCache>, UserRepoError> {
+    ) -> Result<Option<LastFmArtistCache>, MusicRepoError> {
         match self.get_cached(target_artist_id)? {
             Some(cache) if !self.is_cache_expired(&cache) => Ok(Some(cache)),
             _ => Ok(None),
@@ -94,7 +94,7 @@ impl ArtistInfoCacheRepository {
     }
 
     /// Save or update artist info cache.
-    pub fn save_cache(&self, cache: &LastFmArtistCache) -> Result<(), UserRepoError> {
+    pub fn save_cache(&self, cache: &LastFmArtistCache) -> Result<(), MusicRepoError> {
         use crate::db::schema::artist_lastfm_info::dsl::{
             artist_id, artist_lastfm_info, biography, large_image_url, last_fm_url,
             medium_image_url, similar_artists, small_image_url, updated_at,
@@ -121,7 +121,7 @@ impl ArtistInfoCacheRepository {
     }
 
     /// Clear cache for a specific artist.
-    pub fn clear_cache(&self, target_artist_id: i32) -> Result<bool, UserRepoError> {
+    pub fn clear_cache(&self, target_artist_id: i32) -> Result<bool, MusicRepoError> {
         use crate::db::schema::artist_lastfm_info::dsl::{artist_id, artist_lastfm_info};
 
         let mut conn = self.pool.get()?;
@@ -133,7 +133,7 @@ impl ArtistInfoCacheRepository {
     }
 
     /// Clear all expired cache entries.
-    pub fn clear_expired(&self) -> Result<usize, UserRepoError> {
+    pub fn clear_expired(&self) -> Result<usize, MusicRepoError> {
         use crate::db::schema::artist_lastfm_info::dsl::{artist_lastfm_info, updated_at};
 
         let mut conn = self.pool.get()?;

@@ -19,7 +19,7 @@ fn play_queue_entries(
     auth.music()
         .annotate_songs_for_user(auth.user.id, play_queue.songs.clone())
         .map(util::annotate_songs)
-        .map_err(|error| ApiError::Generic(error.to_string()))
+        .map_err(ApiError::from)
 }
 
 fn play_queue_response(
@@ -91,7 +91,7 @@ pub async fn get_play_queue(auth: SubsonicContext) -> impl IntoResponse {
 
             SubsonicResponse::play_queue(auth.format, response).into_response()
         }
-        Err(e) => util::service_error(&auth, e),
+        Err(e) => util::repo_error(&auth, e),
     }
 }
 
@@ -144,7 +144,7 @@ pub async fn save_play_queue(
         .save_play_queue(user_id, &song_ids, current, params.position, changed_by)
     {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
-        Err(e) => util::service_error(&auth, e),
+        Err(e) => util::repo_error(&auth, e),
     }
 }
 
@@ -177,7 +177,7 @@ pub async fn get_play_queue_by_index(auth: SubsonicContext) -> impl IntoResponse
 
             SubsonicResponse::play_queue_by_index(auth.format, response).into_response()
         }
-        Err(e) => util::service_error(&auth, e),
+        Err(e) => util::repo_error(&auth, e),
     }
 }
 
@@ -234,6 +234,6 @@ pub async fn save_play_queue_by_index(
         changed_by,
     ) {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
-        Err(e) => util::service_error(&auth, e),
+        Err(e) => util::repo_error(&auth, e),
     }
 }

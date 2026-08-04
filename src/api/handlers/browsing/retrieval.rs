@@ -13,35 +13,27 @@ fn album_response(
     auth: &SubsonicContext,
     album_id: i32,
 ) -> Result<AlbumWithSongsID3Response, ApiError> {
-    let album = auth
+    let annotated_album = auth
         .music()
-        .get_album(album_id)
-        .map_err(|error| ApiError::Generic(error.to_string()))?
+        .annotated_album_for_user(auth.user.id, album_id)
+        .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::NotFound("Album".into()))?;
-    let album_starred_at = auth
-        .music()
-        .get_starred_at_for_album(auth.user.id, album_id)
-        .map_err(|error| ApiError::Generic(error.to_string()))?;
-    let album_annotations = auth
-        .music()
-        .get_album_annotations_batch(auth.user.id, &[album_id])
-        .map_err(|error| ApiError::Generic(error.to_string()))?;
     let songs = auth
         .music()
         .get_songs_by_album(album_id)
-        .map_err(|error| ApiError::Generic(error.to_string()))?;
+        .map_err(ApiError::from)?;
     let annotated = auth
         .music()
         .annotate_songs_for_user(auth.user.id, songs)
-        .map_err(|error| ApiError::Generic(error.to_string()))?;
+        .map_err(ApiError::from)?;
 
     Ok(
         AlbumWithSongsID3Response::from_album_and_songs_with_starred(
-            &album,
+            &annotated_album.album,
             util::annotate_songs(annotated),
-            album_starred_at.as_ref(),
+            annotated_album.starred_at.as_ref(),
         )
-        .with_annotations(album_annotations.get(&album_id)),
+        .with_annotations(Some(&annotated_album.annotations)),
     )
 }
 
@@ -52,20 +44,20 @@ fn artist_response(
     let artist = auth
         .music()
         .get_artist(artist_id)
-        .map_err(|error| ApiError::Generic(error.to_string()))?
+        .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::NotFound("Artist".into()))?;
     let artist_starred_at = auth
         .music()
         .get_starred_at_for_artist(auth.user.id, artist_id)
-        .map_err(|error| ApiError::Generic(error.to_string()))?;
+        .map_err(ApiError::from)?;
     let albums = auth
         .music()
         .get_albums_by_artist(artist_id)
-        .map_err(|error| ApiError::Generic(error.to_string()))?;
+        .map_err(ApiError::from)?;
     let annotated = auth
         .music()
         .annotate_albums_for_user(auth.user.id, albums)
-        .map_err(|error| ApiError::Generic(error.to_string()))?;
+        .map_err(ApiError::from)?;
 
     Ok(
         ArtistWithAlbumsID3Response::from_artist_and_albums_with_starred(
@@ -77,24 +69,17 @@ fn artist_response(
 }
 
 fn song_response(auth: &SubsonicContext, song_id: i32) -> Result<ChildResponse, ApiError> {
-    let song = auth
+    let annotated = auth
         .music()
-        .get_song(song_id)
-        .map_err(|error| ApiError::Generic(error.to_string()))?
+        .annotated_song_for_user(auth.user.id, song_id)
+        .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::NotFound("Song".into()))?;
-    let starred_at = auth
-        .music()
-        .get_starred_at_for_song(auth.user.id, song_id)
-        .map_err(|error| ApiError::Generic(error.to_string()))?;
-    let annotations = auth
-        .music()
-        .get_song_annotations_batch(auth.user.id, &[song_id])
-        .map_err(|error| ApiError::Generic(error.to_string()))?;
 
-    Ok(
-        ChildResponse::from_song_with_starred(&song, starred_at.as_ref())
-            .with_annotations(annotations.get(&song_id)),
+    Ok(ChildResponse::from_song_with_starred(
+        &annotated.song,
+        annotated.annotations.starred_at.as_ref(),
     )
+    .with_annotations(Some(&annotated.annotations)))
 }
 
 /// GET/POST /rest/getAlbum[.view]

@@ -59,7 +59,7 @@ pub async fn get_music_folders(auth: SubsonicContext) -> impl IntoResponse {
     let folders = match auth.music().get_music_folders() {
         Ok(folders) => folders,
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     };
     let responses: Vec<MusicFolderResponse> =

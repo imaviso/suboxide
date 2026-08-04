@@ -19,7 +19,7 @@ fn playlist_with_songs_response(
     let annotated = auth
         .music()
         .annotate_songs_for_user(auth.user.id, songs.to_vec())
-        .map_err(|error| Box::new(util::service_error(auth, error)))?;
+        .map_err(|error| Box::new(util::repo_error(auth, error)))?;
     let entries = util::annotate_songs(annotated);
     let cover_art = songs.first().and_then(|song| song.cover_art.clone());
 
@@ -65,7 +65,7 @@ pub async fn get_playlists(
                 return util::not_found(&auth, "User");
             }
             Err(e) => {
-                return util::service_error(&auth, e);
+                return util::user_repo_error(&auth, e);
             }
         };
         (user.id, user.username)
@@ -76,7 +76,7 @@ pub async fn get_playlists(
     let playlists = match auth.music().get_playlists(user_id, &username) {
         Ok(v) => v,
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     };
 
@@ -84,7 +84,7 @@ pub async fn get_playlists(
     let cover_arts = match auth.music().get_playlist_cover_arts_batch(&playlist_ids) {
         Ok(v) => v,
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     };
 
@@ -142,7 +142,7 @@ pub async fn get_playlist(
             return util::not_found(&auth, "Playlist");
         }
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     };
 
@@ -153,7 +153,7 @@ pub async fn get_playlist(
     let songs = match auth.music().get_playlist_songs(playlist_id) {
         Ok(v) => v,
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     };
     let response = match playlist_with_songs_response(&auth, &playlist, &songs) {
@@ -211,7 +211,7 @@ pub async fn create_playlist(
                 return util::unauthorized(&auth);
             }
             Err(e) => {
-                return util::service_error(&auth, e);
+                return util::repo_error(&auth, e);
             }
         }
 
@@ -223,7 +223,7 @@ pub async fn create_playlist(
             &song_ids,
             &[],
         ) {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
 
         let playlist = match auth.music().get_playlist(playlist_id) {
@@ -232,13 +232,13 @@ pub async fn create_playlist(
                 return util::not_found(&auth, "Playlist");
             }
             Err(e) => {
-                return util::service_error(&auth, e);
+                return util::repo_error(&auth, e);
             }
         };
         let songs = match auth.music().get_playlist_songs(playlist_id) {
             Ok(v) => v,
             Err(e) => {
-                return util::service_error(&auth, e);
+                return util::repo_error(&auth, e);
             }
         };
 
@@ -260,14 +260,14 @@ pub async fn create_playlist(
     let playlist = match auth.music().create_playlist(user_id, name, None, &song_ids) {
         Ok(p) => p,
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     };
 
     let songs = match auth.music().get_playlist_songs(playlist.id) {
         Ok(v) => v,
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     };
 
@@ -332,7 +332,7 @@ pub async fn update_playlist(
         Ok(true) => {}
         Ok(false) => return util::unauthorized(&auth),
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     }
 
@@ -350,7 +350,7 @@ pub async fn update_playlist(
         &params.song_index_to_remove,
     ) {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
-        Err(e) => util::service_error(&auth, e),
+        Err(e) => util::repo_error(&auth, e),
     }
 }
 
@@ -386,13 +386,13 @@ pub async fn delete_playlist(
         Ok(true) => {}
         Ok(false) => return util::unauthorized(&auth),
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     }
 
     match auth.music().delete_playlist(playlist_id) {
         Ok(true) => SubsonicResponse::empty(auth.format).into_response(),
         Ok(false) => util::not_found(&auth, "Playlist"),
-        Err(e) => util::service_error(&auth, e),
+        Err(e) => util::repo_error(&auth, e),
     }
 }

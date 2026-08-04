@@ -67,17 +67,6 @@ fn sanitized_filename(path: &Path) -> String {
         .replace(['"', '\r', '\n'], "")
 }
 
-fn cover_art_content_type(extension: &str) -> &'static str {
-    match extension {
-        "png" => "image/png",
-        "gif" => "image/gif",
-        "bmp" => "image/bmp",
-        "tiff" => "image/tiff",
-        "webp" => "image/webp",
-        _ => "image/jpeg",
-    }
-}
-
 fn cover_art_image_format(extension: &str) -> Option<ImageFormat> {
     match extension {
         "jpg" | "jpeg" => Some(ImageFormat::Jpeg),
@@ -220,7 +209,7 @@ pub async fn stream(
             return util::not_found(&auth, "Song not found");
         }
         Err(e) => {
-            return util::service_error(&auth, e);
+            return util::repo_error(&auth, e);
         }
     };
 
@@ -335,41 +324,41 @@ pub async fn download(
         EntityId::Song(id) => match auth.music().get_song(id) {
             Ok(Some(song)) => download_song(&auth, &song).await,
             Ok(None) => util::not_found(&auth, "Song not found"),
-            Err(e) => util::service_error(&auth, e),
+            Err(e) => util::repo_error(&auth, e),
         },
         EntityId::Album(id) => match auth.music().get_album(id) {
             Ok(Some(album)) => {
                 let songs = match auth.music().get_songs_by_album(id) {
                     Ok(songs) => songs,
-                    Err(e) => return util::service_error(&auth, e),
+                    Err(e) => return util::repo_error(&auth, e),
                 };
                 zip_download(&auth, &album.name, album_zip_entries(songs), None)
             }
             Ok(None) => util::not_found(&auth, "Album not found"),
-            Err(e) => util::service_error(&auth, e),
+            Err(e) => util::repo_error(&auth, e),
         },
         EntityId::Artist(id) => match auth.music().get_artist(id) {
             Ok(Some(artist)) => {
                 let songs = match auth.music().get_songs_by_artist(id) {
                     Ok(songs) => songs,
-                    Err(e) => return util::service_error(&auth, e),
+                    Err(e) => return util::repo_error(&auth, e),
                 };
                 zip_download(&auth, &artist.name, artist_zip_entries(songs), None)
             }
             Ok(None) => util::not_found(&auth, "Artist not found"),
-            Err(e) => util::service_error(&auth, e),
+            Err(e) => util::repo_error(&auth, e),
         },
         EntityId::Playlist(id) => match auth.music().get_playlist(id) {
             Ok(Some(playlist)) => {
                 let songs = match auth.music().get_playlist_songs(id) {
                     Ok(songs) => songs,
-                    Err(e) => return util::service_error(&auth, e),
+                    Err(e) => return util::repo_error(&auth, e),
                 };
                 let (entries, m3u) = playlist_zip_entries(songs, &playlist.name);
                 zip_download(&auth, &playlist.name, entries, Some(m3u))
             }
             Ok(None) => util::not_found(&auth, "Playlist not found"),
-            Err(e) => util::service_error(&auth, e),
+            Err(e) => util::repo_error(&auth, e),
         },
     }
 }
@@ -636,25 +625,13 @@ pub async fn get_cover_art(
     // Get cover art cache directory
     let cover_art_dir = resolve_cover_art_dir();
 
-    // Try to find the cover art file with different extensions
-    let extensions = ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp"];
-    let mut cover_art_path = None;
-    let mut cover_art_extension = "jpg";
-    let mut content_type = "image/jpeg";
-
-    for &ext in &extensions {
-        let path = cover_art_dir.join(format!("{cover_art_id}.{ext}"));
-        if path.exists() {
-            content_type = cover_art_content_type(ext);
-            cover_art_extension = ext;
-            cover_art_path = Some(path);
-            break;
-        }
-    }
-
-    let Some(path) = cover_art_path else {
+    // Find the cover art file (content-addressed `<hash>.<ext>` convention)
+    let Some((path, cover_art_extension)) =
+        crate::cover_art::find_file(&cover_art_dir, cover_art_id)
+    else {
         return util::not_found(&auth, "Cover art not found");
     };
+    let content_type = crate::cover_art::mime_from_extension(cover_art_extension);
 
     if let Some(size) = requested_size {
         let original_bytes =
@@ -794,8 +771,8 @@ mod tests {
     use image::{DynamicImage, GenericImageView, ImageBuffer, ImageFormat, Rgba};
 
     use super::{
-        album_zip_entry_name, cover_art_content_type, cover_art_image_format, is_safe_cover_art_id,
-        parse_byte_range, playlist_zip_entry_name, resize_cover_art_bytes, sanitize_zip_component,
+        album_zip_entry_name, cover_art_image_format, is_safe_cover_art_id, parse_byte_range,
+        playlist_zip_entry_name, resize_cover_art_bytes, sanitize_zip_component,
         sanitized_filename,
     };
     use crate::models::music::Song;
@@ -833,17 +810,6 @@ mod tests {
             "evilname.flac"
         );
         assert_eq!(sanitized_filename(Path::new("/music")), "music");
-    }
-
-    #[test]
-    fn cover_art_content_type_matches_supported_extensions() {
-        assert_eq!(cover_art_content_type("jpg"), "image/jpeg");
-        assert_eq!(cover_art_content_type("jpeg"), "image/jpeg");
-        assert_eq!(cover_art_content_type("png"), "image/png");
-        assert_eq!(cover_art_content_type("gif"), "image/gif");
-        assert_eq!(cover_art_content_type("bmp"), "image/bmp");
-        assert_eq!(cover_art_content_type("tiff"), "image/tiff");
-        assert_eq!(cover_art_content_type("webp"), "image/webp");
     }
 
     #[test]

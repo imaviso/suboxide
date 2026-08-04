@@ -5,6 +5,7 @@ use axum::response::{IntoResponse, Response};
 use crate::api::auth::SubsonicContext;
 use crate::api::error::ApiError;
 use crate::api::response::error_response;
+use crate::db::{MusicRepoError, UserRepoError};
 use crate::models::music::{AlbumID3Response, ChildResponse};
 
 /// Build a missing-parameter response for the current request format.
@@ -28,6 +29,29 @@ pub(in crate::api::handlers) fn service_error(
     error: impl std::fmt::Display,
 ) -> Response {
     api_error(auth, &ApiError::Generic(error.to_string()))
+}
+
+/// Map a repository error to a formatted API error response.
+///
+/// Uses the centralized `From<MusicRepoError> for ApiError` conversion so
+/// domain errors (e.g. `NotFound`) map to their proper Subsonic codes
+/// instead of leaking as generic errors.
+pub(in crate::api::handlers) fn repo_error(
+    auth: &SubsonicContext,
+    error: MusicRepoError,
+) -> Response {
+    api_error(auth, &ApiError::from(error))
+}
+
+/// Map a user repository error to a formatted API error response.
+///
+/// Uses the centralized `From<UserRepoError> for ApiError` conversion so
+/// domain errors (e.g. `NotFound`) map to their proper Subsonic codes.
+pub(in crate::api::handlers) fn user_repo_error(
+    auth: &SubsonicContext,
+    error: UserRepoError,
+) -> Response {
+    api_error(auth, &ApiError::from(error))
 }
 
 /// Build a formatted API error response.

@@ -57,7 +57,7 @@ pub async fn create_remote_session(
     ) {
         Ok(session) => SubsonicResponse::remote_session(auth.format, map_session(&session, true))
             .into_response(),
-        Err(error) => util::service_error(&auth, error),
+        Err(error) => util::repo_error(&auth, error),
     }
 }
 
@@ -99,7 +99,7 @@ pub async fn join_remote_session(
                 .into_response()
         }
         Ok(None) => util::not_found(&auth, "Remote session"),
-        Err(error) => util::service_error(&auth, error),
+        Err(error) => util::repo_error(&auth, error),
     }
 }
 
@@ -140,7 +140,7 @@ pub async fn get_remote_session(
                 .into_response()
         }
         Ok(None) => util::not_found(&auth, "Remote session"),
-        Err(error) => util::service_error(&auth, error),
+        Err(error) => util::repo_error(&auth, error),
     }
 }
 
@@ -164,7 +164,7 @@ pub async fn close_remote_session(
     match auth.remote().close_remote_session(auth.user.id, session_id) {
         Ok(true) => SubsonicResponse::empty(auth.format).into_response(),
         Ok(false) => util::not_found(&auth, "Remote session"),
-        Err(error) => util::service_error(&auth, error),
+        Err(error) => util::repo_error(&auth, error),
     }
 }
 
@@ -210,7 +210,7 @@ pub async fn send_remote_command(
         params.payload.as_deref(),
     ) {
         Ok(_) => SubsonicResponse::empty(auth.format).into_response(),
-        Err(error) => util::service_error(&auth, error),
+        Err(error) => util::repo_error(&auth, error),
     }
 }
 
@@ -259,7 +259,7 @@ pub async fn get_remote_commands(
             };
             SubsonicResponse::remote_commands(auth.format, response).into_response()
         }
-        Err(error) => util::service_error(&auth, error),
+        Err(error) => util::repo_error(&auth, error),
     }
 }
 
@@ -306,7 +306,7 @@ pub async fn update_remote_state(
         .update_remote_state(auth.user.id, session_id, device_id, state_json)
     {
         Ok(()) => SubsonicResponse::empty(auth.format).into_response(),
-        Err(error) => util::service_error(&auth, error),
+        Err(error) => util::repo_error(&auth, error),
     }
 }
 
@@ -338,7 +338,7 @@ pub async fn get_remote_state(
             SubsonicResponse::remote_state(auth.format, response).into_response()
         }
         Ok(None) => util::not_found(&auth, "Remote state"),
-        Err(error) => util::service_error(&auth, error),
+        Err(error) => util::repo_error(&auth, error),
     }
 }
 

@@ -739,6 +739,54 @@ impl MusicLibrary {
     }
 
     // ========================================================================
+    // Annotated entity details
+    // ========================================================================
+
+    /// Fetch a song with the current user's annotations attached.
+    ///
+    /// Returns `Ok(None)` when the song does not exist. This is the deep
+    /// aggregate behind `getSong` and friends: one call hides the starred-at
+    /// lookup and the annotation batch query.
+    pub(in crate::api) fn annotated_song_for_user(
+        &self,
+        user_id: i32,
+        song_id: i32,
+    ) -> Result<Option<AnnotatedSong>, MusicRepoError> {
+        let Some(song) = self.get_song(song_id)? else {
+            return Ok(None);
+        };
+        let starred = self.get_starred_at_for_song(user_id, song_id)?;
+        let annotations = self.get_song_annotations_batch(user_id, &[song_id])?;
+        let mut entry = annotations.get(&song_id).copied().unwrap_or_default();
+        entry.starred_at = starred;
+        Ok(Some(AnnotatedSong {
+            song,
+            annotations: entry,
+        }))
+    }
+
+    /// Fetch an album with the current user's annotations attached.
+    ///
+    /// Returns `Ok(None)` when the album does not exist.
+    pub(in crate::api) fn annotated_album_for_user(
+        &self,
+        user_id: i32,
+        album_id: i32,
+    ) -> Result<Option<AnnotatedAlbum>, MusicRepoError> {
+        let Some(album) = self.get_album(album_id)? else {
+            return Ok(None);
+        };
+        let starred_at = self.get_starred_at_for_album(user_id, album_id)?;
+        let annotations = self.get_album_annotations_batch(user_id, &[album_id])?;
+        let entry = annotations.get(&album_id).copied().unwrap_or_default();
+        Ok(Some(AnnotatedAlbum {
+            album,
+            annotations: entry,
+            starred_at,
+        }))
+    }
+
+    // ========================================================================
     // Bookmarks
     // ========================================================================
 
@@ -1441,6 +1489,17 @@ impl RemoteSessions {
         RemoteControlRepository::new(self.pool.clone()).get_session_for_user(session_id, user_id)
     }
 
+    /// Verify the session exists and belongs to the user, returning the
+    /// canonical not-found error otherwise.
+    fn require_session(&self, user_id: i32, session_id: &str) -> Result<(), MusicRepoError> {
+        RemoteControlRepository::new(self.pool.clone())
+            .get_session_for_user(session_id, user_id)?
+            .ok_or_else(|| {
+                MusicRepoError::new(MusicRepoErrorKind::NotFound, "remote session not found")
+            })
+            .map(|_| ())
+    }
+
     pub(in crate::api) fn send_remote_command(
         &self,
         user_id: i32,
@@ -1449,11 +1508,7 @@ impl RemoteSessions {
         command: &str,
         payload: Option<&str>,
     ) -> Result<i64, MusicRepoError> {
-        RemoteControlRepository::new(self.pool.clone())
-            .get_session_for_user(session_id, user_id)?
-            .ok_or_else(|| {
-                MusicRepoError::new(MusicRepoErrorKind::NotFound, "remote session not found")
-            })?;
+        self.require_session(user_id, session_id)?;
 
         RemoteControlRepository::new(self.pool.clone()).enqueue_command(
             session_id,
@@ -1471,11 +1526,7 @@ impl RemoteSessions {
         limit: i64,
         exclude_device_id: &str,
     ) -> Result<Vec<RemoteCommand>, MusicRepoError> {
-        RemoteControlRepository::new(self.pool.clone())
-            .get_session_for_user(session_id, user_id)?
-            .ok_or_else(|| {
-                MusicRepoError::new(MusicRepoErrorKind::NotFound, "remote session not found")
-            })?;
+        self.require_session(user_id, session_id)?;
 
         RemoteControlRepository::new(self.pool.clone()).get_commands(
             session_id,
@@ -1492,11 +1543,7 @@ impl RemoteSessions {
         updated_by_device_id: &str,
         state_json: &str,
     ) -> Result<(), MusicRepoError> {
-        RemoteControlRepository::new(self.pool.clone())
-            .get_session_for_user(session_id, user_id)?
-            .ok_or_else(|| {
-                MusicRepoError::new(MusicRepoErrorKind::NotFound, "remote session not found")
-            })?;
+        self.require_session(user_id, session_id)?;
 
         RemoteControlRepository::new(self.pool.clone()).update_state(
             session_id,
@@ -1510,11 +1557,7 @@ impl RemoteSessions {
         user_id: i32,
         session_id: &str,
     ) -> Result<Option<RemoteState>, MusicRepoError> {
-        RemoteControlRepository::new(self.pool.clone())
-            .get_session_for_user(session_id, user_id)?
-            .ok_or_else(|| {
-                MusicRepoError::new(MusicRepoErrorKind::NotFound, "remote session not found")
-            })?;
+        self.require_session(user_id, session_id)?;
 
         RemoteControlRepository::new(self.pool.clone()).get_state(session_id)
     }

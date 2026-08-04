@@ -11,6 +11,7 @@ use rayon::prelude::*;
 use tokio::sync::watch;
 use walkdir::WalkDir;
 
+use crate::cover_art::{content_hash, extension_from_mime, mime_from_extension};
 use crate::db::{DbPool, MusicFolderRepository, MusicRepoError};
 use crate::models::music::{MusicFolder, normalize_search_text};
 use crate::paths::resolve_cover_art_dir;
@@ -85,25 +86,9 @@ impl Scanner {
 
     /// Save cover art to cache and return the cover art ID.
     fn save_cover_art(&self, data: &[u8], mime: &str) -> Result<String, ScanError> {
-        use md5::{Digest, Md5};
-
-        // Generate hash-based ID for the cover art
-        let mut hasher = Md5::new();
-        hasher.update(data);
-        let hash = hex::encode(hasher.finalize());
-
-        // Determine file extension from MIME type
-        let ext = match mime {
-            "image/webp" => "webp",
-            "image/png" => "png",
-            "image/gif" => "gif",
-            "image/bmp" => "bmp",
-            "image/tiff" => "tiff",
-            _ => "jpg", // Default to JPEG
-        };
-
-        let filename = format!("{hash}.{ext}");
-        let filepath = self.cover_art_dir.join(&filename);
+        let hash = content_hash(data);
+        let extension = extension_from_mime(mime);
+        let filepath = self.cover_art_dir.join(format!("{hash}.{extension}"));
 
         // Only write if file doesn't already exist (same content = same hash)
         if !filepath.exists() {
@@ -112,16 +97,6 @@ impl Scanner {
 
         // Return just the hash as the cover art ID
         Ok(hash)
-    }
-
-    fn image_mime_from_ext(ext: &str) -> &'static str {
-        match ext {
-            "png" => "image/png",
-            "gif" => "image/gif",
-            "bmp" => "image/bmp",
-            "webp" => "image/webp",
-            _ => "image/jpeg",
-        }
     }
 
     /// Get the cover art cache directory path.
@@ -142,7 +117,7 @@ impl Scanner {
                     && path.is_file()
                     && let Ok(data) = fs::read(&path)
                 {
-                    return Some((data, Self::image_mime_from_ext(ext).to_string()));
+                    return Some((data, mime_from_extension(ext).to_string()));
                 }
             }
         }
@@ -170,7 +145,7 @@ impl Scanner {
                     && IMAGE_EXTENSIONS.contains(&extension.as_str())
                     && let Ok(data) = fs::read(&path)
                 {
-                    return Some((data, Self::image_mime_from_ext(&extension).to_string()));
+                    return Some((data, mime_from_extension(&extension).to_string()));
                 }
             }
         }
@@ -1396,21 +1371,5 @@ mod tests {
         let normal_secs: u64 = 1_700_000_000;
         let converted = i64::try_from(normal_secs).unwrap_or(i64::MAX);
         assert_eq!(converted, 1_700_000_000_i64);
-    }
-
-    #[test]
-    fn image_mime_from_ext_maps_supported_cover_extensions() {
-        assert_eq!(Scanner::image_mime_from_ext("png"), "image/png");
-        assert_eq!(Scanner::image_mime_from_ext("gif"), "image/gif");
-        assert_eq!(Scanner::image_mime_from_ext("bmp"), "image/bmp");
-        assert_eq!(Scanner::image_mime_from_ext("webp"), "image/webp");
-    }
-
-    #[test]
-    fn image_mime_from_ext_defaults_unknown_and_jpeg_to_jpeg() {
-        assert_eq!(Scanner::image_mime_from_ext("jpg"), "image/jpeg");
-        assert_eq!(Scanner::image_mime_from_ext("jpeg"), "image/jpeg");
-        assert_eq!(Scanner::image_mime_from_ext("tiff"), "image/jpeg");
-        assert_eq!(Scanner::image_mime_from_ext("unknown"), "image/jpeg");
     }
 }
