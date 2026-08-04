@@ -349,7 +349,6 @@ impl ArtistRepository {
         limit: i64,
     ) -> Result<Vec<Artist>, MusicRepoError> {
         let mut conn = self.pool.get()?;
-
         let mut db_query = artists::table
             .select(ArtistRow::as_select())
             .order(artists::name.asc())
@@ -358,7 +357,7 @@ impl ArtistRepository {
             .into_boxed();
 
         if !query.is_empty() {
-            let pattern = format!("%{}%", crate::models::music::normalize_search_text(query));
+            let pattern = search_pattern(query);
             db_query = db_query.filter(artists::search_name.like(pattern));
         }
 
@@ -378,6 +377,12 @@ impl ArtistRepository {
 // ============================================================================
 // Album Repository
 // ============================================================================
+
+/// Build the SQL `LIKE` pattern for a search query, folding case and accents
+/// the same way search names are stored.
+fn search_pattern(query: &str) -> String {
+    format!("%{}%", crate::models::music::normalize_search_text(query))
+}
 
 /// Database row representation for albums.
 #[derive(Debug, Clone, Queryable, Selectable)]
@@ -628,7 +633,7 @@ impl AlbumRepository {
             .into_boxed();
 
         if !query.is_empty() {
-            let pattern = format!("%{}%", crate::models::music::normalize_search_text(query));
+            let pattern = search_pattern(query);
             db_query = db_query.filter(albums::search_name.like(pattern));
         }
 
@@ -813,7 +818,7 @@ impl SongRepository {
             .into_boxed();
 
         if !query.is_empty() {
-            let pattern = format!("%{}%", crate::models::music::normalize_search_text(query));
+            let pattern = search_pattern(query);
             db_query = db_query.filter(songs::search_name.like(pattern));
         }
 

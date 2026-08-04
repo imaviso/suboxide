@@ -55,51 +55,36 @@ impl StarredRepository {
 
     /// Star an artist for a user.
     pub fn star_artist(&self, user_id: i32, artist_id: i32) -> Result<(), MusicRepoError> {
+        self.star(user_id, Some(artist_id), None, None)
+    }
+
+    /// Star an album for a user.
+    pub fn star_album(&self, user_id: i32, album_id: i32) -> Result<(), MusicRepoError> {
+        self.star(user_id, None, Some(album_id), None)
+    }
+
+    /// Star a song for a user.
+    pub fn star_song(&self, user_id: i32, song_id: i32) -> Result<(), MusicRepoError> {
+        self.star(user_id, None, None, Some(song_id))
+    }
+
+    /// Insert a starred row, ignoring duplicates atomically.
+    fn star(
+        &self,
+        user_id: i32,
+        artist_id: Option<i32>,
+        album_id: Option<i32>,
+        song_id: Option<i32>,
+    ) -> Result<(), MusicRepoError> {
         let mut conn = self.pool.get()?;
 
         // Use INSERT OR IGNORE to handle race conditions atomically.
         // If the entry already exists, this is a no-op.
         let new_starred = NewStarred {
             user_id,
-            artist_id: Some(artist_id),
-            album_id: None,
-            song_id: None,
-        };
-
-        diesel::insert_or_ignore_into(starred::table)
-            .values(&new_starred)
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
-
-    /// Star an album for a user.
-    pub fn star_album(&self, user_id: i32, album_id: i32) -> Result<(), MusicRepoError> {
-        let mut conn = self.pool.get()?;
-
-        let new_starred = NewStarred {
-            user_id,
-            artist_id: None,
-            album_id: Some(album_id),
-            song_id: None,
-        };
-
-        diesel::insert_or_ignore_into(starred::table)
-            .values(&new_starred)
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
-
-    /// Star a song for a user.
-    pub fn star_song(&self, user_id: i32, song_id: i32) -> Result<(), MusicRepoError> {
-        let mut conn = self.pool.get()?;
-
-        let new_starred = NewStarred {
-            user_id,
-            artist_id: None,
-            album_id: None,
-            song_id: Some(song_id),
+            artist_id,
+            album_id,
+            song_id,
         };
 
         diesel::insert_or_ignore_into(starred::table)
