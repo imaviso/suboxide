@@ -62,33 +62,33 @@ pub(in crate::api::handlers) fn api_error(auth: &SubsonicContext, error: &ApiErr
 /// Run a synchronous library/database operation off the async executor.
 ///
 /// The closure is spawned onto a blocking thread (Diesel and `SQLite` are
-/// synchronous). Returns the service result or a formatted generic error.
-pub(in crate::api::handlers) async fn run_blocking<T, F, E>(
-    auth: &SubsonicContext,
-    operation: F,
-) -> Result<T, Box<Response>>
+/// synchronous). Errors are converted to [`ApiError`] via the `Into` bound,
+/// so repository errors keep their structured codes instead of collapsing
+/// into a generic message.
+pub(in crate::api::handlers) async fn run_blocking<T, F, E>(operation: F) -> Result<T, ApiError>
 where
     F: FnOnce() -> Result<T, E> + Send + 'static,
     T: Send + 'static,
-    E: std::fmt::Display + Send + 'static,
+    E: Into<ApiError> + Send + 'static,
 {
-    tokio::task::spawn_blocking(operation)
-        .await
-        .map_err(|join_error| Box::new(service_error(auth, join_error)))
-        .and_then(|result| result.map_err(|error| Box::new(service_error(auth, error))))
+    let result = tokio::task::spawn_blocking(operation).await;
+    match result {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(error)) => Err(error.into()),
+        Err(join_error) => Err(ApiError::Generic(join_error.to_string())),
+    }
 }
 
 /// Parse API song ids (`mf-N` or bare integers), erroring on the first
 /// invalid value.
 pub(in crate::api::handlers) fn parse_song_ids(
-    auth: &SubsonicContext,
     ids: &[String],
     param_name: &str,
-) -> Result<Vec<i32>, Box<Response>> {
+) -> Result<Vec<i32>, ApiError> {
     ids.iter()
         .map(|id| {
             crate::models::music::EntityId::parse_song(id)
-                .ok_or_else(|| Box::new(service_error(auth, format!("Invalid {param_name}: {id}"))))
+                .ok_or_else(|| ApiError::Generic(format!("Invalid {param_name}: {id}")))
         })
         .collect()
 }

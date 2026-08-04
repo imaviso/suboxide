@@ -7,8 +7,8 @@ use crate::api::handlers::util;
 
 use crate::api::response::SubsonicResponse;
 use crate::models::music::{
-    AlbumID3Response, ArtistID3Response, ChildResponse, NowPlayingEntryResponse,
-    NowPlayingResponse, Starred2Response, saturating_i64_to_i32,
+    ArtistID3Response, NowPlayingEntryResponse, NowPlayingResponse, Starred2Response,
+    saturating_i64_to_i32,
 };
 
 /// Query parameters for star/unstar.
@@ -116,26 +116,18 @@ pub async fn unstar(
 /// Returns all starred artists, albums, and songs for the current user.
 /// Uses ID3 tags (artist/album/song structure).
 pub async fn get_starred2(auth: SubsonicContext) -> impl IntoResponse {
-    let user_id = auth.user.id;
-
-    let starred_artists = match auth.music().get_starred_artists(user_id) {
-        Ok(v) => v,
-        Err(e) => {
-            return util::repo_error(&auth, e);
-        }
-    };
-    let artist_ids: Vec<i32> = starred_artists.iter().map(|(a, _)| a.id).collect();
-    let album_counts = match auth.music().get_artist_album_counts_batch(&artist_ids) {
-        Ok(v) => v,
+    let items = match auth.music().starred_items_for_user(auth.user.id) {
+        Ok(items) => items,
         Err(e) => {
             return util::repo_error(&auth, e);
         }
     };
 
-    let artists: Vec<ArtistID3Response> = starred_artists
+    let artists: Vec<ArtistID3Response> = items
+        .artists
         .iter()
         .map(|(artist, starred_at)| {
-            let album_count = album_counts.get(&artist.id).copied().unwrap_or(0);
+            let album_count = items.album_counts.get(&artist.id).copied().unwrap_or(0);
             ArtistID3Response::from_artist_with_starred(
                 artist,
                 Some(saturating_i64_to_i32(album_count)),
@@ -144,58 +136,10 @@ pub async fn get_starred2(auth: SubsonicContext) -> impl IntoResponse {
         })
         .collect();
 
-    let starred_albums = match auth.music().get_starred_albums(user_id) {
-        Ok(v) => v,
-        Err(e) => {
-            return util::repo_error(&auth, e);
-        }
-    };
-    let album_starred: std::collections::HashMap<i32, chrono::NaiveDateTime> = starred_albums
-        .iter()
-        .map(|(album, starred_at)| (album.id, *starred_at))
-        .collect();
-    let album_songs: Vec<crate::models::music::Album> =
-        starred_albums.into_iter().map(|(album, _)| album).collect();
-    let annotated_albums =
-        match auth
-            .music()
-            .annotate_albums_with_starred(user_id, album_songs, &album_starred)
-        {
-            Ok(v) => v,
-            Err(e) => {
-                return util::repo_error(&auth, e);
-            }
-        };
-    let albums: Vec<AlbumID3Response> = util::annotate_albums(annotated_albums);
-
-    let starred_songs = match auth.music().get_starred_songs(user_id) {
-        Ok(v) => v,
-        Err(e) => {
-            return util::repo_error(&auth, e);
-        }
-    };
-    let song_starred: std::collections::HashMap<i32, chrono::NaiveDateTime> = starred_songs
-        .iter()
-        .map(|(song, starred_at)| (song.id, *starred_at))
-        .collect();
-    let songs: Vec<crate::models::music::Song> =
-        starred_songs.into_iter().map(|(song, _)| song).collect();
-    let annotated_songs =
-        match auth
-            .music()
-            .annotate_songs_with_starred(user_id, songs, &song_starred)
-        {
-            Ok(v) => v,
-            Err(e) => {
-                return util::repo_error(&auth, e);
-            }
-        };
-    let songs: Vec<ChildResponse> = util::annotate_songs(annotated_songs);
-
     let response = Starred2Response {
         artists,
-        albums,
-        songs,
+        albums: util::annotate_albums(items.albums),
+        songs: util::annotate_songs(items.songs),
     };
     SubsonicResponse::starred2(auth.format, response).into_response()
 }

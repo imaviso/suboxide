@@ -1,6 +1,6 @@
 //! List-based browsing handlers (albums, genres, songs).
 
-use axum::response::{IntoResponse, Response};
+use axum::response::IntoResponse;
 use serde::Deserialize;
 
 use crate::api::auth::SubsonicContext;
@@ -28,8 +28,8 @@ fn albums_for_list_type(
     list_type: &str,
     size: i64,
     offset: i64,
-) -> Result<Vec<Album>, Box<Response>> {
-    match list_type {
+) -> Result<Vec<Album>, ApiError> {
+    let albums = match list_type {
         "random" => auth.music().get_albums_random(size),
         "newest" => auth.music().get_albums_newest(offset, size),
         "frequent" => auth.music().get_albums_frequent(offset, size),
@@ -44,20 +44,17 @@ fn albums_for_list_type(
         }
         "byGenre" => {
             let Some(genre) = params.genre.as_deref() else {
-                return Err(Box::new(util::missing_param(auth, "genre")));
+                return Err(ApiError::MissingParameter("genre".into()));
             };
             auth.music().get_albums_by_genre(genre, offset, size)
         }
         "starred" => auth.music().get_albums_starred(auth.user.id, offset, size),
         "highest" => auth.music().get_albums_highest(auth.user.id, offset, size),
         _ => {
-            return Err(Box::new(util::service_error(
-                auth,
-                format!("Unknown list type: {list_type}"),
-            )));
+            return Err(ApiError::Generic(format!("Unknown list type: {list_type}")));
         }
-    }
-    .map_err(|error| Box::new(util::repo_error(auth, error)))
+    }?;
+    Ok(albums)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -188,7 +185,7 @@ pub async fn get_album_list2(
 
     let albums = match albums_for_list_type(&auth, &params, list_type, size, offset) {
         Ok(albums) => albums,
-        Err(response) => return *response,
+        Err(error) => return util::api_error(&auth, &error),
     };
 
     let annotated = match auth.music().annotate_albums_for_user(auth.user.id, albums) {
@@ -216,7 +213,7 @@ pub async fn get_album_list(
 
     let albums = match albums_for_list_type(&auth, &params, list_type, size, offset) {
         Ok(albums) => albums,
-        Err(response) => return *response,
+        Err(error) => return util::api_error(&auth, &error),
     };
     let user_id = auth.user.id;
 
@@ -311,7 +308,6 @@ pub async fn get_random_songs(
     let music_folder_id = params.music_folder_id;
     let blocking_auth = auth.clone();
     let response = match util::run_blocking(
-        &auth,
         move || -> Result<RandomSongsResponse, crate::db::MusicRepoError> {
             let songs = blocking_auth.music().get_random_songs(
                 size,
@@ -332,7 +328,7 @@ pub async fn get_random_songs(
     .await
     {
         Ok(response) => response,
-        Err(error) => return *error,
+        Err(error) => return util::api_error(&auth, &error),
     };
 
     SubsonicResponse::random_songs(auth.format, response).into_response()
@@ -369,7 +365,6 @@ pub async fn get_songs_by_genre(
     let music_folder_id = params.music_folder_id;
     let blocking_auth = auth.clone();
     let response = match util::run_blocking(
-        &auth,
         move || -> Result<SongsByGenreResponse, crate::db::MusicRepoError> {
             let songs =
                 blocking_auth
@@ -387,7 +382,7 @@ pub async fn get_songs_by_genre(
     .await
     {
         Ok(response) => response,
-        Err(error) => return *error,
+        Err(error) => return util::api_error(&auth, &error),
     };
 
     SubsonicResponse::songs_by_genre(auth.format, response).into_response()
@@ -419,7 +414,6 @@ pub async fn get_top_songs(
     };
 
     let count = params.count.unwrap_or(50).clamp(1, 500);
-    let _user_id = auth.user.id;
 
     // Get top songs by artist name (ordered by play count)
     let songs = match auth
@@ -470,32 +464,11 @@ pub async fn get_similar_songs2(
     crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<SimilarSongs2Params>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
-    let seed = match similar_songs_seed(&params) {
-        Ok(seed) => seed,
+    let songs = match similar_songs_response(&auth, &params) {
+        Ok(songs) => songs,
         Err(error) => return util::api_error(&auth, &error),
     };
-
-    let count = params.count.unwrap_or(50).clamp(1, 500);
-    let _user_id = auth.user.id;
-
-    let songs = match similar_songs_for_seed(auth.music(), seed, count) {
-        Ok(Some(songs)) => songs,
-        Ok(None) => {
-            return util::not_found(&auth, "Item");
-        }
-        Err(error) => {
-            return util::repo_error(&auth, error);
-        }
-    };
-
-    let annotated = match auth.music().annotate_songs_for_user(auth.user.id, songs) {
-        Ok(annotated) => annotated,
-        Err(e) => return util::repo_error(&auth, e),
-    };
-    let response = SimilarSongs2Response {
-        songs: util::annotate_songs(annotated),
-    };
-
+    let response = SimilarSongs2Response { songs };
     SubsonicResponse::similar_songs2(auth.format, response).into_response()
 }
 
@@ -506,88 +479,63 @@ pub async fn get_similar_songs(
     crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<SimilarSongs2Params>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
-    let seed = match similar_songs_seed(&params) {
-        Ok(seed) => seed,
+    let songs = match similar_songs_response(&auth, &params) {
+        Ok(songs) => songs,
         Err(error) => return util::api_error(&auth, &error),
     };
-
-    let count = params.count.unwrap_or(50).clamp(1, 500);
-    let _user_id = auth.user.id;
-
-    let songs = match similar_songs_for_seed(auth.music(), seed, count) {
-        Ok(Some(songs)) => songs,
-        Ok(None) => {
-            return util::not_found(&auth, "Item");
-        }
-        Err(error) => {
-            return util::repo_error(&auth, error);
-        }
-    };
-
-    let annotated = match auth.music().annotate_songs_for_user(auth.user.id, songs) {
-        Ok(annotated) => annotated,
-        Err(e) => return util::repo_error(&auth, e),
-    };
-    let response = SimilarSongsResponse {
-        songs: util::annotate_songs(annotated),
-    };
-
+    let response = SimilarSongsResponse { songs };
     SubsonicResponse::similar_songs(auth.format, response).into_response()
+}
+
+/// Build the annotated similar-songs list shared by the ID3 and legacy
+/// endpoints.
+fn similar_songs_response(
+    auth: &SubsonicContext,
+    params: &SimilarSongs2Params,
+) -> Result<Vec<ChildResponse>, ApiError> {
+    let seed = similar_songs_seed(params)?;
+    let count = params.count.unwrap_or(50).clamp(1, 500);
+
+    let songs = similar_songs_for_seed(auth.music(), seed, count)?
+        .ok_or_else(|| ApiError::NotFound("Item".into()))?;
+    let annotated = auth.music().annotate_songs_for_user(auth.user.id, songs)?;
+    Ok(util::annotate_songs(annotated))
 }
 
 /// GET/POST /rest/getStarred[.view]
 ///
 /// Returns starred songs, albums and artists (non-ID3 version).
 pub async fn get_starred(auth: SubsonicContext) -> impl IntoResponse {
-    let user_id = auth.user.id;
-
-    // Get starred items
-    let starred_artists = match auth.music().get_starred_artists(user_id) {
-        Ok(v) => v,
-        Err(e) => {
-            return util::repo_error(&auth, e);
-        }
-    };
-    let starred_albums = match auth.music().get_starred_albums(user_id) {
-        Ok(v) => v,
-        Err(e) => {
-            return util::repo_error(&auth, e);
-        }
-    };
-    let starred_songs = match auth.music().get_starred_songs(user_id) {
-        Ok(v) => v,
+    let items = match auth.music().starred_items_for_user(auth.user.id) {
+        Ok(items) => items,
         Err(e) => {
             return util::repo_error(&auth, e);
         }
     };
 
     // Convert to response types
-    let artist_responses: Vec<ArtistResponse> = starred_artists
+    let artist_responses: Vec<ArtistResponse> = items
+        .artists
         .iter()
         .map(|(artist, starred_at)| {
             ArtistResponse::from_artist_with_starred(artist, Some(starred_at))
         })
         .collect();
 
-    let album_responses: Vec<ChildResponse> = starred_albums
+    let album_responses: Vec<ChildResponse> = items
+        .albums
         .iter()
-        .map(|(album, starred_at)| {
-            let mut response = ChildResponse::from_album_as_dir(album);
-            response.starred = Some(format_subsonic_datetime(starred_at));
+        .map(|item| {
+            let mut response = ChildResponse::from_album_as_dir(&item.album);
+            response.starred = item.starred_at.as_ref().map(format_subsonic_datetime);
             response
         })
         .collect();
 
-    let songs: Vec<Song> = starred_songs.iter().map(|(song, _)| song.clone()).collect();
-    let annotated = match auth.music().annotate_songs_for_user(user_id, songs) {
-        Ok(annotated) => annotated,
-        Err(e) => return util::repo_error(&auth, e),
-    };
-
     let response = StarredResponse {
         artists: artist_responses,
         albums: album_responses,
-        songs: util::annotate_songs(annotated),
+        songs: util::annotate_songs(items.songs),
     };
 
     SubsonicResponse::starred(auth.format, response).into_response()

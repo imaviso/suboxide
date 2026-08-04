@@ -1,7 +1,6 @@
 //! Music library scanner module.
 
 pub mod engine;
-pub mod lyrics;
 pub mod state;
 pub mod types;
 

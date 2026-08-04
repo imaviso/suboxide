@@ -2,10 +2,10 @@
 
 use chrono::{Duration, NaiveDateTime, Utc};
 use diesel::prelude::*;
-use diesel::sql_types::{BigInt, Integer, Nullable, Text, Timestamp};
 use rand_core::{OsRng, RngCore};
 
 use crate::db::DbPool;
+use crate::db::schema::{remote_commands, remote_sessions, remote_state};
 
 use super::error::{MusicRepoError, MusicRepoErrorKind};
 
@@ -46,6 +46,100 @@ pub struct RemoteState {
     pub updated_at: NaiveDateTime,
 }
 
+#[derive(Debug, Clone, Queryable, Selectable)]
+#[diesel(table_name = remote_sessions)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[expect(
+    dead_code,
+    reason = "full-table projection; id is not part of the domain type"
+)]
+struct RemoteSessionRow {
+    id: i32,
+    session_id: String,
+    pairing_code: String,
+    owner_user_id: i32,
+    host_device_id: String,
+    host_device_name: Option<String>,
+    controller_user_id: Option<i32>,
+    controller_device_id: Option<String>,
+    controller_device_name: Option<String>,
+    expires_at: NaiveDateTime,
+    created_at: NaiveDateTime,
+    updated_at: NaiveDateTime,
+    closed_at: Option<NaiveDateTime>,
+}
+
+impl From<RemoteSessionRow> for RemoteSession {
+    fn from(row: RemoteSessionRow) -> Self {
+        Self {
+            session_id: row.session_id,
+            pairing_code: row.pairing_code,
+            owner_user_id: row.owner_user_id,
+            host_device_id: row.host_device_id,
+            host_device_name: row.host_device_name,
+            controller_user_id: row.controller_user_id,
+            controller_device_id: row.controller_device_id,
+            controller_device_name: row.controller_device_name,
+            expires_at: row.expires_at,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+            closed_at: row.closed_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Queryable, Selectable)]
+#[diesel(table_name = remote_commands)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[expect(
+    dead_code,
+    reason = "full-table projection; session_id is not part of the domain type"
+)]
+struct RemoteCommandRow {
+    id: i64,
+    session_id: String,
+    source_device_id: String,
+    command: String,
+    payload: Option<String>,
+    created_at: NaiveDateTime,
+}
+
+impl From<RemoteCommandRow> for RemoteCommand {
+    fn from(row: RemoteCommandRow) -> Self {
+        Self {
+            id: row.id,
+            command: row.command,
+            payload: row.payload,
+            source_device_id: row.source_device_id,
+            created_at: row.created_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Queryable, Selectable)]
+#[diesel(table_name = remote_state)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[expect(
+    dead_code,
+    reason = "full-table projection; session_id is not part of the domain type"
+)]
+struct RemoteStateRow {
+    session_id: String,
+    state_json: String,
+    updated_by_device_id: String,
+    updated_at: NaiveDateTime,
+}
+
+impl From<RemoteStateRow> for RemoteState {
+    fn from(row: RemoteStateRow) -> Self {
+        Self {
+            state_json: row.state_json,
+            updated_by_device_id: row.updated_by_device_id,
+            updated_at: row.updated_at,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RemoteControlRepository {
     pool: DbPool,
@@ -74,43 +168,32 @@ impl RemoteControlRepository {
         let expires_at = now + Duration::seconds(ttl_seconds);
 
         conn.transaction(|conn| {
-            diesel::sql_query(
-                "UPDATE remote_sessions
-                 SET closed_at = ?, updated_at = ?
-                 WHERE owner_user_id = ? AND host_device_id = ? AND closed_at IS NULL",
-            )
-            .bind::<Timestamp, _>(now)
-            .bind::<Timestamp, _>(now)
-            .bind::<Integer, _>(owner_user_id)
-            .bind::<Text, _>(host_device_id)
-            .execute(conn)?;
+            diesel::update(remote_sessions::table)
+                .filter(remote_sessions::owner_user_id.eq(owner_user_id))
+                .filter(remote_sessions::host_device_id.eq(host_device_id))
+                .filter(remote_sessions::closed_at.is_null())
+                .set((
+                    remote_sessions::closed_at.eq(Some(now)),
+                    remote_sessions::updated_at.eq(now),
+                ))
+                .execute(conn)?;
 
             for _ in 0..5 {
                 let session_id = generate_session_id();
                 let pairing_code = generate_pairing_code();
 
-                let insert_result = diesel::sql_query(
-                    "INSERT INTO remote_sessions (
-                        session_id,
-                        pairing_code,
-                        owner_user_id,
-                        host_device_id,
-                        host_device_name,
-                        expires_at,
-                        created_at,
-                        updated_at
-                     )
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                )
-                .bind::<Text, _>(&session_id)
-                .bind::<Text, _>(&pairing_code)
-                .bind::<Integer, _>(owner_user_id)
-                .bind::<Text, _>(host_device_id)
-                .bind::<Nullable<Text>, _>(host_device_name)
-                .bind::<Timestamp, _>(expires_at)
-                .bind::<Timestamp, _>(now)
-                .bind::<Timestamp, _>(now)
-                .execute(conn);
+                let insert_result = diesel::insert_into(remote_sessions::table)
+                    .values((
+                        remote_sessions::session_id.eq(&session_id),
+                        remote_sessions::pairing_code.eq(&pairing_code),
+                        remote_sessions::owner_user_id.eq(owner_user_id),
+                        remote_sessions::host_device_id.eq(host_device_id),
+                        remote_sessions::host_device_name.eq(host_device_name),
+                        remote_sessions::expires_at.eq(expires_at),
+                        remote_sessions::created_at.eq(now),
+                        remote_sessions::updated_at.eq(now),
+                    ))
+                    .execute(conn);
 
                 match insert_result {
                     Ok(_) => return Self::get_session_by_id_with_conn(conn, &session_id),
@@ -145,29 +228,13 @@ impl RemoteControlRepository {
         let mut conn = self.pool.get()?;
         let now = Utc::now().naive_utc();
 
-        let session_row = diesel::sql_query(
-            "SELECT
-                session_id,
-                pairing_code,
-                owner_user_id,
-                host_device_id,
-                host_device_name,
-                controller_user_id,
-                controller_device_id,
-                controller_device_name,
-                expires_at,
-                created_at,
-                updated_at,
-                closed_at
-             FROM remote_sessions
-             WHERE pairing_code = ?
-               AND closed_at IS NULL
-               AND expires_at > CURRENT_TIMESTAMP
-             LIMIT 1",
-        )
-        .bind::<Text, _>(pairing_code)
-        .get_result::<RemoteSessionRow>(&mut conn)
-        .optional()?;
+        let session_row = remote_sessions::table
+            .filter(remote_sessions::pairing_code.eq(pairing_code))
+            .filter(remote_sessions::closed_at.is_null())
+            .filter(remote_sessions::expires_at.gt(now))
+            .select(RemoteSessionRow::as_select())
+            .first::<RemoteSessionRow>(&mut conn)
+            .optional()?;
 
         let Some(session_row) = session_row else {
             return Ok(None);
@@ -181,33 +248,22 @@ impl RemoteControlRepository {
         let new_expiry = now + Duration::seconds(DEFAULT_JOINED_SESSION_TTL_SECONDS);
         let consumed_pairing_code = format!("joined-{}", session_row.session_id);
 
-        let changed = diesel::sql_query(
-            "UPDATE remote_sessions
-             SET
-               controller_user_id = ?,
-               controller_device_id = ?,
-               controller_device_name = ?,
-               pairing_code = ?,
-               expires_at = ?,
-               updated_at = ?
-              WHERE session_id = ?
-                AND pairing_code = ?
-                AND owner_user_id = ?
-                AND expires_at > ?
-                AND closed_at IS NULL
-                AND controller_user_id IS NULL",
-        )
-        .bind::<Integer, _>(controller_user_id)
-        .bind::<Text, _>(controller_device_id)
-        .bind::<Nullable<Text>, _>(controller_device_name)
-        .bind::<Text, _>(&consumed_pairing_code)
-        .bind::<Timestamp, _>(new_expiry)
-        .bind::<Timestamp, _>(now)
-        .bind::<Text, _>(&session_row.session_id)
-        .bind::<Text, _>(pairing_code)
-        .bind::<Integer, _>(controller_user_id)
-        .bind::<Timestamp, _>(now)
-        .execute(&mut conn)?;
+        let changed = diesel::update(remote_sessions::table)
+            .filter(remote_sessions::session_id.eq(&session_row.session_id))
+            .filter(remote_sessions::pairing_code.eq(pairing_code))
+            .filter(remote_sessions::owner_user_id.eq(controller_user_id))
+            .filter(remote_sessions::expires_at.gt(now))
+            .filter(remote_sessions::closed_at.is_null())
+            .filter(remote_sessions::controller_user_id.is_null())
+            .set((
+                remote_sessions::controller_user_id.eq(Some(controller_user_id)),
+                remote_sessions::controller_device_id.eq(Some(controller_device_id)),
+                remote_sessions::controller_device_name.eq(controller_device_name),
+                remote_sessions::pairing_code.eq(&consumed_pairing_code),
+                remote_sessions::expires_at.eq(new_expiry),
+                remote_sessions::updated_at.eq(now),
+            ))
+            .execute(&mut conn)?;
 
         if changed == 0 {
             return Ok(None);
@@ -226,32 +282,20 @@ impl RemoteControlRepository {
         user_id: i32,
     ) -> Result<Option<RemoteSession>, MusicRepoError> {
         let mut conn = self.pool.get()?;
-        let row = diesel::sql_query(
-            "SELECT
-                session_id,
-                pairing_code,
-                owner_user_id,
-                host_device_id,
-                host_device_name,
-                controller_user_id,
-                controller_device_id,
-                controller_device_name,
-                expires_at,
-                created_at,
-                updated_at,
-                closed_at
-             FROM remote_sessions
-             WHERE session_id = ?
-               AND closed_at IS NULL
-               AND expires_at > CURRENT_TIMESTAMP
-               AND (owner_user_id = ? OR controller_user_id = ?)
-             LIMIT 1",
-        )
-        .bind::<Text, _>(session_id)
-        .bind::<Integer, _>(user_id)
-        .bind::<Integer, _>(user_id)
-        .get_result::<RemoteSessionRow>(&mut conn)
-        .optional()?;
+        let now = Utc::now().naive_utc();
+
+        let row = remote_sessions::table
+            .filter(remote_sessions::session_id.eq(session_id))
+            .filter(remote_sessions::closed_at.is_null())
+            .filter(remote_sessions::expires_at.gt(now))
+            .filter(
+                remote_sessions::owner_user_id
+                    .eq(user_id)
+                    .or(remote_sessions::controller_user_id.eq(user_id)),
+            )
+            .select(RemoteSessionRow::as_select())
+            .first::<RemoteSessionRow>(&mut conn)
+            .optional()?;
 
         Ok(row.map(RemoteSession::from))
     }
@@ -264,19 +308,19 @@ impl RemoteControlRepository {
         let mut conn = self.pool.get()?;
         let now = Utc::now().naive_utc();
 
-        let changed = diesel::sql_query(
-            "UPDATE remote_sessions
-             SET closed_at = ?, updated_at = ?
-             WHERE session_id = ?
-               AND closed_at IS NULL
-               AND (owner_user_id = ? OR controller_user_id = ?)",
-        )
-        .bind::<Timestamp, _>(now)
-        .bind::<Timestamp, _>(now)
-        .bind::<Text, _>(session_id)
-        .bind::<Integer, _>(user_id)
-        .bind::<Integer, _>(user_id)
-        .execute(&mut conn)?;
+        let changed = diesel::update(remote_sessions::table)
+            .filter(remote_sessions::session_id.eq(session_id))
+            .filter(remote_sessions::closed_at.is_null())
+            .filter(
+                remote_sessions::owner_user_id
+                    .eq(user_id)
+                    .or(remote_sessions::controller_user_id.eq(user_id)),
+            )
+            .set((
+                remote_sessions::closed_at.eq(Some(now)),
+                remote_sessions::updated_at.eq(now),
+            ))
+            .execute(&mut conn)?;
 
         Ok(changed > 0)
     }
@@ -295,35 +339,37 @@ impl RemoteControlRepository {
         let mut conn = self.pool.get()?;
         let now = Utc::now().naive_utc();
 
-        let changed = diesel::sql_query(
-            "INSERT INTO remote_commands (session_id, source_device_id, command, payload, created_at)
-             SELECT ?, ?, ?, ?, ?
-             WHERE EXISTS (
-                 SELECT 1 FROM remote_sessions
-                 WHERE session_id = ?
-                   AND closed_at IS NULL
-                   AND expires_at > CURRENT_TIMESTAMP
-             )",
-        )
-        .bind::<Text, _>(session_id)
-        .bind::<Text, _>(source_device_id)
-        .bind::<Text, _>(command)
-        .bind::<Nullable<Text>, _>(payload)
-        .bind::<Timestamp, _>(now)
-        .bind::<Text, _>(session_id)
-        .execute(&mut conn)?;
+        let session_active = diesel::select(diesel::dsl::exists(
+            remote_sessions::table
+                .filter(remote_sessions::session_id.eq(session_id))
+                .filter(remote_sessions::closed_at.is_null())
+                .filter(remote_sessions::expires_at.gt(now)),
+        ))
+        .get_result::<bool>(&mut conn)?;
 
-        if changed == 0 {
+        if !session_active {
             return Err(MusicRepoError::new(
                 MusicRepoErrorKind::NotFound,
                 "remote session not found or inactive",
             ));
         }
 
-        let row = diesel::sql_query("SELECT last_insert_rowid() AS id")
-            .get_result::<LastInsertRow>(&mut conn)?;
+        diesel::insert_into(remote_commands::table)
+            .values((
+                remote_commands::session_id.eq(session_id),
+                remote_commands::source_device_id.eq(source_device_id),
+                remote_commands::command.eq(command),
+                remote_commands::payload.eq(payload),
+                remote_commands::created_at.eq(now),
+            ))
+            .execute(&mut conn)?;
 
-        Ok(row.id)
+        let row = remote_commands::table
+            .select(remote_commands::id)
+            .order(remote_commands::id.desc())
+            .first::<i64>(&mut conn)?;
+
+        Ok(row)
     }
 
     /// Get queued commands after a command id.
@@ -339,20 +385,14 @@ impl RemoteControlRepository {
     ) -> Result<Vec<RemoteCommand>, MusicRepoError> {
         let mut conn = self.pool.get()?;
 
-        let rows = diesel::sql_query(
-            "SELECT id, command, payload, source_device_id, created_at
-             FROM remote_commands
-             WHERE session_id = ?
-               AND id > ?
-               AND source_device_id != ?
-             ORDER BY id ASC
-             LIMIT ?",
-        )
-        .bind::<Text, _>(session_id)
-        .bind::<BigInt, _>(since_id)
-        .bind::<Text, _>(exclude_device_id)
-        .bind::<BigInt, _>(limit)
-        .load::<RemoteCommandRow>(&mut conn)?;
+        let rows = remote_commands::table
+            .filter(remote_commands::session_id.eq(session_id))
+            .filter(remote_commands::id.gt(since_id))
+            .filter(remote_commands::source_device_id.ne(exclude_device_id))
+            .order(remote_commands::id.asc())
+            .limit(limit)
+            .select(RemoteCommandRow::as_select())
+            .load::<RemoteCommandRow>(&mut conn)?;
 
         Ok(rows.into_iter().map(RemoteCommand::from).collect())
     }
@@ -370,27 +410,21 @@ impl RemoteControlRepository {
         let mut conn = self.pool.get()?;
         let now = Utc::now().naive_utc();
 
-        let changed = diesel::sql_query(
-            "INSERT INTO remote_state (session_id, state_json, updated_by_device_id, updated_at)
-             SELECT ?, ?, ?, ?
-             WHERE EXISTS (
-                 SELECT 1 FROM remote_sessions
-                 WHERE session_id = ?
-                   AND closed_at IS NULL
-                   AND expires_at > CURRENT_TIMESTAMP
-             )
-             ON CONFLICT(session_id) DO UPDATE
-             SET
-                 state_json = excluded.state_json,
-                 updated_by_device_id = excluded.updated_by_device_id,
-                 updated_at = excluded.updated_at",
-        )
-        .bind::<Text, _>(session_id)
-        .bind::<Text, _>(state_json)
-        .bind::<Text, _>(updated_by_device_id)
-        .bind::<Timestamp, _>(now)
-        .bind::<Text, _>(session_id)
-        .execute(&mut conn)?;
+        let changed = diesel::insert_into(remote_state::table)
+            .values((
+                remote_state::session_id.eq(session_id),
+                remote_state::state_json.eq(state_json),
+                remote_state::updated_by_device_id.eq(updated_by_device_id),
+                remote_state::updated_at.eq(now),
+            ))
+            .on_conflict(remote_state::session_id)
+            .do_update()
+            .set((
+                remote_state::state_json.eq(state_json),
+                remote_state::updated_by_device_id.eq(updated_by_device_id),
+                remote_state::updated_at.eq(now),
+            ))
+            .execute(&mut conn)?;
 
         if changed == 0 {
             return Err(MusicRepoError::new(
@@ -408,15 +442,12 @@ impl RemoteControlRepository {
     /// Returns an error if database access fails.
     pub fn get_state(&self, session_id: &str) -> Result<Option<RemoteState>, MusicRepoError> {
         let mut conn = self.pool.get()?;
-        let row = diesel::sql_query(
-            "SELECT state_json, updated_by_device_id, updated_at
-             FROM remote_state
-             WHERE session_id = ?
-             LIMIT 1",
-        )
-        .bind::<Text, _>(session_id)
-        .get_result::<RemoteStateRow>(&mut conn)
-        .optional()?;
+
+        let row = remote_state::table
+            .filter(remote_state::session_id.eq(session_id))
+            .select(RemoteStateRow::as_select())
+            .first::<RemoteStateRow>(&mut conn)
+            .optional()?;
 
         Ok(row.map(RemoteState::from))
     }
@@ -430,127 +461,12 @@ impl RemoteControlRepository {
         conn: &mut diesel::SqliteConnection,
         session_id: &str,
     ) -> Result<RemoteSession, MusicRepoError> {
-        diesel::sql_query(
-            "SELECT
-                session_id,
-                pairing_code,
-                owner_user_id,
-                host_device_id,
-                host_device_name,
-                controller_user_id,
-                controller_device_id,
-                controller_device_name,
-                expires_at,
-                created_at,
-                updated_at,
-                closed_at
-             FROM remote_sessions
-             WHERE session_id = ?
-             LIMIT 1",
-        )
-        .bind::<Text, _>(session_id)
-        .get_result::<RemoteSessionRow>(conn)
-        .map(RemoteSession::from)
-        .map_err(MusicRepoError::from)
-    }
-}
-
-#[derive(QueryableByName)]
-struct LastInsertRow {
-    #[diesel(sql_type = BigInt)]
-    id: i64,
-}
-
-#[derive(QueryableByName)]
-struct RemoteSessionRow {
-    #[diesel(sql_type = Text)]
-    session_id: String,
-    #[diesel(sql_type = Text)]
-    pairing_code: String,
-    #[diesel(sql_type = Integer)]
-    owner_user_id: i32,
-    #[diesel(sql_type = Text)]
-    host_device_id: String,
-    #[diesel(sql_type = Nullable<Text>)]
-    host_device_name: Option<String>,
-    #[diesel(sql_type = Nullable<Integer>)]
-    controller_user_id: Option<i32>,
-    #[diesel(sql_type = Nullable<Text>)]
-    controller_device_id: Option<String>,
-    #[diesel(sql_type = Nullable<Text>)]
-    controller_device_name: Option<String>,
-    #[diesel(sql_type = Timestamp)]
-    expires_at: NaiveDateTime,
-    #[diesel(sql_type = Timestamp)]
-    created_at: NaiveDateTime,
-    #[diesel(sql_type = Timestamp)]
-    updated_at: NaiveDateTime,
-    #[diesel(sql_type = Nullable<Timestamp>)]
-    closed_at: Option<NaiveDateTime>,
-}
-
-impl From<RemoteSessionRow> for RemoteSession {
-    fn from(row: RemoteSessionRow) -> Self {
-        Self {
-            session_id: row.session_id,
-            pairing_code: row.pairing_code,
-            owner_user_id: row.owner_user_id,
-            host_device_id: row.host_device_id,
-            host_device_name: row.host_device_name,
-            controller_user_id: row.controller_user_id,
-            controller_device_id: row.controller_device_id,
-            controller_device_name: row.controller_device_name,
-            expires_at: row.expires_at,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-            closed_at: row.closed_at,
-        }
-    }
-}
-
-#[derive(QueryableByName)]
-struct RemoteCommandRow {
-    #[diesel(sql_type = BigInt)]
-    id: i64,
-    #[diesel(sql_type = Text)]
-    command: String,
-    #[diesel(sql_type = Nullable<Text>)]
-    payload: Option<String>,
-    #[diesel(sql_type = Text)]
-    source_device_id: String,
-    #[diesel(sql_type = Timestamp)]
-    created_at: NaiveDateTime,
-}
-
-impl From<RemoteCommandRow> for RemoteCommand {
-    fn from(row: RemoteCommandRow) -> Self {
-        Self {
-            id: row.id,
-            command: row.command,
-            payload: row.payload,
-            source_device_id: row.source_device_id,
-            created_at: row.created_at,
-        }
-    }
-}
-
-#[derive(QueryableByName)]
-struct RemoteStateRow {
-    #[diesel(sql_type = Text)]
-    state_json: String,
-    #[diesel(sql_type = Text)]
-    updated_by_device_id: String,
-    #[diesel(sql_type = Timestamp)]
-    updated_at: NaiveDateTime,
-}
-
-impl From<RemoteStateRow> for RemoteState {
-    fn from(row: RemoteStateRow) -> Self {
-        Self {
-            state_json: row.state_json,
-            updated_by_device_id: row.updated_by_device_id,
-            updated_at: row.updated_at,
-        }
+        remote_sessions::table
+            .filter(remote_sessions::session_id.eq(session_id))
+            .select(RemoteSessionRow::as_select())
+            .first::<RemoteSessionRow>(conn)
+            .map(RemoteSession::from)
+            .map_err(MusicRepoError::from)
     }
 }
 

@@ -1,8 +1,9 @@
 //! Playlist-related API handlers (getPlaylists, getPlaylist, createPlaylist, updatePlaylist, deletePlaylist)
-use axum::response::{IntoResponse, Response};
+use axum::response::IntoResponse;
 use serde::Deserialize;
 
 use crate::api::auth::SubsonicContext;
+use crate::api::error::ApiError;
 use crate::api::handlers::util;
 use crate::api::response::SubsonicResponse;
 use crate::db::Playlist;
@@ -15,11 +16,11 @@ fn playlist_with_songs_response(
     auth: &SubsonicContext,
     playlist: &Playlist,
     songs: &[Song],
-) -> Result<PlaylistWithSongsResponse, Box<Response>> {
+) -> Result<PlaylistWithSongsResponse, ApiError> {
     let annotated = auth
         .music()
         .annotate_songs_for_user(auth.user.id, songs.to_vec())
-        .map_err(|error| Box::new(util::repo_error(auth, error)))?;
+        .map_err(ApiError::from)?;
     let entries = util::annotate_songs(annotated);
     let cover_art = songs.first().and_then(|song| song.cover_art.clone());
 
@@ -158,7 +159,7 @@ pub async fn get_playlist(
     };
     let response = match playlist_with_songs_response(&auth, &playlist, &songs) {
         Ok(response) => response,
-        Err(response) => return *response,
+        Err(error) => return util::api_error(&auth, &error),
     };
 
     SubsonicResponse::playlist(auth.format, response).into_response()
@@ -195,9 +196,9 @@ pub async fn create_playlist(
     }
 
     let user_id = auth.user.id;
-    let song_ids = match util::parse_song_ids(&auth, &params.song_id, "songId") {
+    let song_ids = match util::parse_song_ids(&params.song_id, "songId") {
         Ok(ids) => ids,
-        Err(response) => return *response,
+        Err(error) => return util::api_error(&auth, &error),
     };
 
     if let Some(playlist_id_str) = params.playlist_id.as_ref() {
@@ -244,7 +245,7 @@ pub async fn create_playlist(
 
         let response = match playlist_with_songs_response(&auth, &playlist, &songs) {
             Ok(response) => response,
-            Err(response) => return *response,
+            Err(error) => return util::api_error(&auth, &error),
         };
 
         return SubsonicResponse::playlist(auth.format, response).into_response();
@@ -273,7 +274,7 @@ pub async fn create_playlist(
 
     let response = match playlist_with_songs_response(&auth, &playlist, &songs) {
         Ok(response) => response,
-        Err(response) => return *response,
+        Err(error) => return util::api_error(&auth, &error),
     };
 
     SubsonicResponse::playlist(auth.format, response).into_response()
@@ -336,9 +337,9 @@ pub async fn update_playlist(
         }
     }
 
-    let song_ids_to_add = match util::parse_song_ids(&auth, &params.song_id_to_add, "songIdToAdd") {
+    let song_ids_to_add = match util::parse_song_ids(&params.song_id_to_add, "songIdToAdd") {
         Ok(ids) => ids,
-        Err(response) => return *response,
+        Err(error) => return util::api_error(&auth, &error),
     };
 
     match auth.music().update_playlist(

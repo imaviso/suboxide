@@ -67,27 +67,45 @@ pub async fn get_album_info2(
     crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<AlbumInfo2Params>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
+    album_info_response(&auth, &params)
+}
+
+/// GET/POST /rest/getAlbumInfo[.view]
+///
+/// Returns album info (non-ID3 version). Similar to getAlbumInfo2.
+pub async fn get_album_info(
+    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<AlbumInfo2Params>,
+    auth: SubsonicContext,
+) -> impl IntoResponse {
+    album_info_response(&auth, &params)
+}
+
+/// Build the album-info response for both the ID3 and legacy endpoints.
+fn album_info_response(
+    auth: &SubsonicContext,
+    params: &AlbumInfo2Params,
+) -> axum::response::Response {
     // Get the required 'id' parameter
     let Some(album_id) = params
         .id
         .as_deref()
         .and_then(crate::models::music::EntityId::parse_album)
     else {
-        return util::missing_param(&auth, "id");
+        return util::missing_param(auth, "id");
     };
 
     // Get the album
     let album = match auth.music().get_album(album_id) {
         Ok(Some(album)) => album,
         Ok(None) => {
-            return util::not_found(&auth, "Album");
+            return util::not_found(auth, "Album");
         }
         Err(e) => {
-            return util::repo_error(&auth, e);
+            return util::repo_error(auth, e);
         }
     };
 
-    // Create response with available data from the album
+    // AlbumInfoResponse is the same for ID3 and non-ID3
     let response = AlbumInfoResponse::from_album(&album);
     SubsonicResponse::album_info(auth.format, response).into_response()
 }
@@ -116,38 +134,6 @@ pub async fn get_artist_info(
         }
     };
     SubsonicResponse::artist_info(auth.format, response).into_response()
-}
-
-/// GET/POST /rest/getAlbumInfo[.view]
-///
-/// Returns album info (non-ID3 version). Similar to getAlbumInfo2.
-pub async fn get_album_info(
-    crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<AlbumInfo2Params>,
-    auth: SubsonicContext,
-) -> impl IntoResponse {
-    // Get the required 'id' parameter
-    let Some(album_id) = params
-        .id
-        .as_deref()
-        .and_then(crate::models::music::EntityId::parse_album)
-    else {
-        return util::missing_param(&auth, "id");
-    };
-
-    // Get the album
-    let album = match auth.music().get_album(album_id) {
-        Ok(Some(album)) => album,
-        Ok(None) => {
-            return util::not_found(&auth, "Album");
-        }
-        Err(e) => {
-            return util::repo_error(&auth, e);
-        }
-    };
-
-    // Use AlbumInfoResponse which is the same for ID3 and non-ID3
-    let response = AlbumInfoResponse::from_album(&album);
-    SubsonicResponse::album_info(auth.format, response).into_response()
 }
 
 /// Query parameters for getLyrics.
@@ -206,7 +192,7 @@ pub async fn get_lyrics_by_song_id(
     crate::api::auth::SubsonicQuery(params): crate::api::auth::SubsonicQuery<IdParams>,
     auth: SubsonicContext,
 ) -> impl IntoResponse {
-    use crate::scanner::lyrics::{parse_lrc, parse_unsynced};
+    use crate::lyrics::{parse_lrc, parse_unsynced};
 
     // Get the required 'id' parameter
     let Some(song_id) = params

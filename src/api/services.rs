@@ -17,6 +17,7 @@ use crate::db::{
 use crate::lastfm::{
     LastFmClient, LastFmError, models::extract_biography, models::extract_image_urls,
 };
+use crate::lyrics::{ExtractedLyrics, extract_lyrics};
 use crate::models::User;
 use crate::models::music::{
     Album, AlbumAnnotations, Artist, ArtistID3Response, ArtistInfo2Response, Song, SongAnnotations,
@@ -24,7 +25,6 @@ use crate::models::music::{
 };
 use crate::models::user::UserRoles;
 use crate::paths::resolve_cover_art_dir;
-use crate::scanner::lyrics::{ExtractedLyrics, extract_lyrics};
 
 const LASTFM_PLACEHOLDER_IMAGE_MARKER: &str = "2a96cbd8b46e442fc41c2b86b821562f";
 
@@ -143,6 +143,19 @@ pub(in crate::api) struct AnnotatedAlbum {
     pub(crate) album: Album,
     pub(crate) annotations: AlbumAnnotations,
     pub(crate) starred_at: Option<NaiveDateTime>,
+}
+
+/// A user's starred artists, albums, and songs with annotations.
+#[derive(Debug, Clone)]
+pub(in crate::api) struct StarredItems {
+    /// Starred artists with their starred timestamp.
+    pub(crate) artists: Vec<(Artist, NaiveDateTime)>,
+    /// Album count per starred artist, keyed by artist ID.
+    pub(crate) album_counts: HashMap<i32, i64>,
+    /// Starred albums with annotations.
+    pub(crate) albums: Vec<AnnotatedAlbum>,
+    /// Starred songs with annotations.
+    pub(crate) songs: Vec<AnnotatedSong>,
 }
 
 impl MusicLibrary {
@@ -736,6 +749,52 @@ impl MusicLibrary {
             }
         }
         Ok(annotations)
+    }
+
+    // ========================================================================
+    // Starred items
+    // ========================================================================
+
+    /// Fetch a user's starred artists, albums, and songs with annotations
+    /// attached, plus each artist's album count. This is the deep aggregate
+    /// behind `getStarred`/`getStarred2`: one call hides the starred-item
+    /// queries and the annotation batches.
+    pub(in crate::api) fn starred_items_for_user(
+        &self,
+        user_id: i32,
+    ) -> Result<StarredItems, MusicRepoError> {
+        let starred_artists = self.get_starred_artists(user_id)?;
+        let artist_ids: Vec<i32> = starred_artists.iter().map(|(a, _)| a.id).collect();
+        let album_counts = self.get_artist_album_counts_batch(&artist_ids)?;
+
+        let starred_albums = self.get_starred_albums(user_id)?;
+        let album_starred: HashMap<i32, NaiveDateTime> = starred_albums
+            .iter()
+            .map(|(album, starred_at)| (album.id, *starred_at))
+            .collect();
+        let annotated_albums = self.annotate_albums_with_starred(
+            user_id,
+            starred_albums.into_iter().map(|(album, _)| album).collect(),
+            &album_starred,
+        )?;
+
+        let starred_songs = self.get_starred_songs(user_id)?;
+        let song_starred: HashMap<i32, NaiveDateTime> = starred_songs
+            .iter()
+            .map(|(song, starred_at)| (song.id, *starred_at))
+            .collect();
+        let annotated_songs = self.annotate_songs_with_starred(
+            user_id,
+            starred_songs.into_iter().map(|(song, _)| song).collect(),
+            &song_starred,
+        )?;
+
+        Ok(StarredItems {
+            artists: starred_artists,
+            album_counts,
+            albums: annotated_albums,
+            songs: annotated_songs,
+        })
     }
 
     // ========================================================================

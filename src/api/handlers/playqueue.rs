@@ -121,9 +121,9 @@ pub async fn save_play_queue(
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let user_id = auth.user.id;
-    let song_ids = match util::parse_song_ids(&auth, &params.song_id, "id") {
+    let song_ids = match util::parse_song_ids(&params.song_id, "id") {
         Ok(ids) => ids,
-        Err(response) => return *response,
+        Err(error) => return util::api_error(&auth, &error),
     };
     let current = match params.current.as_deref() {
         Some(current) => match crate::models::music::EntityId::parse_song(current) {
@@ -211,9 +211,9 @@ pub async fn save_play_queue_by_index(
     auth: SubsonicContext,
 ) -> impl IntoResponse {
     let user_id = auth.user.id;
-    let song_ids = match util::parse_song_ids(&auth, &params.song_id, "id") {
+    let song_ids = match util::parse_song_ids(&params.song_id, "id") {
         Ok(ids) => ids,
-        Err(response) => return *response,
+        Err(error) => return util::api_error(&auth, &error),
     };
 
     let current_song_id = params

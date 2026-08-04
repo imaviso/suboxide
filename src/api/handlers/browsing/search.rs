@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use axum::response::{IntoResponse, Response};
+use axum::response::IntoResponse;
 use chrono::NaiveDateTime;
 use serde::Deserialize;
 
@@ -35,11 +35,11 @@ struct SearchData {
 fn search_artist_stars(
     auth: &SubsonicContext,
     data: &SearchData,
-) -> Result<HashMap<i32, NaiveDateTime>, Box<Response>> {
+) -> Result<HashMap<i32, NaiveDateTime>, ApiError> {
     let artist_ids: Vec<i32> = data.artists.iter().map(|artist| artist.id).collect();
     auth.music()
         .get_starred_at_for_artists_batch(auth.user.id, &artist_ids)
-        .map_err(|error| Box::new(util::repo_error(auth, error)))
+        .map_err(ApiError::from)
 }
 
 fn search_limits(params: &SearchParamsV2) -> SearchLimits {
@@ -94,11 +94,11 @@ fn search_data(auth: &SubsonicContext, limits: &SearchLimits) -> Result<SearchDa
 fn search_album_stars(
     auth: &SubsonicContext,
     data: &SearchData,
-) -> Result<HashMap<i32, NaiveDateTime>, Box<Response>> {
+) -> Result<HashMap<i32, NaiveDateTime>, ApiError> {
     let album_ids: Vec<i32> = data.albums.iter().map(|album| album.id).collect();
     auth.music()
         .get_starred_at_for_albums_batch(auth.user.id, &album_ids)
-        .map_err(|error| Box::new(util::repo_error(auth, error)))
+        .map_err(ApiError::from)
 }
 
 /// Query parameters for search3/search2.
@@ -155,7 +155,7 @@ pub async fn search3(
     };
     let artist_stars = match search_artist_stars(&auth, &data) {
         Ok(stars) => stars,
-        Err(response) => return *response,
+        Err(error) => return util::api_error(&auth, &error),
     };
 
     // Convert to response types with starred status from batch results
@@ -212,11 +212,11 @@ pub async fn search2(
 
     let artist_stars = match search_artist_stars(&auth, &data) {
         Ok(stars) => stars,
-        Err(response) => return *response,
+        Err(error) => return util::api_error(&auth, &error),
     };
     let album_stars = match search_album_stars(&auth, &data) {
         Ok(stars) => stars,
-        Err(response) => return *response,
+        Err(error) => return util::api_error(&auth, &error),
     };
 
     // Convert to non-ID3 response types

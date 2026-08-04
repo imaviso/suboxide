@@ -80,7 +80,6 @@ pub async fn get_indexes(
     let if_modified_since = params.if_modified_since;
     let blocking_auth = auth.clone();
     let response = match util::run_blocking(
-        &auth,
         move || -> Result<IndexesResponse, crate::db::MusicRepoError> {
             let last_modified = library_last_modified(&blocking_auth)?;
 
@@ -130,7 +129,7 @@ pub async fn get_indexes(
     .await
     {
         Ok(response) => response,
-        Err(error) => return *error,
+        Err(error) => return util::api_error(&auth, &error),
     };
 
     SubsonicResponse::indexes(auth.format, response).into_response()
@@ -148,7 +147,6 @@ pub async fn get_artists(
     let _ = params.if_modified_since;
     let blocking_auth = auth.clone();
     let response = match util::run_blocking(
-        &auth,
         move || -> Result<ArtistsID3Response, crate::db::MusicRepoError> {
             let last_modified = library_last_modified(&blocking_auth)?;
 
@@ -199,7 +197,7 @@ pub async fn get_artists(
     .await
     {
         Ok(response) => response,
-        Err(error) => return *error,
+        Err(error) => return util::api_error(&auth, &error),
     };
 
     SubsonicResponse::artists(auth.format, response).into_response()

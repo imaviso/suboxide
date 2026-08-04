@@ -238,6 +238,44 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    remote_sessions (id) {
+        id -> Integer,
+        session_id -> Text,
+        pairing_code -> Text,
+        owner_user_id -> Integer,
+        host_device_id -> Text,
+        host_device_name -> Nullable<Text>,
+        controller_user_id -> Nullable<Integer>,
+        controller_device_id -> Nullable<Text>,
+        controller_device_name -> Nullable<Text>,
+        expires_at -> Timestamp,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+        closed_at -> Nullable<Timestamp>,
+    }
+}
+
+diesel::table! {
+    remote_commands (id) {
+        id -> BigInt,
+        session_id -> Text,
+        source_device_id -> Text,
+        command -> Text,
+        payload -> Nullable<Text>,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    remote_state (session_id) {
+        session_id -> Text,
+        state_json -> Text,
+        updated_by_device_id -> Text,
+        updated_at -> Timestamp,
+    }
+}
+
 // Define foreign key relationships
 diesel::joinable!(albums -> artists (artist_id));
 diesel::joinable!(artist_lastfm_info -> artists (artist_id));
@@ -258,6 +296,7 @@ diesel::joinable!(play_queue_songs -> play_queue (play_queue_id));
 diesel::joinable!(play_queue_songs -> songs (song_id));
 diesel::joinable!(bookmarks -> users (user_id));
 diesel::joinable!(bookmarks -> songs (song_id));
+diesel::joinable!(remote_sessions -> users (owner_user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     users,
@@ -277,4 +316,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     settings,
     bookmarks,
     internet_radio_stations,
+    remote_sessions,
+    remote_commands,
+    remote_state,
 );
